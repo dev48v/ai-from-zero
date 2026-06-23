@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 6 — What an LLM Really Does</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .pbar { height:8px; border-radius:5px; background:#6366f1; transition:width .3s; }
+  .cand:hover { border-color:#6366f1; background:#eef2ff; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 6</div>
+      <h1 class="text-xl font-bold">🔮 What an LLM Really Does — Predict the Next Word</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 TRY</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Be the model: pick the next word, one at a time</h2>
+      <p class="text-slate-500 text-center mb-5">A chatbot looks like it "thinks in sentences." It doesn't. It predicts <b>one next word</b>, adds it, and repeats. This tiny model learned word odds from a few sentences — click a candidate to extend the text.</p>
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs font-bold uppercase text-slate-500 mb-1">Generated so far</div>
+        <div id="text" class="text-lg text-slate-800 leading-relaxed min-h-[60px] mb-4"></div>
+        <div class="text-xs font-bold uppercase text-indigo-600 mb-2">Next-word probabilities (click one)</div>
+        <div id="cands" class="space-y-2"></div>
+        <div class="flex items-center gap-3 mt-5 pt-4 border-t border-slate-100 text-sm">
+          <button id="auto" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-lg">🎲 Auto-write 8</button>
+          <button id="reset" class="text-slate-500 underline">reset</button>
+          <span class="ml-auto text-slate-500">Temperature</span>
+          <input id="temp" type="range" min="1" max="20" value="8" class="w-28 accent-indigo-600" />
+          <span id="tempVal" class="font-bold text-indigo-600 w-8">0.8</span>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 text-center mt-4">↑ Low temperature → it always grabs the likeliest word (safe, repetitive). High temperature → it gambles on rarer words (creative, riskier). That one knob is "creativity."</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">The one trick, step by step</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto2" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Go deeper</h2>
+    <p class="text-slate-500 mb-8">This toy uses a 2-word memory. A real LLM uses the same predict-next-word loop — but its "memory" is thousands of words and its probabilities come from a giant trained network, not simple counts.</p>
+    <ol class="space-y-5">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">See real next-token odds</h3></div><p class="text-sm text-slate-600">In the OpenAI playground or with most APIs you can show <b>logprobs</b> — the actual probability the model gave each candidate token. It looks exactly like the bars here, just over 100,000+ possible tokens.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Play with temperature for real</h3></div><p class="text-sm text-slate-600">Set temperature to 0 in any chatbot API and it becomes near-deterministic; crank it to 1.5 and it gets wild and error-prone. Same knob you're dragging here.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Connect it to tokens</h3></div><p class="text-sm text-slate-600">Revisit <a href="day2-tokens.html" class="text-indigo-600 font-semibold underline">Day 2 · Tokens</a>: the model predicts the next <i>token</i> (a word-piece), not always a whole word. Everything else is identical.</p></li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 6 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">Tomorrow: Why LLMs hallucinate.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== NEXT-TOKEN PREDICTOR (bigram learned from a small corpus) =====
+const CORPUS = `the cat sat on the mat and looked at the bird .
+the cat chased the bird across the garden .
+the dog ran across the garden to the cat .
+the dog looked at the cat on the mat .
+the bird flew over the garden and the dog .
+the cat looked at the dog and ran away .
+the dog sat on the mat near the door .
+the bird sang in the garden every morning .
+the cat slept on the warm mat all day .
+the dog chased the cat around the garden .`;
+const tokens = CORPUS.toLowerCase().split(/\s+/).filter(Boolean);
+const model = {};   // word -> { next: count }
+for (let i=0;i<tokens.length-1;i++){ const a=tokens[i], b=tokens[i+1]; (model[a] ||= {}); model[a][b]=(model[a][b]||0)+1; }
+
+let gen = ["the"], temp = 0.8;
+const textEl=document.getElementById("text"), candsEl=document.getElementById("cands");
+function distribution(){
+  const last = gen[gen.length-1];
+  const nexts = model[last] || { ".":1 };
+  const total = Object.values(nexts).reduce((a,b)=>a+b,0);
+  // raw probabilities, then temperature-reshape: p^(1/T) renormalised
+  let arr = Object.entries(nexts).map(([w,c])=>({ w, p:c/total }));
+  const reshaped = arr.map(o=>({ w:o.w, t:Math.pow(o.p, 1/temp) }));
+  const z = reshaped.reduce((a,b)=>a+b.t,0);
+  arr = reshaped.map(o=>({ w:o.w, p:o.t/z })).sort((a,b)=>b.p-a.p);
+  return arr;
+}
+function render(){
+  textEl.innerHTML = gen.map((w,i)=> i===gen.length-1 ? `<span class="bg-indigo-100 text-indigo-800 rounded px-1">${w}</span>` : w).join(" ") + ` <span class="text-indigo-400">▌</span>`;
+  const dist = distribution(), max = dist[0].p;
+  candsEl.innerHTML = dist.slice(0,6).map(o=>`
+    <button class="cand w-full flex items-center gap-3 border border-slate-200 rounded-lg px-3 py-1.5 text-left transition" data-w="${o.w}">
+      <span class="font-mono text-sm font-semibold text-slate-800 w-20">${o.w==="."?"· (end)":o.w}</span>
+      <div class="flex-1 bg-slate-100 rounded-full"><div class="pbar" style="width:${(o.p/max)*100}%"></div></div>
+      <span class="text-xs font-bold text-indigo-600 w-12 text-right">${(o.p*100).toFixed(0)}%</span>
+    </button>`).join("");
+  candsEl.querySelectorAll(".cand").forEach(b=>b.onclick=()=>pick(b.dataset.w));
+}
+function pick(w){ gen.push(w); if (gen.length>40 || w===".") {} render(); }
+function sample(){ const d=distribution(); let r=Math.random(), acc=0; for(const o of d){ acc+=o.p; if(r<=acc) return o.w; } return d[0].w; }
+document.getElementById("auto").onclick = ()=>{ let n=8; const iv=setInterval(()=>{ gen.push(sample()); render(); if(--n<=0||gen[gen.length-1]===".") clearInterval(iv); }, 220); };
+document.getElementById("reset").onclick = ()=>{ gen=["the"]; render(); };
+document.getElementById("temp").oninput = function(){ temp=+this.value/10; document.getElementById("tempVal").textContent=temp.toFixed(1); render(); };
+render();
+
+const STEPS = [
+  { title:"1. A chatbot only predicts the NEXT word", why:"This is the whole secret, and it's almost anticlimactic. An LLM never plans a sentence. Given everything so far, it outputs a probability for every possible next word, picks one, appends it, and runs again with the longer text. Paragraphs, code, poems — all of it is this one step on repeat.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">"the cat sat on the ___" → P(mat)=high, P(bird)=low</div>`, code:`nextWord = predict(textSoFar);  // that's the entire model` },
+  { title:"2. It's a probability over the whole vocabulary", why:"The output isn't one word — it's a number for EVERY word it knows (100,000+ for a real model). Most are near zero; a handful are plausible. The bars in the demo are that distribution, just over a tiny vocabulary. The model is, at heart, a very good guesser of 'what usually comes next.'", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">output = [P(word₁), P(word₂), … P(word₁₀₀₀₀₀)]</div>`, code:`probs = model(context);  // one score per possible token` },
+  { title:"3. Autoregression: feed the output back in", why:"After picking a word, it becomes part of the input for the next prediction. This loop — predict, append, predict again — is called autoregression. Because each new word conditions on all the previous ones, short local choices add up to coherent long text. Click words in the demo and feel the loop.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">predict → append → predict → append → …</div>`, code:`while (notDone) { text += predict(text); }` },
+  { title:"4. Temperature = the creativity dial", why:"Once you have probabilities, how do you choose? Temperature reshapes them before sampling. Near 0, the top word always wins — safe and repetitive. High, the odds flatten so rarer words get a real chance — creative but error-prone. Drag the slider and watch the bars even out or sharpen.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full"><div>temp → 0: always the top word</div><div class="text-indigo-600">temp high: gambles on rarer words</div></div>`, code:`p = p ** (1/temperature);  // then renormalise + sample` },
+  { title:"5. Where do the probabilities come from?", why:"In this toy, from counting which word followed which in a few sentences (a 'bigram' with 1-word memory). A real LLM replaces the counting with a giant neural network trained on much of the internet, and its memory spans thousands of words. The mechanism is identical — only the quality of the guess changes.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full"><div>toy: count word pairs (1-word memory)</div><div class="text-indigo-600">LLM: trained network (1000s of words of memory)</div></div>`, code:`// counts → tiny model · trained net → ChatGPT` },
+  { title:"6. Why this explains so much", why:"'Just predicting the next word' explains the magic AND the flaws. Fluency: it has seen how language flows. Hallucination: a plausible-sounding next word isn't always a TRUE one — it optimises for likely, not correct. Tomorrow's lesson digs into exactly that.", concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">Predict next word → append → repeat. Temperature tunes the daring.</p></div>`, code:`// likely ≠ true → that gap is where hallucinations live` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto2");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+</script>
+</body>
+</html>

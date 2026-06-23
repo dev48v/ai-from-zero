@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 4 — What a Neural Net Does</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .cell { width:38px; height:38px; border-radius:6px; background:#e2e8f0; cursor:pointer; transition:background .1s; }
+  .cell.on { background:#4f46e5; }
+  .bar { height:14px; border-radius:6px; background:#6366f1; transition:width .3s; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 4</div>
+      <h1 class="text-xl font-bold">🧠 What a Neural Net Does — the Intuition (No Math)</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 TRY</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-4xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Draw a shape — watch it turn pixels into a guess</h2>
+      <p class="text-slate-500 text-center mb-6">A net doesn't "see" your drawing. It turns the pixels into a few <b>measurements</b>, then checks which thing those measurements look most like. Click cells to draw, or tap a shape.</p>
+      <div class="grid md:grid-cols-3 gap-6 items-start">
+        <div>
+          <div class="text-xs font-bold uppercase text-indigo-600 mb-2">① Input (pixels)</div>
+          <div id="grid" class="inline-grid gap-1 bg-white p-2 rounded-xl border border-slate-200" style="grid-template-columns:repeat(5,38px);"></div>
+          <div class="flex flex-wrap gap-1 mt-3" id="presets"></div>
+        </div>
+        <div>
+          <div class="text-xs font-bold uppercase text-indigo-600 mb-2">② Features it measures</div>
+          <div id="feats" class="space-y-2 bg-white p-3 rounded-xl border border-slate-200 text-xs"></div>
+        </div>
+        <div>
+          <div class="text-xs font-bold uppercase text-indigo-600 mb-2">③ Its guess</div>
+          <div id="out" class="space-y-2 bg-white p-3 rounded-xl border border-slate-200 text-xs"></div>
+          <div id="verdict" class="mt-3 text-center text-2xl font-bold text-indigo-600">—</div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 text-center mt-6">↑ Pixels → a handful of features → a vote for each label. That three-step flow is the whole idea of a neural net. Real ones just have far more features, learned automatically.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">The intuition, step by step</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Try it on the real thing</h2>
+    <p class="text-slate-500 mb-8">This demo fakes the features with simple rules so you can see the shape of it. A real network <b>learns</b> its own features from examples — but the pixels → features → vote flow is identical.</p>
+    <ol class="space-y-5">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">See features being learned</h3></div><p class="text-sm text-slate-600">Open the <b>TensorFlow Playground</b> (playground.tensorflow.org) and watch a tiny net grow its own feature detectors as it trains — exactly the layers we faked here.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Watch real digit recognition</h3></div><p class="text-sm text-slate-600">Search "MNIST CNN visualization" to see the early layers detecting edges and later layers detecting whole digits — the hierarchy this lesson describes.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Build one from scratch</h3></div><p class="text-sm text-slate-600">Ready for the actual code? <a href="../../deeplearningfromzero.php" class="text-indigo-600 font-semibold underline">DeepLearningFromZero</a> builds the neuron, the forward pass, and backprop line by line.</p></li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 4 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">Tomorrow: How a neural net learns — training, in plain words.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== Pixels -> features -> label vote (a hand-faked "net") =====
+const N = 5;
+let pixels = Array(N*N).fill(0);
+const TEMPLATES = {
+  "T": [1,1,1,1,1, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0],
+  "L": [1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,1,1,1,1],
+  "X": [1,0,0,0,1, 0,1,0,1,0, 0,0,1,0,0, 0,1,0,1,0, 1,0,0,0,1],
+  "O": [1,1,1,1,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,1],
+  "+": [0,0,1,0,0, 0,0,1,0,0, 1,1,1,1,1, 0,0,1,0,0, 0,0,1,0,0],
+};
+const gridEl = document.getElementById("grid"), featsEl = document.getElementById("feats"),
+      outEl = document.getElementById("out"), verdictEl = document.getElementById("verdict");
+
+for (let i=0;i<N*N;i++){ const d=document.createElement("div"); d.className="cell"; d.dataset.i=i;
+  d.onclick=()=>{ pixels[i]^=1; d.classList.toggle("on"); run(); }; gridEl.appendChild(d); }
+
+function setPixels(arr){ pixels=[...arr]; [...gridEl.children].forEach((d,i)=>d.classList.toggle("on", !!pixels[i])); run(); }
+
+function features(){
+  const rowSum = r => [0,1,2,3,4].reduce((s,col)=>s+pixels[r*5+col],0);
+  const colSum = col => [0,1,2,3,4].reduce((s,r)=>s+pixels[r*5+col],0);
+  return [
+    { name:"Top row filled",   v: rowSum(0)/5 },
+    { name:"Left edge filled",  v: colSum(0)/5 },
+    { name:"Center cross",      v: (colSum(2)+rowSum(2))/10 },
+    { name:"Corners on",        v: (pixels[0]+pixels[4]+pixels[20]+pixels[24])/4 },
+  ];
+}
+function run(){
+  const f = features();
+  featsEl.innerHTML = f.map(x=>`<div><div class="flex justify-between mb-0.5"><span class="text-slate-500">${x.name}</span><span class="font-bold text-indigo-600">${Math.round(x.v*100)}%</span></div><div class="bar" style="width:${Math.max(4,x.v*100)}%"></div></div>`).join("");
+  const on = pixels.reduce((a,b)=>a+b,0);
+  const scores = Object.entries(TEMPLATES).map(([label,t])=>{
+    let match=0,tot=0; for(let i=0;i<25;i++){ if(t[i]||pixels[i]){tot++; if(t[i]===pixels[i])match++;} }
+    return { label, score: on? (tot? match/tot : 0) : 0 };
+  }).sort((a,b)=>b.score-a.score);
+  const max = scores[0].score || 1;
+  outEl.innerHTML = scores.map(s=>`<div><div class="flex justify-between mb-0.5"><span class="font-mono font-bold">${s.label}</span><span class="text-slate-400">${Math.round(s.score*100)}%</span></div><div class="bar" style="width:${Math.max(4,(s.score/max)*100)}%"></div></div>`).join("");
+  verdictEl.textContent = on>=3 ? `“${scores[0].label}”` : "draw something →";
+}
+const presetEl = document.getElementById("presets");
+Object.entries(TEMPLATES).forEach(([label,t])=>{ const b=document.createElement("button"); b.className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-1.5 hover:border-indigo-400 font-mono font-bold"; b.textContent=label; b.onclick=()=>setPixels(t); presetEl.appendChild(b); });
+const clr=document.createElement("button"); clr.className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-1.5 hover:border-indigo-400"; clr.textContent="clear"; clr.onclick=()=>setPixels(Array(25).fill(0)); presetEl.appendChild(clr);
+setPixels(TEMPLATES["T"]);
+
+const STEPS = [
+  { title:"1. A neuron is a tiny yes/no detector", why:"Forget the brain metaphor for a second. A single artificial neuron looks at some numbers, weighs them up, and outputs one number that says 'how much do I see the thing I look for?' That's it — a little detector with a dial for how strongly it fires.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">inputs → [ detector ] → "how much I see it"</div>`, code:`one neuron ≈ "does this look like my pattern? a little / a lot"` },
+  { title:"2. Early layers spot simple features", why:"Stack neurons into a layer and feed them the raw input (pixels, in our demo). Each one learns to fire on a simple pattern — an edge here, a corner there, a blob of colour. Alone, none of them understand the picture; together they describe it in simple parts.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full">pixels → [edges, corners, blobs]</div>`, code:`layer 1: simple features (edges, strokes)` },
+  { title:"3. Deeper layers combine into bigger things", why:"The next layer doesn't see pixels — it sees the FIRST layer's findings. So it can combine 'edge + edge + corner' into 'a loop' or 'a junction', and the layer after that into 'an eye' or 'a digit'. Depth builds a hierarchy: pixels → parts → objects.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full"><div>edges → shapes → parts → object</div><div class="text-indigo-600">simple ➜ complex, layer by layer</div></div>`, code:`layer 2+: combine features into parts, then objects` },
+  { title:"4. Weights = how much each clue matters", why:"Every connection has a WEIGHT — a number saying how much that clue counts toward the next detector. 'Has a closed loop' might count a lot toward '8' and against '1'. The network is nothing but a giant pile of these learned importances.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full">clue × weight = how much it votes</div>`, code:`weights = learned "importance" of each clue` },
+  { title:"5. The last layer votes for an answer", why:"The final layer takes all the high-level features and casts a vote for each possible label — '80% an 8, 15% a 3, …'. The highest vote is the answer. In the demo, the right-hand bars are exactly this vote.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full">features → vote per label → pick the top</div>`, code:`output: a score per label → argmax = the guess` },
+  { title:"6. 'Learning' just tunes the clues", why:"Nobody hand-writes these detectors. The network starts random and sees thousands of labelled examples; each mistake nudges the weights so the right clues count more (that's backprop, in DeepLearningFromZero). Train long enough and useful features emerge on their own.", concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">Pixels → features → vote. Learned, not programmed.</p></div>`, code:`training = adjust weights from examples until the votes are right` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+</script>
+</body>
+</html>

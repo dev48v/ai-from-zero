@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 12 — Tokenization</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .tok { display:inline-flex; flex-direction:column; align-items:center; margin:2px; border-radius:6px; padding:3px 7px; font-size:13px; line-height:1.2; white-space:pre; }
+  .tok small { font-size:9px; opacity:.6; margin-top:1px; font-family:ui-monospace,monospace; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 12</div>
+      <h1 class="text-xl font-bold">🔤 Tokenization — How LLMs Actually Read Your Text</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">The model never sees your letters — it sees tokens</h2>
+      <p class="text-slate-500 text-center mb-5">Type below. Your text gets chopped into <b>tokens</b> (often subword pieces, not whole words), and each token becomes an <b>integer ID</b> — that's all the model ever receives. Watch the chips and the count change as you type.</p>
+
+      <div class="flex flex-wrap justify-center gap-2 mb-3" id="presets"></div>
+
+      <textarea id="input" rows="3" class="w-full rounded-xl border border-slate-300 p-3 text-sm font-mono focus:border-indigo-500 focus:ring focus:ring-indigo-100 outline-none">Tokenization isn't magic — it's subwords!</textarea>
+
+      <div class="flex flex-wrap justify-center gap-3 my-4 text-center">
+        <div class="bg-white rounded-xl border border-slate-200 px-5 py-2"><div class="text-2xl font-bold text-indigo-600" id="tokCount">0</div><div class="text-xs text-slate-400 uppercase tracking-wide">tokens</div></div>
+        <div class="bg-white rounded-xl border border-slate-200 px-5 py-2"><div class="text-2xl font-bold text-slate-700" id="charCount">0</div><div class="text-xs text-slate-400 uppercase tracking-wide">characters</div></div>
+        <div class="bg-white rounded-xl border border-slate-200 px-5 py-2"><div class="text-2xl font-bold text-slate-700" id="ratio">—</div><div class="text-xs text-slate-400 uppercase tracking-wide">chars / token</div></div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-3">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">Tokens (·  = leading space)</div>
+        <div id="chips" class="flex flex-wrap"></div>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-4">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">Token IDs — the numbers the model actually reads</div>
+        <pre id="ids" class="!text-[12px]"></pre>
+      </div>
+
+      <p class="text-xs text-slate-400 text-center mt-4">LLMs don't see letters or words — they see <b>tokens</b> (often subwords) mapped to <b>integer IDs</b>. That's why counts, costs, and context limits are all measured in tokens (rule of thumb: ~4 characters ≈ 1 token in English). This is a teaching approximation, not GPT's exact vocabulary.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How tokenization works</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Tokenize for real, in code</h2>
+    <p class="text-slate-500 mb-8">The demo uses a toy splitter. Real tokenizers (tiktoken for GPT, the 🤗 transformers tokenizers for open models) give you exact token IDs and counts. ~6 steps with copy buttons.</p>
+    <ol class="space-y-5" id="buildSteps"></ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 12 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You now see what the model sees: text → tokens → integer IDs. Every prompt, cost, and context limit is counted here.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== TOY TOKENIZER (BPE-flavoured heuristic, fully offline) =====
+// Common whole words stay intact; long/rare words get broken into subword pieces.
+const COMMON = new Set(("the of and to a in is it you that he was for on are with as i his they be at one have this from or had by hot word but what some we can out other were all there when up use your how said an each she which do their time if will way about many then them write would like so these her long make thing see him two has look more day could go come did number sound no most people my over know water than call first who may down side been now find any new work part take get place made live where after back little only round man year came show every good me give our under name very through just form sentence great think say help low line differ turn cause much mean before move right boy old too same tell does set three want air well also play small end put home read hand port large spell add even land here must big high such follow act why ask men change went light kind off need house picture try us again animal point mother world near build self earth father").split(" "));
+// Frequent subword chunks a BPE merge would learn early.
+const PIECES = ["tion","ing","ed","er","est","ly","ment","ness","able","ful","less","ous","ize","ise","pre","re","un","in","dis","sub","over","under","ization","word","token","magic"];
+
+function pieceSplit(word){
+  // greedy longest-match against known pieces; fall back to ~4-char chunks
+  let out=[], i=0, lower=word.toLowerCase();
+  while(i<word.length){
+    let matched=null;
+    for(const p of PIECES.sort((a,b)=>b.length-a.length)){
+      if(lower.startsWith(p,i) && p.length < word.length){ matched=p; break; }
+    }
+    if(matched){ out.push(word.slice(i,i+matched.length)); i+=matched.length; }
+    else { out.push(word.slice(i,i+4)); i+=4; }
+  }
+  return out;
+}
+
+function tokenize(text){
+  const tokens=[];
+  // split keeping whitespace + punctuation as boundaries
+  const parts = text.match(/\s+|[^\s]+/g) || [];
+  let pendingSpace=false;
+  for(const part of parts){
+    if(/^\s+$/.test(part)){ pendingSpace=true; continue; }
+    // split a chunk of non-space into words and punctuation/symbols
+    const sub = part.match(/[A-Za-z]+|[0-9]+|[^A-Za-z0-9\s]/gu) || [part];
+    sub.forEach((unit,idx)=>{
+      const lead = (idx===0 && pendingSpace) ? " " : "";
+      let pieces;
+      if(/^[A-Za-z]+$/.test(unit)){
+        if(unit.length<=4 || COMMON.has(unit.toLowerCase())) pieces=[unit];
+        else pieces=pieceSplit(unit);
+      } else {
+        pieces=[unit]; // numbers, punctuation, emoji = their own token
+      }
+      pieces.forEach((p,pi)=> tokens.push((pi===0?lead:"")+p));
+    });
+    pendingSpace=false;
+  }
+  return tokens;
+}
+
+// stable fake vocab ID (deterministic hash → 100..50256-ish range)
+function tokenId(tok){
+  let h=2166136261;
+  for(let i=0;i<tok.length;i++){ h^=tok.charCodeAt(i); h=Math.imul(h,16777619); }
+  return (Math.abs(h)%50157)+100;
+}
+
+const PALETTE=["bg-indigo-100 text-indigo-800","bg-sky-100 text-sky-800","bg-emerald-100 text-emerald-800","bg-amber-100 text-amber-800","bg-rose-100 text-rose-800","bg-violet-100 text-violet-800","bg-teal-100 text-teal-800","bg-fuchsia-100 text-fuchsia-800"];
+
+const inputEl=document.getElementById("input"),chipsEl=document.getElementById("chips"),idsEl=document.getElementById("ids");
+const tokCountEl=document.getElementById("tokCount"),charCountEl=document.getElementById("charCount"),ratioEl=document.getElementById("ratio");
+
+function render(){
+  const text=inputEl.value;
+  const tokens=tokenize(text);
+  chipsEl.innerHTML="";
+  tokens.forEach((tok,i)=>{
+    const lead = tok.startsWith(" ");
+    const shown = (lead?"·":"") + tok.replace(/^ /,"");
+    const id = tokenId(tok);
+    const c=document.createElement("span");
+    c.className="tok "+PALETTE[i%PALETTE.length];
+    c.innerHTML=`${shown.replace(/</g,"&lt;").replace(/>/g,"&gt;")||"␣"}<small>${id}</small>`;
+    chipsEl.appendChild(c);
+  });
+  const ids=tokens.map(tokenId);
+  idsEl.textContent="[ "+ids.join(", ")+" ]";
+  tokCountEl.textContent=tokens.length;
+  charCountEl.textContent=text.length;
+  ratioEl.textContent = tokens.length ? (text.length/tokens.length).toFixed(1) : "—";
+}
+inputEl.addEventListener("input",render);
+
+const PRESETS=[
+  {label:"A sentence", text:"Tokenization isn't magic — it's subwords!"},
+  {label:"Code", text:"for (let i=0; i<n; i++) { sum += arr[i]; }"},
+  {label:"Emoji", text:"I love AI 🤖🔥 — let's go! 🚀"},
+  {label:"Long rare word", text:"antidisestablishmentarianism"},
+  {label:"Counting letters", text:"How many r's are in strawberry?"},
+];
+const presetsEl=document.getElementById("presets");
+PRESETS.forEach(p=>{ const b=document.createElement("button"); b.className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-1.5 hover:border-indigo-400"; b.textContent=p.label; b.onclick=()=>{ inputEl.value=p.text; render(); }; presetsEl.appendChild(b); });
+render();
+
+// ===== UNDERSTAND STEPS =====
+const STEPS = [
+  { title:"1. Models work on numbers, not text",
+    why:"A neural network is just math — it multiplies matrices of numbers, it has no idea what a letter is. So before any text reaches the model, it has to be turned into numbers. Your sentence is converted into a list of integers, and those integers are the only thing the model ever sees. Tokenization is that first translation step from human text into model-readable numbers.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">\"hello\" → [15339] → math → numbers → text back out</div>`, code:`text → tokens → integer IDs → the model` },
+  { title:"2. A token is usually a piece of a word",
+    why:"It's tempting to think one word = one token, but that's not how it works. A token is a chunk of text the tokenizer decided is worth its own ID — sometimes a whole common word, often just a fragment. 'cat' might be one token, but 'tokenization' might split into 'token' + 'ization'. The pieces are called subwords. So 'token count' and 'word count' are different numbers.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">tokenization → <b>token</b> · <b>ization</b> &nbsp;(1 word, 2 tokens)</div>`, code:`one word can become several tokens (subwords)` },
+  { title:"3. Why subwords beat whole words",
+    why:"If every distinct word needed its own ID, the vocabulary would be infinite — new words, typos, names, and other languages would all break it. If you used single letters instead, sequences would be huge and slow. Subwords are the sweet spot: a fixed vocabulary of a few thousand to ~100k pieces can spell ANY word by gluing pieces together, even ones it has never seen. Flexible and compact at the same time.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">letters = too slow · whole words = too many · <b>subwords = just right</b></div>`, code:`fixed vocab of subwords can build any word` },
+  { title:"4. The vocabulary and token IDs",
+    why:"Every tokenizer ships with a fixed dictionary called the vocabulary — a numbered list of all the tokens it knows. Encoding looks each piece up and replaces it with its number (its token ID). Decoding does the reverse: take the numbers, look up the pieces, glue them back into text. The IDs are arbitrary lookup positions, not meaningful values — token #7635 isn't 'bigger' than #200, it's just an index.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">vocab: { \"the\":262, \" cat\":3797, \"s\":82 } → \"the cats\" = [262, 3797, 82]</div>`, code:`encode = lookup token → ID · decode = ID → token` },
+  { title:"5. BPE: how the vocabulary is built",
+    why:"The most common method is Byte-Pair Encoding (BPE). It starts from single characters, then repeatedly finds the most frequent adjacent pair across a huge pile of text and merges it into a new token. Do that thousands of times and frequent chunks like 'ing', 'tion', and ' the' become single tokens, while rare strings stay broken up. The result: common text is cheap (few tokens) and rare text costs more tokens — the tokenizer learned what's worth a slot.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">t+h→th · th+e→the · merge the most common pair, repeat ×N</div>`, code:`BPE = greedily merge the most frequent character pairs` },
+  { title:"6. Spaces and casing change the tokens",
+    why:"Most tokenizers attach the leading space to the word, so ' cat' (with a space) and 'cat' (start of text) are DIFFERENT tokens with different IDs. Capitalization matters too: 'Cat' and 'cat' often differ. This is why two prompts that look almost identical to you can produce a slightly different token count — the model is sensitive to spacing and case in ways our eyes gloss over.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">\" cat\" ≠ \"cat\" ≠ \"Cat\" &nbsp;— space &amp; case = different IDs</div>`, code:`leading space + casing are part of the token` },
+  { title:"7. Why 'strawberry', emoji, and code tokenize oddly",
+    why:"The famous 'how many r's in strawberry?' failure happens because the model never sees the letters s-t-r-a-w-b-e-r-r-y — it sees 2–3 subword chunks, so counting individual characters is genuinely hard for it. Emoji and rare symbols often become several byte-level tokens each, and code (with its brackets, indentation, and odd identifiers) fragments into many small tokens. The split, not the model being 'dumb', explains a lot of weird behaviour.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">strawberry → <b>str</b>·<b>aw</b>·<b>berry</b> &nbsp;(letters are invisible to the model)</div>`, code:`the model sees chunks, not characters → can't count letters` },
+  { title:"8. Tokens drive cost and the context window",
+    why:"This is the practical payoff. APIs bill per token (both what you send and what you get back), so a wordy prompt literally costs more. And every model has a context window measured in tokens — the maximum it can hold at once. Go over it and the oldest text falls out of view. Long documents, big code files, and chat history all eat into the same token budget, so token-awareness is real money and real memory.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">price = $ per 1K tokens · context window = max tokens at once</div>`, code:`cost ∝ tokens · context limit is counted in tokens` },
+  { title:"9. Every model has its own tokenizer",
+    why:"There's no single universal tokenizer. GPT models use tiktoken's vocabularies; open models like Llama or Mistral ship their own. The same sentence can be 18 tokens in one and 22 in another, especially for non-English text or code. So a token count is only meaningful for a specific model — always measure with the tokenizer that matches the model you're actually calling.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">same text → GPT: 18 tokens · another model: 22 tokens</div>`, code:`token counts are per-model — use the matching tokenizer` },
+  { title:"10. Practical tips",
+    why:"Count tokens before you send, especially for long prompts, so you don't blow the context window or the budget. Trim filler, repeated boilerplate, and giant pasted logs. Remember English is roughly 4 characters per token, but code and other languages can be far denser. And if you're asking the model to do character-level work (count letters, reverse a string), expect it to struggle — that's the tokenizer's blind spot, not a mystery.",
+    concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">Text → tokens → integer IDs. Count them, trim them, and you control cost, context, and quality.</p></div>`, code:`count tokens · trim prompts · ~4 chars/token in English` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+
+// ===== BUILD STEPS (with copy buttons) =====
+const BUILD=[
+  { title:"Install a real tokenizer",
+    desc:"tiktoken is OpenAI's fast BPE tokenizer; 🤗 transformers covers open models.",
+    code:`pip install tiktoken transformers` },
+  { title:"Encode text → token IDs",
+    desc:"Pick the encoding that matches your model, then turn text into the integer IDs the model receives.",
+    code:`import tiktoken
+
+enc = tiktoken.get_encoding("cl100k_base")   # used by GPT-3.5/4
+ids = enc.encode("Tokenization isn't magic!")
+print(ids)        # e.g. [3404, 2065, 4536, 956, 11204, 0]` },
+  { title:"Count tokens (this is your real length)",
+    desc:"len(ids) is the number that drives cost and the context window — not len(text).",
+    code:`text = "Tokenization isn't magic — it's subwords!"
+n_tokens = len(enc.encode(text))
+print(n_tokens, "tokens")
+print(len(text), "characters")
+print(round(len(text)/n_tokens, 1), "chars/token")` },
+  { title:"Decode IDs → back to text",
+    desc:"Decoding is the exact inverse: integer IDs go in, the original text comes out.",
+    code:`ids  = enc.encode("hello world")
+text = enc.decode(ids)
+print(text)                       # "hello world"
+# inspect one piece at a time:
+for i in ids:
+    print(i, repr(enc.decode([i])))   # see the subword for each ID` },
+  { title:"Estimate cost from token counts",
+    desc:"APIs bill per token for input and output. Multiply tokens by the per-token price.",
+    code:`prompt = "Summarise this report in 3 bullet points: ..."
+in_tokens  = len(enc.encode(prompt))
+out_tokens = 250                      # your expected reply length
+
+# example prices ($ per 1,000 tokens) — check current rates
+PRICE_IN, PRICE_OUT = 0.0005, 0.0015
+cost = (in_tokens/1000)*PRICE_IN + (out_tokens/1000)*PRICE_OUT
+print(f"~{in_tokens} in + {out_tokens} out  →  ${cost:.4f}")` },
+  { title:"Use an open-model tokenizer (Hugging Face)",
+    desc:"Different model, different vocabulary. Always count with the tokenizer that matches the model you call.",
+    code:`from transformers import AutoTokenizer
+
+tok = AutoTokenizer.from_pretrained("gpt2")
+out = tok("Tokenization isn't magic!")
+print(out["input_ids"])               # integer IDs
+print(tok.convert_ids_to_tokens(out["input_ids"]))  # the subword pieces
+print(len(out["input_ids"]), "tokens")` },
+];
+const buildEl=document.getElementById("buildSteps");
+BUILD.forEach((s,i)=>{
+  const li=document.createElement("li");
+  li.className="bg-white rounded-2xl border border-slate-200 p-6";
+  const codeId="code"+i;
+  li.innerHTML=`<div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">${i+1}</div><h3 class="font-bold text-lg">${s.title}</h3></div>
+    <p class="text-sm text-slate-600 mb-3">${s.desc}</p>
+    <div class="relative">
+      <button data-copy="${codeId}" class="copy-btn absolute right-2 top-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-md">Copy</button>
+      <pre id="${codeId}"></pre>
+    </div>`;
+  buildEl.appendChild(li);
+  li.querySelector("#"+codeId).textContent=s.code;
+});
+document.querySelectorAll(".copy-btn").forEach(btn=>{
+  btn.onclick=()=>{
+    const code=document.getElementById(btn.dataset.copy).textContent;
+    navigator.clipboard.writeText(code).then(()=>{ const o=btn.textContent; btn.textContent="✓ Copied"; setTimeout(()=>btn.textContent=o,1200); });
+  };
+});
+</script>
+</body>
+</html>

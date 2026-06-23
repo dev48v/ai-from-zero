@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 14 — Vector Databases</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .dot { transition: r .15s ease, fill .15s ease; cursor:pointer; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 14</div>
+      <h1 class="text-xl font-bold">🗂️ Vector Databases — Search by Meaning, at Scale</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-4xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Search finds meaning — not just matching words</h2>
+      <p class="text-slate-500 text-center mb-5">Day 13 turned text into <b>vectors</b>. Now: type a question. We embed it, then find the <b>nearest vectors</b> in a little library of docs using cosine similarity. Watch how <b>vector search</b> finds the right doc by <b>meaning</b> while plain <b>keyword search</b> misses it.</p>
+
+      <!-- SEARCH BOX -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">① Type a query — or pick an example</div>
+        <input id="q" type="text" placeholder="e.g. how to reset my password" class="w-full rounded-lg border border-slate-300 px-4 py-3 text-base focus:border-indigo-500 outline-none" />
+        <div class="flex flex-wrap gap-2 mt-3" id="examples"></div>
+        <p class="text-xs text-slate-400 mt-3">Try a query whose words don't appear in any doc — e.g. <b>"recovering account access"</b> still finds the password-reset doc, because their <b>meanings</b> are close.</p>
+      </div>
+
+      <!-- TWO COLUMNS: VECTOR vs KEYWORD -->
+      <div class="grid md:grid-cols-2 gap-5 mb-5">
+        <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-1">② Vector search — by meaning</div>
+          <p class="text-xs text-slate-400 mb-3">Ranked by cosine similarity to the query's embedding.</p>
+          <div id="vecResults" class="space-y-2"><div class="text-slate-400 text-sm">Start typing above…</div></div>
+        </div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-4">
+          <div class="text-xs uppercase font-bold text-slate-500 tracking-wider mb-1">② Keyword search — by exact words</div>
+          <p class="text-xs text-slate-400 mb-3">Ranked by how many query words literally appear in the doc.</p>
+          <div id="kwResults" class="space-y-2"><div class="text-slate-400 text-sm">Start typing above…</div></div>
+        </div>
+      </div>
+
+      <!-- INDEX MAP -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">③ The index — every doc is a dot; the query lands among them, nearest neighbours circled</div>
+        <div class="relative">
+          <svg id="map" viewBox="0 0 600 360" class="w-full" style="background:#f8fafc;border-radius:12px;"></svg>
+          <div id="tip" class="absolute hidden bg-slate-900 text-white text-xs font-semibold px-2 py-1 rounded pointer-events-none"></div>
+        </div>
+        <p class="text-xs text-slate-400 mt-2">Grey dots = stored documents (the index). The <b class="text-indigo-600">indigo ★</b> = your query. The <b class="text-emerald-600">circled</b> dots are its nearest neighbours — the top results.</p>
+      </div>
+
+      <p class="text-xs text-slate-400 text-center mt-5">A <b>vector database</b> stores embeddings and finds the ones nearest to your query's embedding — so search works on <b>meaning, not exact words</b>. This demo uses ~10 docs with tiny hand-authored vectors so it's deterministic; at scale a vector DB uses an <b>ANN (approximate nearest-neighbour)</b> index to stay fast over millions of vectors.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How vector search works</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build real semantic search, in code</h2>
+    <p class="text-slate-500 mb-8">The demo uses tiny hand-authored vectors. Real pipelines embed text with a model and store the vectors in a vector database (pgvector, Chroma, Pinecone, FAISS) that does fast nearest-neighbour search. ~8 steps with copy buttons.</p>
+    <ol class="space-y-5" id="buildSteps"></ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 14 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You now store embeddings and search them by meaning: chunk → embed → upsert → embed the query → nearest-neighbour top-k → filter. This is the retrieval half of RAG, and the engine behind semantic search and recommendations.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== HAND-AUTHORED CORPUS + VECTORS (fully offline, deterministic) =====
+// Each doc gets a small hand-authored embedding. Dimensions loosely mean:
+//  [0] account/login  [1] delivery/shipping  [2] payments/billing  [3] hours/location  [4] returns/refunds  [5] support/contact
+const DOCS = [
+  { text:"How to recover access to your account",            vec:[0.97, 0.02, 0.04, 0.0,  0.0,  0.12] },
+  { text:"Resetting a forgotten password",                   vec:[0.88, 0.0,  0.14, 0.0,  0.0,  0.06] },
+  { text:"Track the status of your delivery",                vec:[0.0,  0.97, 0.0,  0.06, 0.04, 0.02] },
+  { text:"Where is my shipment right now",                   vec:[0.02, 0.90, 0.06, 0.0,  0.06, 0.0 ] },
+  { text:"Updating your billing and card details",           vec:[0.06, 0.0,  0.97, 0.0,  0.08, 0.0 ] },
+  { text:"Why was my payment declined",                      vec:[0.0,  0.06, 0.90, 0.0,  0.06, 0.12] },
+  { text:"Store opening hours and locations",                vec:[0.0,  0.04, 0.0,  0.97, 0.0,  0.02] },
+  { text:"Finding the nearest branch near you",              vec:[0.0,  0.12, 0.0,  0.88, 0.0,  0.06] },
+  { text:"Returning an item for a refund",                   vec:[0.0,  0.10, 0.12, 0.0,  0.96, 0.0 ] },
+  { text:"Contact our customer support team",                vec:[0.12, 0.0,  0.06, 0.06, 0.06, 0.96] },
+];
+
+// Example queries. Each has a hand-authored embedding too, so the demo is deterministic.
+// Note: the words deliberately DON'T overlap the matching doc, to show meaning beats keywords.
+const EXAMPLES = [
+  { q:"how to reset my password",          vec:[0.86, 0.0,  0.16, 0.0,  0.0,  0.07] },
+  { q:"recovering account access",         vec:[0.98, 0.02, 0.03, 0.0,  0.0,  0.10] },
+  { q:"where is my parcel",                vec:[0.0,  0.98, 0.02, 0.04, 0.04, 0.0 ] },
+  { q:"my card was rejected at checkout",  vec:[0.0,  0.05, 0.97, 0.0,  0.05, 0.06] },
+  { q:"when are you open",                 vec:[0.0,  0.03, 0.0,  0.98, 0.0,  0.02] },
+  { q:"I want my money back",              vec:[0.0,  0.08, 0.14, 0.0,  0.95, 0.0 ] },
+  { q:"how do I talk to a human",          vec:[0.12, 0.0,  0.05, 0.05, 0.05, 0.96] },
+];
+
+// Keyword-bearing words per query, so the keyword column can do an honest literal match.
+// (Same query strings as EXAMPLES so a click fills both the box and a known vector.)
+
+function dot(a,b){ let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s; }
+function norm(a){ return Math.sqrt(dot(a,a)); }
+function cosine(a,b){ const d=norm(a)*norm(b); return d===0?0:dot(a,b)/d; }
+
+// Approximate an embedding for a free-typed query by averaging the vectors of
+// any example whose words it shares, else fall back to nearest example by word overlap.
+const STOP = new Set(["how","to","my","the","a","an","is","are","of","for","do","i","you","your","me","at","in","on","when","where","was","want","back","right","now","near"]);
+function tokens(s){ return s.toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w && !STOP.has(w)); }
+
+function embedQuery(text){
+  // exact example match → use its authored vector (deterministic)
+  const hit = EXAMPLES.find(e => e.q.toLowerCase() === text.trim().toLowerCase());
+  if(hit) return hit.vec.slice();
+  // otherwise score each example by shared meaningful words, blend the best ones
+  const qt = tokens(text);
+  if(qt.length === 0) return null;
+  let scored = EXAMPLES.map(e => {
+    const et = tokens(e.q);
+    const overlap = qt.filter(w => et.includes(w)).length;
+    return { e, overlap };
+  });
+  // also consider docs' words for richer matching
+  const blend = new Array(6).fill(0); let weight = 0;
+  scored.forEach(({e,overlap}) => { if(overlap>0){ for(let i=0;i<6;i++) blend[i]+=e.vec[i]*overlap; weight+=overlap; } });
+  // include doc text word matches
+  DOCS.forEach(d => {
+    const dt = tokens(d.text);
+    const overlap = qt.filter(w => dt.includes(w)).length;
+    if(overlap>0){ for(let i=0;i<6;i++) blend[i]+=d.vec[i]*overlap; weight+=overlap; }
+  });
+  if(weight===0) return null;            // no signal → treat as no match
+  for(let i=0;i<6;i++) blend[i]/=weight;
+  return blend;
+}
+
+// ----- SEARCH (vector) -----
+function vectorSearch(qv){
+  return DOCS.map((d,i)=>({ i, text:d.text, score:cosine(qv, d.vec) }))
+             .sort((a,b)=>b.score-a.score);
+}
+// ----- SEARCH (keyword) -----
+function keywordSearch(text){
+  const qt = tokens(text);
+  return DOCS.map((d,i)=>{
+    const dt = tokens(d.text);
+    const matches = qt.filter(w => dt.includes(w));
+    return { i, text:d.text, score:matches.length, matches };
+  }).sort((a,b)=>b.score-a.score);
+}
+
+const qEl = document.getElementById("q");
+const vecResultsEl = document.getElementById("vecResults");
+const kwResultsEl  = document.getElementById("kwResults");
+
+function bar(score){ // score 0..1
+  const pct = Math.max(0, Math.min(1, score))*100;
+  return `<div class="h-2 w-full bg-slate-100 rounded-full overflow-hidden mt-1"><div class="h-full bg-indigo-600 rounded-full" style="width:${pct.toFixed(0)}%"></div></div>`;
+}
+
+let topVecIdx = [];   // indices of nearest neighbours, for the map
+let queryVec = null;  // current query embedding, for the map
+
+function render(){
+  const text = qEl.value;
+  queryVec = embedQuery(text);
+
+  // VECTOR column
+  if(!queryVec){
+    vecResultsEl.innerHTML = `<div class="text-slate-400 text-sm">Type a query to search by meaning…</div>`;
+    topVecIdx = [];
+  } else {
+    const ranked = vectorSearch(queryVec);
+    topVecIdx = ranked.slice(0,3).map(r=>r.i);
+    vecResultsEl.innerHTML = ranked.slice(0,5).map((r,rank)=>`
+      <div class="fade-in rounded-lg border ${rank===0?'border-indigo-300 bg-indigo-50':'border-slate-200'} p-2">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm ${rank===0?'font-bold text-indigo-900':'text-slate-700'}">${rank===0?'🏆 ':''}${r.text}</span>
+          <span class="text-xs font-mono ${rank===0?'text-indigo-700 font-bold':'text-slate-400'}">${r.score.toFixed(2)}</span>
+        </div>
+        ${bar(r.score)}
+      </div>`).join("");
+  }
+
+  // KEYWORD column
+  const kw = keywordSearch(text);
+  const anyKw = kw.some(r=>r.score>0);
+  if(text.trim()===""){
+    kwResultsEl.innerHTML = `<div class="text-slate-400 text-sm">Type a query to match exact words…</div>`;
+  } else if(!anyKw){
+    kwResultsEl.innerHTML = `<div class="fade-in rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">⚠ No documents share any words with your query — keyword search returns <b>nothing</b>, even though a relevant doc exists.</div>`;
+  } else {
+    kwResultsEl.innerHTML = kw.filter(r=>r.score>0).slice(0,5).map((r,rank)=>`
+      <div class="fade-in rounded-lg border ${rank===0?'border-slate-300 bg-slate-50':'border-slate-200'} p-2">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm ${rank===0?'font-bold text-slate-900':'text-slate-700'}">${r.text}</span>
+          <span class="text-xs font-mono text-slate-400">${r.score} word${r.score===1?'':'s'}</span>
+        </div>
+        <div class="text-xs text-slate-400 mt-1">matched: ${r.matches.map(m=>`<span class="bg-amber-100 text-amber-800 rounded px-1">${m}</span>`).join(" ")}</div>
+      </div>`).join("");
+  }
+
+  drawMap();
+}
+qEl.addEventListener("input", render);
+
+// ----- EXAMPLE BUTTONS -----
+const examplesEl = document.getElementById("examples");
+EXAMPLES.forEach(e=>{
+  const btn=document.createElement("button");
+  btn.className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-1.5 hover:border-indigo-400";
+  btn.textContent=e.q;
+  btn.onclick=()=>{ qEl.value=e.q; render(); };
+  examplesEl.appendChild(btn);
+});
+
+// ----- ③ INDEX MAP (project 6D → 2D with a fixed deterministic projection) -----
+// Two fixed projection axes so the same vector always lands on the same spot.
+const AX = [0.7, -0.2, 0.5, -0.6, 0.3, 0.1];   // x-axis weights
+const AY = [0.2, 0.7, -0.3, 0.2, -0.6, 0.4];   // y-axis weights
+function project(vec){
+  let x=0,y=0;
+  for(let i=0;i<6;i++){ x+=vec[i]*AX[i]; y+=vec[i]*AY[i]; }
+  // map roughly [-1,1] → svg coords with padding
+  const sx = 300 + x*230;
+  const sy = 180 - y*150;
+  return [Math.max(30,Math.min(570,sx)), Math.max(30,Math.min(330,sy))];
+}
+const mapEl=document.getElementById("map"), tipEl=document.getElementById("tip");
+function drawMap(){
+  mapEl.innerHTML="";
+  // doc dots
+  DOCS.forEach((d,i)=>{
+    const [x,y]=project(d.vec);
+    const isNear = topVecIdx.includes(i);
+    if(isNear){
+      const ring=document.createElementNS("http://www.w3.org/2000/svg","circle");
+      ring.setAttribute("cx",x); ring.setAttribute("cy",y); ring.setAttribute("r",16);
+      ring.setAttribute("fill","none"); ring.setAttribute("stroke","#10b981"); ring.setAttribute("stroke-width","2.5");
+      mapEl.appendChild(ring);
+    }
+    const c=document.createElementNS("http://www.w3.org/2000/svg","circle");
+    c.setAttribute("cx",x); c.setAttribute("cy",y); c.setAttribute("r",8);
+    c.setAttribute("fill", isNear ? "#34d399" : "#94a3b8"); c.setAttribute("class","dot");
+    c.setAttribute("opacity","0.9");
+    c.addEventListener("mouseenter",()=>{ c.setAttribute("r",12); tipEl.textContent=d.text; tipEl.classList.remove("hidden"); });
+    c.addEventListener("mousemove",e=>{ const r=mapEl.getBoundingClientRect(); tipEl.style.left=(e.clientX-r.left+10)+"px"; tipEl.style.top=(e.clientY-r.top-6)+"px"; });
+    c.addEventListener("mouseleave",()=>{ c.setAttribute("r",8); tipEl.classList.add("hidden"); });
+    mapEl.appendChild(c);
+  });
+  // query star
+  if(queryVec){
+    const [qx,qy]=project(queryVec);
+    const star=document.createElementNS("http://www.w3.org/2000/svg","text");
+    star.setAttribute("x",qx); star.setAttribute("y",qy+7); star.setAttribute("text-anchor","middle");
+    star.setAttribute("font-size","26"); star.setAttribute("fill","#6366f1"); star.textContent="★";
+    const lbl=document.createElementNS("http://www.w3.org/2000/svg","text");
+    lbl.setAttribute("x",qx); lbl.setAttribute("y",qy-16); lbl.setAttribute("text-anchor","middle");
+    lbl.setAttribute("font-size","11"); lbl.setAttribute("font-weight","700"); lbl.setAttribute("fill","#6366f1");
+    lbl.textContent="query";
+    mapEl.appendChild(star); mapEl.appendChild(lbl);
+  }
+}
+drawMap();
+
+// ===== UNDERSTAND STEPS =====
+const STEPS = [
+  { title:"1. Recap: embeddings turn text into vectors",
+    why:"Day 13's idea is the foundation for everything here. An embedding model takes a piece of text and returns a fixed-length list of numbers — a vector — that captures its meaning. Texts that mean similar things get vectors that point in similar directions, and unrelated texts get vectors that point apart. So once everything is a vector, comparing meaning becomes comparing geometry. Today's question is the natural next one: if I have a vector for my query and millions of vectors for my documents, how do I quickly find the closest ones?",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">"reset my password" → <b>[0.92, 0.0, 0.08, …]</b> &nbsp;(similar meaning ⇒ nearby vector)</div>`, code:`embed(text) → vector; similar meaning ⇒ nearby vectors` },
+  { title:"2. The search problem: find the nearest vectors",
+    why:"Semantic search reframes 'find relevant documents' as a pure geometry question. You embed the user's query into a vector, then look through all your stored document vectors and return the ones that sit closest to it. Closeness means similar meaning, so the nearest vectors are the most relevant results — even when they share no words with the query. The entire job of a vector database is to answer one request well: given this query vector, which stored vectors are nearest?",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">query vector → <b>find the k nearest</b> document vectors → those are the results</div>`, code:`search = nearest-neighbour lookup in vector space` },
+  { title:"3. Measuring closeness: cosine similarity / distance",
+    why:"To rank results we need one number for 'how close are these two vectors'. The usual choice is cosine similarity: it measures the angle between two vectors and ignores their length, scoring 1 when they point the same way (same meaning) down to 0 when they're at right angles (unrelated). It's just a dot product divided by the two lengths. Some systems use Euclidean distance or dot product instead, but the spirit is identical — a single score that says how aligned two meanings are, so we can sort by it.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">cos(q, d) = (q · d) / (|q| × |d|) &nbsp; → &nbsp; 1 = same · 0 = unrelated</div>`, code:`cosine similarity = how aligned two vectors are` },
+  { title:"4. Brute-force kNN — and why it doesn't scale",
+    why:"The simplest way to find the nearest vectors is brute force: compute the similarity between the query and every single stored vector, then sort. This is called exact k-nearest-neighbours, and it's perfectly correct. The catch is cost. With a thousand documents it's instant, but with ten million documents each in 1536 dimensions, every query has to do ten million full-length comparisons — that's billions of multiplications per search. Latency balloons, and your database melts under real traffic. We need something cleverer than checking everything.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">compare query to <b>ALL</b> vectors → correct, but 10M × 1536 mults per query 😵</div>`, code:`brute-force kNN = compare to every vector (exact, but slow at scale)` },
+  { title:"5. ANN indexes (HNSW) — fast approximate search",
+    why:"The fix is to give up a tiny bit of accuracy for an enormous speed-up using an approximate nearest-neighbour (ANN) index. Instead of scanning every vector, the index pre-organises them so a query only has to visit a small fraction. The popular HNSW index builds a layered graph where each vector links to its neighbours; a search hops greedily through the graph toward the query and converges in a handful of steps. Other indexes use clustering (IVF) or compression (PQ). The result is sub-millisecond search over millions of vectors, returning almost exactly the same top results as brute force.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>HNSW</b>: hop through a neighbour graph → visit a few vectors, not all → 1000× faster</div>`, code:`ANN index (HNSW/IVF) = approximate but fast nearest-neighbour search` },
+  { title:"6. What a vector database actually is",
+    why:"A vector database is a system built to do one thing extremely well: store vectors and find the nearest ones fast. Each record holds the vector itself, the original text (or a reference to it), and metadata — things like author, date, category, or document ID. On top of the vectors it maintains an ANN index so queries stay fast as the collection grows. It also handles the boring-but-vital parts: inserts and updates, deletes, persistence to disk, and filtering. Think of it as a regular database whose primary query is 'nearest to this vector' instead of 'rows where column = value'.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">vector DB = <b>vectors</b> + <b>metadata</b> + an <b>ANN index</b> for fast nearest-neighbour</div>`, code:`vector DB = store vectors + metadata + ANN index` },
+  { title:"7. The ingest pipeline: chunk → embed → upsert",
+    why:"Before you can search, you have to load your data in. First you chunk long documents into bite-sized pieces — a paragraph or a few sentences — because a small chunk has one focused meaning, which makes its vector sharp and its retrieval precise. Next you embed each chunk with the same model you'll use for queries. Finally you upsert each vector into the database along with its text and metadata. 'Upsert' means insert-or-update, so re-running the pipeline cleanly refreshes changed content without creating duplicates. Do this once and your data is searchable.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">document → <b>chunk</b> → <b>embed</b> each chunk → <b>upsert</b> (vector + text + metadata)</div>`, code:`ingest: chunk → embed → upsert into the vector DB` },
+  { title:"8. The query pipeline: embed → search → top-k",
+    why:"Answering a query mirrors the ingest pipeline. You embed the query with the very same model that embedded the documents, so query and documents live in one shared space and are directly comparable. You hand that query vector to the database and ask for the top-k nearest neighbours — typically the closest 3 to 10. The database walks its ANN index and returns those records with their similarity scores and stored text. That ranked list is your search result, ready to show a user or feed to a downstream step. Always embed both sides with the same model, or the geometry won't line up.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">query → <b>embed</b> (same model) → <b>search</b> index → return <b>top-k</b> with scores</div>`, code:`query: embed query → ANN search → return top-k matches` },
+  { title:"9. Metadata filtering + hybrid search",
+    why:"Pure vector search isn't always enough, so production systems combine it with two extras. Metadata filtering lets you restrict the search to records matching a condition — only this user's documents, only the last 30 days, only the 'pricing' category — so you search the right slice of data. Hybrid search blends vector similarity with old-fashioned keyword matching: the vector half catches meaning and synonyms, while the keyword half nails exact terms like product codes, names, or rare jargon that embeddings sometimes blur. Together, filtering plus hybrid scoring gives results that are both relevant and precise.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">vector score + keyword score, <b>filtered</b> by metadata (user, date, category)</div>`, code:`filter by metadata + blend vector & keyword scores (hybrid)` },
+  { title:"10. This IS the retrieval half of RAG",
+    why:"Everything here is the 'retrieval' in retrieval-augmented generation. RAG works in two halves: first retrieve the most relevant chunks of your own data for a question, then hand those chunks to a generator to produce a grounded answer. The vector database is that first half — it's what turns a question into the handful of source passages worth reading. Real systems you can use include Pinecone and Weaviate (managed services), pgvector (vectors inside Postgres), and Chroma or FAISS (run locally / embedded). Pick by scale and ops needs, but they all answer the same core question: nearest to this vector.",
+    concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">Embed the query, find the nearest stored vectors, return the top-k. That's semantic search — and the retrieval engine inside RAG.</p></div>`, code:`vector search = the retrieval half of RAG · Pinecone · Weaviate · pgvector · Chroma · FAISS` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+
+// ===== BUILD STEPS (with copy buttons) =====
+const BUILD=[
+  { title:"Install the tools",
+    desc:"An embeddings model (openai or local sentence-transformers) plus a vector store. We'll show Chroma (local) and pgvector (Postgres).",
+    code:`pip install openai sentence-transformers chromadb numpy
+# for the pgvector example:
+pip install psycopg2-binary` },
+  { title:"Embed your documents (chunk → vector)",
+    desc:"Split text into focused chunks, then embed each with the model you'll also use for queries.",
+    code:`from openai import OpenAI
+client = OpenAI()
+
+def embed(text):
+    r = client.embeddings.create(
+        model="text-embedding-3-small",   # 1536-dim vectors
+        input=text)
+    return r.data[0].embedding
+
+docs = [
+    "How to recover access to your account",
+    "Track the status of your delivery",
+    "Updating your billing and card details",
+    "Store opening hours and locations",
+    "Returning an item for a refund",
+]
+doc_vecs = [embed(d) for d in docs]` },
+  { title:"Upsert vectors into a vector database (Chroma)",
+    desc:"Store each vector with its text and metadata. 'Upsert' = insert-or-update, so re-runs don't duplicate.",
+    code:`import chromadb
+db = chromadb.Client()
+col = db.get_or_create_collection("support_docs")
+
+col.upsert(
+    ids=[f"doc-{i}" for i in range(len(docs))],
+    documents=docs,
+    embeddings=doc_vecs,
+    metadatas=[{"category": "support", "lang": "en"} for _ in docs],
+)` },
+  { title:"Embed the query and search top-k",
+    desc:"Embed the query with the SAME model, then ask the DB for the nearest vectors. It matches by meaning.",
+    code:`query = "recovering account access"   # no shared words with any doc!
+qv = embed(query)
+
+hits = col.query(query_embeddings=[qv], n_results=3)
+for doc, dist in zip(hits["documents"][0], hits["distances"][0]):
+    print(round(dist, 3), doc)
+# top hit: "How to recover access to your account" — matched by meaning` },
+  { title:"Add metadata filtering",
+    desc:"Restrict the search to the right slice of data — only a user's docs, a date range, or a category.",
+    code:`hits = col.query(
+    query_embeddings=[qv],
+    n_results=3,
+    where={"category": "support"},     # only support docs
+)
+print(hits["documents"][0])` },
+  { title:"Same thing in Postgres with pgvector",
+    desc:"If you already run Postgres, pgvector adds a vector column and nearest-neighbour search via SQL.",
+    code:`-- one-time setup
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE TABLE docs (
+  id      bigserial PRIMARY KEY,
+  content text,
+  category text,
+  embedding vector(1536)
+);
+CREATE INDEX ON docs USING hnsw (embedding vector_cosine_ops);  -- ANN index
+
+-- search: <=> is cosine distance, smaller = closer
+SELECT content, 1 - (embedding <=> :query_vec) AS similarity
+FROM docs
+WHERE category = 'support'
+ORDER BY embedding <=> :query_vec
+LIMIT 3;` },
+  { title:"Hybrid search (vector + keyword)",
+    desc:"Blend vector similarity with literal keyword matching so exact terms (codes, names) aren't missed.",
+    code:`# naive hybrid: combine a vector score and a keyword score
+def keyword_score(query, doc):
+    qw = set(query.lower().split())
+    dw = set(doc.lower().split())
+    return len(qw & dw) / max(1, len(qw))
+
+def hybrid(query, docs, doc_vecs, alpha=0.7):
+    qv = embed(query)
+    import numpy as np
+    def cos(a, b):
+        a, b = np.array(a), np.array(b)
+        return float(a @ b / (np.linalg.norm(a)*np.linalg.norm(b)))
+    scored = [(d, alpha*cos(qv, dv) + (1-alpha)*keyword_score(query, d))
+              for d, dv in zip(docs, doc_vecs)]
+    return sorted(scored, key=lambda x: x[1], reverse=True)
+
+for doc, s in hybrid("forgot login", docs, doc_vecs)[:3]:
+    print(round(s, 3), doc)` },
+  { title:"Use it as the retrieval half of RAG",
+    desc:"Retrieve the top-k chunks for a question, then feed them as context to a generator for a grounded answer.",
+    code:`def retrieve(question, k=3):
+    hits = col.query(query_embeddings=[embed(question)], n_results=k)
+    return hits["documents"][0]
+
+question = "I can't get into my account"
+context = "\\n".join(retrieve(question))
+
+prompt = f"""Use ONLY the context to answer.
+Context:
+{context}
+
+Question: {question}"""
+# send 'prompt' to your text-generation model → grounded answer` },
+];
+const buildEl=document.getElementById("buildSteps");
+BUILD.forEach((s,i)=>{
+  const li=document.createElement("li");
+  li.className="bg-white rounded-2xl border border-slate-200 p-6";
+  const codeId="code"+i;
+  li.innerHTML=`<div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">${i+1}</div><h3 class="font-bold text-lg">${s.title}</h3></div>
+    <p class="text-sm text-slate-600 mb-3">${s.desc}</p>
+    <div class="relative">
+      <button data-copy="${codeId}" class="copy-btn absolute right-2 top-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-md">Copy</button>
+      <pre id="${codeId}"></pre>
+    </div>`;
+  buildEl.appendChild(li);
+  li.querySelector("#"+codeId).textContent=s.code;
+});
+document.querySelectorAll(".copy-btn").forEach(btn=>{
+  btn.onclick=()=>{
+    const code=document.getElementById(btn.dataset.copy).textContent;
+    navigator.clipboard.writeText(code).then(()=>{ const o=btn.textContent; btn.textContent="✓ Copied"; setTimeout(()=>btn.textContent=o,1200); });
+  };
+});
+
+// initial render of the LOOK demo
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 10 — Fine-tuning vs RAG</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 10</div>
+      <h1 class="text-xl font-bold">🧩 Fine-tuning vs RAG — Two Ways to Teach a Model</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 TRY</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Got a job for an LLM? It tells you which approach fits.</h2>
+      <p class="text-slate-500 text-center mb-5">RAG <i>looks things up</i> at question time; fine-tuning <i>bakes new behaviour into the weights</i> by retraining. Pick a scenario and see which wins — and why.</p>
+      <div class="flex flex-wrap justify-center gap-2 mb-5" id="scen"></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-center text-sm text-slate-500 mb-1">Recommended approach</div>
+        <div id="rec" class="text-center text-2xl font-bold mb-3">—</div>
+        <div id="why" class="text-sm text-slate-700 bg-slate-50 rounded-lg p-3"></div>
+      </div>
+      <div class="grid md:grid-cols-2 gap-4 mt-4 text-sm">
+        <div class="bg-white rounded-2xl border border-emerald-200 p-4"><div class="font-bold text-emerald-700 mb-1">📚 RAG — give it notes</div><div class="text-slate-600">Store your data externally; fetch relevant bits per question and put them in the prompt. Best for FACTS that change.</div></div>
+        <div class="bg-white rounded-2xl border border-indigo-200 p-4"><div class="font-bold text-indigo-700 mb-1">🏋️ Fine-tune — retrain it</div><div class="text-slate-600">Continue training on examples so new STYLE/SKILL is baked into the weights. Best for BEHAVIOUR/format.</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Knowledge vs behaviour</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="whyB" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 The decision, in practice</h2>
+    <p class="text-slate-500 mb-8">Most real products use a base model + RAG first, and fine-tune only if needed.</p>
+    <ol class="space-y-5">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Start with prompting + RAG</h3></div><p class="text-sm text-slate-600">Cheapest, fastest, no training. Covers most "answer from my data" needs and keeps facts current. Try this before anything heavier.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Fine-tune for consistent behaviour</h3></div><p class="text-sm text-slate-600">When you need a reliable tone, format, or a narrow skill (always output this JSON, always answer in this brand voice), train on examples of the behaviour.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">They combine</h3></div><p class="text-sm text-slate-600">Fine-tune for HOW it answers + RAG for WHAT facts it uses. A support bot can be fine-tuned to sound on-brand AND RAG over the live help-centre.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Watch the failure modes</h3></div><p class="text-sm text-slate-600">Fine-tuning can't keep up with changing facts (retrain to update) and can make the model forget other things. RAG depends on good retrieval — bad chunks → bad answers.</p></li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 10 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">Tomorrow: AI agents — when the model can use tools and act.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== FINE-TUNE vs RAG decision =====
+const SCEN=[
+  { q:"Answer questions about our constantly-updated product catalogue", rec:"RAG", why:"The data changes often. RAG fetches the current catalogue at query time, so answers are always fresh — fine-tuning would be stale the moment a price changes (and you'd retrain every update)." },
+  { q:"Always reply in our brand's friendly, emoji-light tone", rec:"Fine-tune", why:"This is a BEHAVIOUR, not a fact. Train on examples of the desired tone so it's baked into the weights and applied consistently everywhere — a prompt can nudge tone, fine-tuning locks it in." },
+  { q:"Answer staff questions from our internal HR policy PDFs", rec:"RAG", why:"Private knowledge the base model never saw. RAG retrieves the exact policy passage and can cite it — giving grounded, checkable answers without exposing the docs in training." },
+  { q:"Always output results as strict, valid JSON in our schema", rec:"Fine-tune", why:"A consistent FORMAT/skill. Fine-tuning on many schema-correct examples makes valid JSON the default behaviour, far more reliable than asking nicely in the prompt every time." },
+  { q:"Reflect today's stock prices / breaking news", rec:"RAG", why:"Real-time facts. Only retrieval (or tools) can supply data newer than the model's training cutoff — fine-tuning bakes in a frozen snapshot." },
+  { q:"Speak a niche legal sub-domain's style + reasoning fluently", rec:"Fine-tune", why:"A deep, stable SKILL/style learned from many examples — bake it into the weights. (Pair with RAG for the specific case facts.)" },
+];
+const recEl=document.getElementById("rec"), whyEl=document.getElementById("why"), scenEl=document.getElementById("scen");
+function pick(i){ const s=SCEN[i]; recEl.textContent=s.rec==="RAG"?"📚 RAG":"🏋️ Fine-tune"; recEl.className="text-center text-2xl font-bold mb-3 "+(s.rec==="RAG"?"text-emerald-600":"text-indigo-600"); whyEl.textContent=s.why; }
+SCEN.forEach((s,i)=>{ const b=document.createElement("button"); b.className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 hover:border-indigo-400 text-left max-w-xs"; b.textContent=s.q; b.onclick=()=>{ scenEl.querySelectorAll("button").forEach(x=>x.classList.remove("border-indigo-500","bg-indigo-50","border-2")); b.classList.add("border-indigo-500","bg-indigo-50","border-2"); pick(i); }; scenEl.appendChild(b); });
+scenEl.firstChild.classList.add("border-indigo-500","bg-indigo-50","border-2"); pick(0);
+
+const STEPS = [
+  { title:"1. A base model has frozen knowledge", why:"An LLM's knowledge is whatever was in its training data, frozen at the cutoff date. It doesn't know your private documents, this week's news, or your house style. To make it useful for YOUR needs, you add knowledge or behaviour — and there are two fundamentally different ways.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">base model = frozen general knowledge, no private/recent data</div>`, code:`// it knows the public internet up to a date — and nothing of yours` },
+  { title:"2. RAG: give it notes at question time", why:"Retrieval-Augmented Generation keeps your data OUTSIDE the model. At query time it fetches the relevant pieces and pastes them into the prompt, so the model answers from material it can see right now. The weights never change — you're handing it an open book for each question.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">question → fetch relevant docs → put in prompt → answer from them</div>`, code:`answer = llm(retrieve(question) + question);  // open-book` },
+  { title:"3. Fine-tuning: change the weights", why:"Fine-tuning continues TRAINING the model on your examples, so the new pattern is baked into its weights. It's like the model studying until the behaviour is second nature. No retrieval at runtime — the knowledge/skill is now part of the model itself.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">your examples → more training → behaviour baked into weights</div>`, code:`tunedModel = train(baseModel, yourExamples);  // closed-book, internalised` },
+  { title:"4. Facts → RAG · behaviour → fine-tune", why:"The key split: RAG is best for KNOWLEDGE, especially facts that change (catalogues, policies, news) — update the data, not the model. Fine-tuning is best for BEHAVIOUR: a consistent tone, format, or narrow skill you want applied everywhere. Asking 'is this a fact or a way of behaving?' usually decides it.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full"><div>changing FACTS → RAG</div><div class="text-indigo-700">consistent STYLE/skill → fine-tune</div></div>`, code:`// "what does it know?" → RAG · "how does it act?" → fine-tune` },
+  { title:"5. Cost, freshness, citations", why:"RAG is cheap to start, updates instantly (just change the docs), and can cite sources — but it needs good retrieval and uses prompt tokens. Fine-tuning needs a training run + curated examples and goes stale as facts change (retrain to update), but bakes in behaviour with no per-query retrieval. Different bills, different upkeep.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full"><div>RAG: cheap, fresh, cites · needs good retrieval</div><div>fine-tune: upfront training · stale on facts</div></div>`, code:`// RAG updates = edit docs · fine-tune updates = retrain` },
+  { title:"6. In practice: RAG first, often both", why:"Most teams reach for prompting + RAG first (cheapest, covers most needs) and fine-tune only when they need rock-solid behaviour. And they combine: fine-tune for HOW it answers, RAG for WHAT facts it uses. They're complementary tools, not rivals.", concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">RAG = look it up (facts). Fine-tune = retrain it (behaviour). Often: both.</p></div>`, code:`// fine-tune the voice + RAG the live knowledge` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("whyB").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+</script>
+</body>
+</html>

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 11 — AI Agents</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 11</div>
+      <h1 class="text-xl font-bold">🤖 AI Agents — an LLM That Can Use Tools and Act</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 TRY</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-2xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Give the model tools and a loop — and it stops just talking</h2>
+      <p class="text-slate-500 text-center mb-5">A chatbot answers in one shot. An agent runs in a loop: <b>Thought</b> → <b>Action</b> (call a tool) → <b>Observation</b> (the result) → repeat, until it has what it needs. Watch one solve a task.</p>
+      <div class="flex flex-wrap justify-center gap-2 mb-4" id="tasks"></div>
+      <div class="flex justify-center mb-4"><button id="run" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2 rounded-lg text-sm">▶ Run the agent</button></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-4">
+        <div id="trace" class="space-y-2 min-h-[200px] text-sm"></div>
+      </div>
+      <p class="text-xs text-slate-400 text-center mt-4">🛠️ Tools available: <span class="font-mono">calculator</span>, <span class="font-mono">search</span>, <span class="font-mono">get_hours</span>. The model decides WHICH to call and WHEN, reads the result, and loops until it can answer.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How an agent works</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 The agent loop, in code</h2>
+    <p class="text-slate-500 mb-8">An agent is mostly a while-loop around the model. ~15 lines of orchestration.</p>
+    <ol class="space-y-5">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Describe the tools to the model</h3></div>
+        <pre>const tools = {
+  calculator: (expr) => eval(expr),
+  search:     (q)    => searchWeb(q),
+  get_hours:  (biz)  => db.hours(biz),
+};
+// the model is told each tool's name, purpose, and arguments</pre></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Loop: let it think, then act</h3></div>
+        <pre>while (true) {
+  const step = await llm(history);          // model emits Thought + Action
+  if (step.type === "answer") return step.text;
+  const result = tools[step.tool](step.args); // run the tool
+  history += `Observation: ${result}`;        // feed the result back
+}</pre></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">The observation closes the loop</h3></div><p class="text-sm text-slate-600">Each tool result is appended to the context, so the next Thought is informed by what actually happened — not a guess. That feedback is what makes an agent grounded instead of hallucinating.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Guardrails matter</h3></div><p class="text-sm text-slate-600">Cap the iterations (so it can't loop forever), validate tool inputs, and gate risky actions (sending email, spending money) behind approval. Autonomy needs limits.</p></li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 11 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">From tokens to agents — you now have the whole mental model of modern AI.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== AGENT LOOP =====
+const TASKS=[
+  { q:"What's a 15% tip on an ₹840 bill, split between 3 people?",
+    trace:[
+      ["thought","I need to compute the tip, then split the total. I'll use the calculator."],
+      ["action","calculator(\"840 * 0.15\")"],
+      ["obs","126"],
+      ["thought","Tip is ₹126. Total = 840 + 126 = 966, split 3 ways."],
+      ["action","calculator(\"(840 + 126) / 3\")"],
+      ["obs","322"],
+      ["answer","A 15% tip is ₹126, making the total ₹966 — that's ₹322 per person."],
+    ]},
+  { q:"Is 'Cafe Mocha' open now, and how far past closing if I leave in 2 hours?",
+    trace:[
+      ["thought","First find the cafe's hours. I'll call get_hours."],
+      ["action","get_hours(\"Cafe Mocha\")"],
+      ["obs","{ open: \"09:00\", close: \"21:00\", now: \"20:15\" }"],
+      ["thought","It's 20:15, closes 21:00 — open now. If I leave in 2h it'll be 22:15."],
+      ["action","calculator(\"22*60+15 - (21*60)\")"],
+      ["obs","75"],
+      ["answer","Yes, Cafe Mocha is open now (closes 21:00). If you leave in 2 hours it'll already be 75 minutes past closing."],
+    ]},
+  { q:"What's the population of the capital of France, doubled?",
+    trace:[
+      ["thought","I need the capital of France, then its population, then double it. Search first."],
+      ["action","search(\"capital of France population\")"],
+      ["obs","Paris — population ≈ 2,100,000"],
+      ["thought","Paris, ~2.1M. Double it with the calculator."],
+      ["action","calculator(\"2100000 * 2\")"],
+      ["obs","4200000"],
+      ["answer","The capital of France is Paris (~2.1M people); doubled, that's about 4,200,000."],
+    ]},
+];
+const ICON={thought:"💭 Thought",action:"🛠️ Action",obs:"👁️ Observation",answer:"✅ Answer"};
+const STYLE={thought:"bg-slate-50 text-slate-600",action:"bg-indigo-50 text-indigo-700 font-mono",obs:"bg-amber-50 text-amber-700 font-mono",answer:"bg-emerald-50 text-emerald-800 font-semibold"};
+const traceEl=document.getElementById("trace"), tasksEl=document.getElementById("tasks");
+let active=0, timer=null;
+function run(){
+  if(timer){clearInterval(timer);timer=null;}
+  traceEl.innerHTML=""; const T=TASKS[active].trace; let i=0;
+  traceEl.innerHTML=`<div class="rounded-lg px-3 py-2 bg-white border border-slate-200"><b>🎯 Task:</b> ${TASKS[active].q}</div>`;
+  timer=setInterval(()=>{
+    if(i>=T.length){ clearInterval(timer); timer=null; return; }
+    const [type,txt]=T[i++];
+    const d=document.createElement("div"); d.className=`fade-in rounded-lg px-3 py-2 ${STYLE[type]}`; d.innerHTML=`<span class="text-xs font-bold uppercase opacity-70">${ICON[type]}</span><div>${txt}</div>`; traceEl.appendChild(d);
+  }, 750);
+}
+TASKS.forEach((t,i)=>{ const b=document.createElement("button"); b.className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 hover:border-indigo-400 text-left max-w-xs"; b.textContent=t.q; b.onclick=()=>{ active=i; tasksEl.querySelectorAll("button").forEach(x=>x.classList.remove("border-indigo-500","bg-indigo-50","border-2")); b.classList.add("border-indigo-500","bg-indigo-50","border-2"); run(); }; tasksEl.appendChild(b); });
+tasksEl.firstChild.classList.add("border-indigo-500","bg-indigo-50","border-2");
+document.getElementById("run").onclick=run;
+run();
+
+const STEPS = [
+  { title:"1. A chatbot only talks; an agent acts", why:"A plain LLM call takes text in and gives text out — one shot, no way to look anything up or do anything in the world. An agent wraps the model in a loop and hands it TOOLS (a calculator, web search, your APIs), so it can take actions, see results, and keep going until the job is done.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">chatbot: text → text · agent: text → actions → result → text</div>`, code:`// agent = LLM + tools + a loop` },
+  { title:"2. Tools extend what it can do", why:"You describe each tool to the model — its name, what it does, what arguments it takes. The model can't divide big numbers reliably or know today's data, but it CAN decide 'I should call the calculator with this expression'. Tools cover exactly the model's weak spots: math, fresh facts, real actions.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">calculator · search · get_hours · send_email · query_db …</div>`, code:`tools = { calculator, search, get_hours };  // described to the model` },
+  { title:"3. Thought → Action → Observation", why:"The core loop (often called ReAct): the model writes a THOUGHT (its plan), emits an ACTION (which tool + arguments), your code runs it and returns an OBSERVATION (the real result), which goes back into the context. Then it thinks again. Reasoning and acting, interleaved — watch the trace build.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">💭 Thought → 🛠️ Action → 👁️ Observation → 💭 … → ✅ Answer</div>`, code:`Thought → Action(tool, args) → Observation → repeat` },
+  { title:"4. The observation grounds it", why:"This is why agents beat one-shot answers on multi-step tasks: each tool result is REAL, fed back before the next decision. The model isn't guessing the tip amount — it sees 126 from the calculator. Closing the loop with real observations is what turns plausible guessing into reliable problem-solving.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">real tool result → next thought is grounded, not guessed</div>`, code:`history += "Observation: " + toolResult;  // facts, not guesses` },
+  { title:"5. It plans multi-step on its own", why:"You don't script the steps — the model decides how many tools to call and in what order. 'Population of France's capital, doubled' becomes search → then calculator, chained because the model worked out the dependency. That autonomy over multi-step plans is what makes it an 'agent' and not just a function call.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">model chooses the steps + order itself (you don't script them)</div>`, code:`// the loop runs until the model decides it can answer` },
+  { title:"6. Power needs guardrails", why:"An agent that can send email, spend money, or run code is powerful and risky. So you cap iterations (no infinite loops), validate tool inputs, and put a human approval gate on dangerous actions. Agents are the frontier of applied AI — autonomy is the point, but limits make it safe.", concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">LLM + tools + a Thought→Action→Observation loop = an agent that gets things done.</p></div>`, code:`for (let i=0; i<MAX_STEPS; i++) { ... }  // bounded + gated` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+</script>
+</body>
+</html>

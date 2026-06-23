@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 5 — How a Neural Net Learns</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  canvas { background:#020617; border:1px solid #1e293b; border-radius:10px; }
+  .bar { height:14px; border-radius:6px; background:#6366f1; transition:width .3s; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 5</div>
+      <h1 class="text-xl font-bold">📉 How a Neural Net Learns — Training, in Plain Words</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 TRY</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Guess → see how wrong → adjust → repeat</h2>
+      <p class="text-slate-500 text-center mb-6">The net's job: learn the rule behind these dots. It starts with a <b>random</b> guess (a bad line), measures how far off it is, and nudges its one dial a little in the better direction. Press Train and watch the line snap onto the data.</p>
+      <div class="grid md:grid-cols-3 gap-5 items-start">
+        <div class="md:col-span-2 flex justify-center"><canvas id="c" width="480" height="340"></canvas></div>
+        <div class="space-y-3">
+          <div class="bg-white rounded-2xl border border-slate-200 p-4 space-y-3 text-sm">
+            <div>
+              <div class="flex justify-between mb-0.5"><span class="text-slate-500">Its dial (the weight)</span><span id="wval" class="font-bold text-indigo-600">—</span></div>
+              <div class="bar" id="wbar" style="width:10%"></div>
+              <div class="text-[11px] text-slate-400 mt-1">the true rule's dial is <b>3.0</b></div>
+            </div>
+            <div class="flex justify-between"><span class="text-slate-500">How wrong (loss)</span><span id="loss" class="font-bold text-rose-500">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Steps taken</span><span id="steps-n" class="font-bold">0</span></div>
+            <div>
+              <div class="flex justify-between mb-0.5"><span class="text-slate-500">Step size (learning rate)</span><span id="lrval" class="font-bold text-indigo-600">small</span></div>
+              <input id="lr" type="range" min="1" max="3" value="2" step="1" class="w-full accent-indigo-600" />
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button id="run" class="flex-1 bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2.5 rounded-xl">▶ Train</button>
+            <button id="reset" class="px-4 bg-slate-200 hover:bg-slate-300 rounded-xl font-semibold">↺ random start</button>
+          </div>
+          <p class="text-xs text-slate-400">Each step it moves the dial DOWNHILL — toward less wrongness. That downhill walk is the whole of "learning".</p>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 text-center mt-6">↑ Red lines = how wrong each guess is right now. The net shrinks the total redness, step by step, until the line fits — never told the rule, it found it.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">The learning loop, step by step</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Go deeper</h2>
+    <p class="text-slate-500 mb-8">This demo tuned ONE dial. A real network does the exact same loop — guess, measure, nudge — across millions of dials at once. The recipe doesn't change; only the count does.</p>
+    <ol class="space-y-5">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Watch loss fall live</h3></div><p class="text-sm text-slate-600">Open <b>playground.tensorflow.org</b> and hit play — the "loss" curve in the corner is exactly the wrongness from this demo, dropping as the net trains.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Feel the learning rate</h3></div><p class="text-sm text-slate-600">In the demo, set step size to "big" and reset a few times — sometimes it overshoots and wobbles. Too small and it crawls. Picking this number is a real part of training models.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">See the real math</h3></div><p class="text-sm text-slate-600">The "nudge downhill" is gradient descent + backprop. <a href="../../deeplearningfromzero.php" class="text-indigo-600 font-semibold underline">DeepLearningFromZero</a> builds it line by line; <a href="../../machinelearningfromzero.php" class="text-indigo-600 font-semibold underline">MachineLearningFromZero</a> Day 1 fits this very line in 40 lines.</p></li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 5 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">Tomorrow: What an LLM really does — predicting the next word.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== TRAINING DEMO: learn y = 3x by nudging one dial =====
+const c = document.getElementById("c"), ctx = c.getContext("2d");
+const PAD = 30, TRUE_W = 3;
+const XS = [1,2,3,4,5,6,7,8];
+const data = XS.map(x => ({ x, y: TRUE_W*x + (Math.random()-0.5)*2 }));   // noisy line through origin
+const maxX = 9, maxY = 30;
+const px = x => PAD + (x/maxX)*(c.width-2*PAD);
+const py = y => (c.height-PAD) - (y/maxY)*(c.height-2*PAD);
+let w, steps = 0, lr = 0.01, timer = null;
+const LRS = { 1:[0.002,"small"], 2:[0.01,"medium"], 3:[0.03,"big"] };
+
+function reset(){
+  w = Math.random()*0.8;          // bad random start
+  steps = 0; updateUI(); draw();
+}
+function loss(){ return data.reduce((s,d)=> s + (w*d.x - d.y)**2, 0)/data.length; }
+function trainStep(){
+  // gradient of mean squared error w.r.t. w
+  let g = 0; for (const d of data) g += 2*(w*d.x - d.y)*d.x;
+  g /= data.length;
+  w -= lr*g; steps++;
+  updateUI(); draw();
+}
+function updateUI(){
+  document.getElementById("wval").textContent = w.toFixed(2);
+  document.getElementById("wbar").style.width = Math.max(4, Math.min(100, (w/4)*100)) + "%";
+  document.getElementById("loss").textContent = loss().toFixed(2);
+  document.getElementById("steps-n").textContent = steps;
+}
+function draw(){
+  ctx.clearRect(0,0,c.width,c.height); ctx.fillStyle="#020617"; ctx.fillRect(0,0,c.width,c.height);
+  // axes
+  ctx.strokeStyle="#1e293b"; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(PAD,py(0)); ctx.lineTo(c.width-PAD,py(0)); ctx.moveTo(PAD,PAD); ctx.lineTo(PAD,py(0)); ctx.stroke();
+  // error lines (how wrong each point is now)
+  ctx.strokeStyle="rgba(244,63,94,0.7)"; ctx.lineWidth=2;
+  for (const d of data){ ctx.beginPath(); ctx.moveTo(px(d.x),py(d.y)); ctx.lineTo(px(d.x),py(w*d.x)); ctx.stroke(); }
+  // the net's current line
+  ctx.strokeStyle="#818cf8"; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(px(0),py(0)); ctx.lineTo(px(maxX),py(w*maxX)); ctx.stroke();
+  // data points
+  for (const d of data){ ctx.fillStyle="#6ee7b7"; ctx.beginPath(); ctx.arc(px(d.x),py(d.y),5,0,Math.PI*2); ctx.fill(); }
+}
+document.getElementById("run").onclick = function(){
+  if (timer){ clearInterval(timer); timer=null; this.textContent="▶ Train"; return; }
+  this.textContent="⏸ Pause"; timer=setInterval(()=>{ trainStep(); if(loss()<0.6||steps>4000){clearInterval(timer);timer=null;this.textContent="✓ Learned";} }, 40);
+};
+document.getElementById("reset").onclick = () => { if(timer){clearInterval(timer);timer=null;document.getElementById("run").textContent="▶ Train";} reset(); };
+document.getElementById("lr").oninput = function(){ const [v,name]=LRS[this.value]; lr=v; document.getElementById("lrval").textContent=name; };
+reset();
+
+const STEPS = [
+  { title:"1. It starts out knowing nothing", why:"A fresh network's dials (its 'weights') are set to random numbers. So its very first guesses are nonsense — the line in the demo starts in a silly place. This is important: the net is not programmed with the answer, it has to discover it from examples.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">brand-new net = random dials = bad guesses</div>`, code:`learning starts from random, not from rules` },
+  { title:"2. Make a guess on an example", why:"Show the net one example (an input) and let it produce an output with its current dials. It's just running the math forward — no learning yet, only a prediction. In the demo, that's the blue line's height at each dot.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">input → current dials → a guess</div>`, code:`guess = run the network forward on the input` },
+  { title:"3. Measure how wrong it was (loss)", why:"Compare the guess to the real answer and turn the gap into a single number called the LOSS — high when very wrong, near zero when right. The red lines in the demo ARE the loss: their total length is how badly the net is doing right now.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">loss = how far the guess is from the truth</div>`, code:`loss = (guess − truth)²   // one number: "how wrong"` },
+  { title:"4. Nudge the dials downhill", why:"Here's the magic. For each dial, the net works out: 'if I turn you up a little, does the wrongness go up or down?' Then it turns every dial a tiny bit in the direction that REDUCES loss. That's gradient descent — always step downhill on the wrongness.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full"><div>which way lowers the loss? → step that way, a little</div><div class="text-indigo-600">repeat for every dial</div></div>`, code:`each dial −= step × (direction that lowers loss)` },
+  { title:"5. Repeat thousands of times", why:"One nudge barely helps. But loop over many examples, many times (each full pass is an 'epoch'), and the dials inch toward values that make good guesses everywhere. In the demo the line creeps onto the dots over hundreds of tiny steps — that slow convergence IS training.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">guess → measure → nudge → guess → measure → nudge …</div>`, code:`for many epochs: for each example: guess, measure, nudge` },
+  { title:"6. Step size matters (and so does stopping)", why:"The learning rate is how big each nudge is. Too big and it overshoots and wobbles; too small and it crawls forever. And if you train too long on too little data, the net starts memorising instead of learning — overfitting. Good training is balancing these dials about the dials.", concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">Random start → guess, measure wrongness, step downhill, repeat. That's learning.</p></div>`, code:`too-big steps wobble · too-small crawl · too-long overfits` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+</script>
+</body>
+</html>

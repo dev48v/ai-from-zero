@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 9 — Temperature & Sampling</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .pbar { height:14px; border-radius:5px; background:#6366f1; transition:width .3s; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 9</div>
+      <h1 class="text-xl font-bold">🌡️ Temperature & Sampling — the Creativity Dial</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 TRY</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-2xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">One number decides "safe & repetitive" vs "creative & risky"</h2>
+      <p class="text-slate-500 text-center mb-5">The model gives probabilities for the next word. Temperature reshapes them before it picks. Low → it grabs the top word every time. High → the odds flatten and rarer words get a real chance.</p>
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-sm text-slate-500 mb-1">Prompt: <span class="font-mono text-slate-700">"The weather today is ___"</span></div>
+        <div class="flex items-center gap-3 my-3 text-sm">
+          <span class="text-slate-500 w-24">Temperature</span>
+          <input id="temp" type="range" min="1" max="20" value="8" class="flex-1 accent-indigo-600" />
+          <span id="tv" class="font-bold text-indigo-600 w-10">0.8</span>
+        </div>
+        <div id="bars" class="space-y-2 my-4"></div>
+        <div class="flex items-center gap-2">
+          <button id="sample" class="bg-indigo-600 text-white font-semibold px-4 py-2 rounded-lg text-sm">🎲 Sample 12 times</button>
+          <div id="samples" class="text-sm text-slate-600 flex flex-wrap gap-1"></div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 text-center mt-4">↑ Drag toward 0: bars spike on "sunny", samples all say "sunny" (deterministic). Drag high: bars even out, samples scatter across "stormy", "unpredictable", even odd ones. T ≈ 0.7–1.0 is the usual creative range.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How sampling works</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 The sampling knobs</h2>
+    <p class="text-slate-500 mb-8">Three settings control how the next token is chosen.</p>
+    <ol class="space-y-5">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">temperature</h3></div><p class="text-sm text-slate-600">Reshapes the probabilities: <code>p ∝ p^(1/T)</code>. T→0 sharpens to the top word (deterministic); T→1 keeps them as-is; T&gt;1 flattens (wilder). Factual task → low; brainstorming → higher.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">top-k</h3></div><p class="text-sm text-slate-600">Only ever sample from the k most-likely words; zero out the rest. Stops the model from occasionally picking something absurd from the long tail.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">top-p (nucleus)</h3></div><p class="text-sm text-slate-600">Keep the smallest set of words whose probabilities sum to p (e.g. 0.9), sample from those. Adapts: few options when the model is sure, many when it isn't.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Rule of thumb</h3></div><p class="text-sm text-slate-600">Code, extraction, factual Q&amp;A → temperature ≈ 0 (reproducible). Marketing copy, ideas, fiction → 0.7–1.0. Set temperature OR top-p, not both aggressively.</p></li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 9 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">Tomorrow: Fine-tuning vs RAG — two ways to give a model new knowledge.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== TEMPERATURE =====
+const BASE=[ ["sunny",0.46],["cloudy",0.22],["rainy",0.14],["warm",0.09],["stormy",0.05],["unpredictable",0.03],["purple",0.01] ];
+let temp=0.8;
+const barsEl=document.getElementById("bars"), samplesEl=document.getElementById("samples");
+function dist(){
+  const re=BASE.map(([w,p])=>[w,Math.pow(p,1/temp)]); const z=re.reduce((s,[,p])=>s+p,0);
+  return re.map(([w,p])=>[w,p/z]).sort((a,b)=>b[1]-a[1]);
+}
+function render(){
+  const d=dist(), max=d[0][1];
+  barsEl.innerHTML=d.map(([w,p])=>`<div><div class="flex justify-between text-xs mb-0.5"><span class="font-mono text-slate-700">${w}</span><span class="text-indigo-600 font-bold">${(p*100).toFixed(0)}%</span></div><div class="bg-slate-100 rounded-full"><div class="pbar" style="width:${(p/max)*100}%"></div></div></div>`).join("");
+}
+function sample(){ const d=dist(); const out=[]; for(let n=0;n<12;n++){ let r=Math.random(),acc=0,pick=d[d.length-1][0]; for(const [w,p] of d){ acc+=p; if(r<=acc){pick=w;break;} } out.push(pick); }
+  samplesEl.innerHTML=out.map(w=>`<span class="bg-indigo-50 text-indigo-700 rounded px-1.5 py-0.5 fade-in">${w}</span>`).join(""); }
+document.getElementById("temp").oninput=function(){ temp=+this.value/10; document.getElementById("tv").textContent=temp.toFixed(1); render(); };
+document.getElementById("sample").onclick=sample;
+render();
+
+const STEPS = [
+  { title:"1. The model outputs probabilities, not a word", why:"From Day 6: at each step the model produces a probability for every possible next token — a whole distribution, not a single answer. 'The weather today is...' might be 46% sunny, 22% cloudy, 14% rainy, and a long tail of rarer options. Choosing one from that distribution is a separate decision called sampling.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">"weather is ___" → {sunny 46%, cloudy 22%, rainy 14%, …}</div>`, code:`probs = model(prompt);  // a distribution over the vocabulary` },
+  { title:"2. Greedy: always take the top — and repeat", why:"The simplest choice is greedy: always pick the single most-likely token. It's deterministic and safe, but it makes the model dull and repetitive — it'll loop the same phrasings and never surprise you. You often want some controlled randomness instead.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">greedy → always "sunny" → same output every time</div>`, code:`next = argmax(probs);  // deterministic, can be repetitive` },
+  { title:"3. Temperature reshapes the odds", why:"Before sampling, raise each probability to the power 1/T and renormalise. T below 1 SHARPENS the distribution (the top word dominates → near-greedy); T above 1 FLATTENS it (rare words get a real shot). It's a single dial from 'predictable' to 'wild'. Drag the slider and watch the bars spike or level out.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">p ∝ p^(1/T) · low T sharpens · high T flattens</div>`, code:`p = Math.pow(p, 1/temperature);  // then renormalise` },
+  { title:"4. Then sample from the reshaped distribution", why:"Pick a token at random WEIGHTED by the new probabilities — so likely words come up often, rare ones occasionally. That's why two runs of the same prompt differ at higher temperature. Hit 'sample' repeatedly: low T gives the same word, high T scatters.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">spin a weighted wheel → likely words usually win</div>`, code:`r = random(); walk cumulative probs until r is covered;` },
+  { title:"5. top-k and top-p trim the tail", why:"Pure temperature can still occasionally pick something absurd from the long tail. top-k keeps only the k likeliest words; top-p (nucleus) keeps the smallest group summing to p (e.g. 90%). Both cut the weird tail while preserving variety — usually paired with a moderate temperature.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">top-k: keep best k · top-p: keep until prob sums to p</div>`, code:`candidates = topP(probs, 0.9);  // sample only from the nucleus` },
+  { title:"6. Match the setting to the task", why:"This dial is one of your main controls. Facts, code, extraction → temperature ≈ 0 for reproducible, safe output. Brainstorming, copywriting, fiction → 0.7–1.0 for variety. Set temperature OR top-p, not both hard. Understanding it explains why the same prompt gives different answers — and how to control that.", concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">Reshape the odds, then sample. Low = safe & same; high = creative & varied.</p></div>`, code:`// facts → T≈0 · ideas → T≈0.8` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+</script>
+</body>
+</html>

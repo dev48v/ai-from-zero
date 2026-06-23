@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 1 — AI vs ML vs DL</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .ring { cursor:pointer; transition: all .25s; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back to AIFromZero" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 1</div>
+      <h1 class="text-xl font-bold">🧠 AI vs ML vs DL — The Nested Circles</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<!-- LOOK -->
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">They're not three rivals — they're nested</h2>
+      <p class="text-slate-500 text-center mb-6">AI contains ML contains DL. Click each ring to see what it means. Then sort the real-world examples into the right ring.</p>
+      <div class="grid md:grid-cols-2 gap-6 items-center">
+        <div class="flex justify-center">
+          <svg viewBox="0 0 320 320" class="w-full max-w-sm">
+            <circle class="ring" data-k="ai" cx="160" cy="160" r="150" fill="#e0e7ff" stroke="#6366f1" stroke-width="2"/>
+            <circle class="ring" data-k="ml" cx="160" cy="185" r="105" fill="#c7d2fe" stroke="#6366f1" stroke-width="2"/>
+            <circle class="ring" data-k="dl" cx="160" cy="210" r="58" fill="#a5b4fc" stroke="#6366f1" stroke-width="2"/>
+            <text x="160" y="45" text-anchor="middle" font-size="16" font-weight="800" fill="#3730a3">AI</text>
+            <text x="160" y="105" text-anchor="middle" font-size="14" font-weight="800" fill="#3730a3">ML</text>
+            <text x="160" y="212" text-anchor="middle" font-size="13" font-weight="800" fill="#312e81">DL</text>
+          </svg>
+        </div>
+        <div>
+          <div id="ringInfo" class="bg-white rounded-2xl border border-slate-200 p-5 min-h-[150px]">
+            <div class="text-slate-400 text-sm">Click a ring on the left →</div>
+          </div>
+          <div class="mt-4 bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs font-bold uppercase text-indigo-600 mb-1">Sort it: where does this fit?</div>
+            <div id="qBox" class="text-sm font-semibold my-2">—</div>
+            <div class="flex gap-2">
+              <button class="ans flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:border-indigo-400" data-a="ai">Just AI (rules)</button>
+              <button class="ans flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:border-indigo-400" data-a="ml">ML</button>
+              <button class="ans flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:border-indigo-400" data-a="dl">DL</button>
+            </div>
+            <div id="qFeedback" class="text-sm mt-2 min-h-[40px]"></div>
+            <div class="text-xs text-slate-400">Score: <span id="score">0</span>/<span id="asked">0</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 text-center mt-6">↑ Rule of thumb: hand-written rules = just AI · learns from data = ML · learns from data with a neural net = DL.</p>
+    </div>
+  </div>
+</section>
+
+<!-- UNDERSTAND -->
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">The three terms, untangled</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div>
+        <div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step on the left →</div></div>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div>
+        <div id="why" class="text-slate-700">—</div>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">EXAMPLE</div>
+        <pre id="code"></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BUILD -->
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Spot it in the wild</h2>
+    <p class="text-slate-500 mb-8">No coding needed today — just train your eye. Use this checklist on any "AI" product you meet.</p>
+    <ol class="space-y-5">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Ask: did a human write the rules, or did it learn them?</h3></div>
+        <p class="text-sm text-slate-600">Hand-written if/else logic (a thermostat, a chess engine's opening book) = <b>AI but not ML</b>. Learned from examples = <b>ML</b>.</p>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Ask: is there a neural network inside?</h3></div>
+        <p class="text-sm text-slate-600">Learns from data with a neural net (images, language, speech) = <b>DL</b>. Learns with simpler math (decision trees, linear models) = <b>ML but not DL</b>.</p>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Place it on the map</h3></div>
+        <p class="text-sm text-slate-600">ChatGPT → DL (a transformer). Spam filter → usually ML. A flowchart bot → just AI. GenAI (images, text, audio) → a subset of DL.</p>
+      </li>
+    </ol>
+    <div class="mt-8 bg-white rounded-2xl border border-slate-200 p-6">
+      <h3 class="font-bold mb-2">Where each lives, in one line of code</h3>
+<pre>AI  (rules):   if temp &lt; 18: heater.on()
+ML  (learns):  model = DecisionTree().fit(X, y)
+DL  (net):     model = nn.Sequential(nn.Linear(...), nn.ReLU(), ...)</pre>
+    </div>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center">
+      <h3 class="font-bold text-lg text-indigo-900">🎉 Day 1 of AIFromZero done.</h3>
+      <p class="text-sm text-indigo-700 mt-2">Tomorrow: Tokens — how AI actually reads your text.</p>
+    </div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ---------- LOOK: rings + quiz ----------
+const RING = {
+  ai: { t:"Artificial Intelligence", d:"The big umbrella: ANY technique that makes a machine seem smart — including hand-written rules with no learning at all.", ex:"Chess engines, a thermostat schedule, a flowchart chatbot, GPS routing." },
+  ml: { t:"Machine Learning", d:"A subset of AI where the machine LEARNS patterns from data instead of being told explicit rules. You show it examples; it figures out the rule.", ex:"Spam filters, Netflix recommendations, credit-fraud detection, price prediction." },
+  dl: { t:"Deep Learning", d:"A subset of ML that learns using neural networks with many layers. It powers anything dealing with images, language, or audio at scale.", ex:"ChatGPT, image generators, face unlock, voice assistants, self-driving vision." }
+};
+const ringInfo = document.getElementById("ringInfo");
+document.querySelectorAll(".ring").forEach(c => c.onclick = () => {
+  const r = RING[c.dataset.k];
+  document.querySelectorAll(".ring").forEach(x => x.setAttribute("stroke-width", x === c ? "5" : "2"));
+  ringInfo.innerHTML = `<div class="fade-in"><div class="font-bold text-indigo-700 text-lg">${r.t}</div><p class="text-sm text-slate-600 mt-1">${r.d}</p><div class="text-xs text-slate-500 mt-2"><b>Examples:</b> ${r.ex}</div></div>`;
+});
+
+const QUIZ = [
+  { q:"A thermostat that turns on the heater below 18°C", a:"ai", why:"Hand-written rule, no learning → AI, but not ML." },
+  { q:"A spam filter that learns from emails you mark as spam", a:"ml", why:"Learns from labelled examples with simple math → ML." },
+  { q:"ChatGPT answering your question", a:"dl", why:"A transformer neural network → Deep Learning." },
+  { q:"Netflix suggesting your next show", a:"ml", why:"Learns from viewing data, usually without deep nets → ML." },
+  { q:"A self-driving car recognising a pedestrian", a:"dl", why:"Vision via neural networks → Deep Learning." },
+  { q:"A flowchart customer-support bot ('press 1 for…')", a:"ai", why:"Scripted rules, no learning → AI only." },
+  { q:"An image generator turning text into a painting", a:"dl", why:"Diffusion neural network → Deep Learning." }
+];
+let qi = 0, score = 0, asked = 0;
+const qBox = document.getElementById("qBox"), qFb = document.getElementById("qFeedback");
+function showQ() { qBox.textContent = QUIZ[qi].q; qFb.innerHTML = ""; }
+document.querySelectorAll(".ans").forEach(b => b.onclick = () => {
+  const correct = QUIZ[qi].a; asked++;
+  if (b.dataset.a === correct) { score++; qFb.innerHTML = `<span class="text-green-600 fade-in">✓ Correct. ${QUIZ[qi].why}</span>`; }
+  else qFb.innerHTML = `<span class="text-rose-600 fade-in">✗ It's <b>${correct.toUpperCase()}</b>. ${QUIZ[qi].why}</span>`;
+  document.getElementById("score").textContent = score;
+  document.getElementById("asked").textContent = asked;
+  qi = (qi + 1) % QUIZ.length;
+  setTimeout(showQ, 1600);
+});
+showQ();
+
+// ---------- UNDERSTAND ----------
+const STEPS = [
+  { title:"1. They're nested, not rival", why:"The single most useful picture: Deep Learning is inside Machine Learning, which is inside Artificial Intelligence. Every DL system is ML; every ML system is AI; but not the reverse. People use the words interchangeably — they shouldn't.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center"><div class="font-mono text-xs">AI ⊃ ML ⊃ DL</div><div class="text-indigo-700 mt-1">DL is a kind of ML, which is a kind of AI</div></div>`, code:`AI  = "make machines seem smart" (any method)
+ML  = "...by learning from data"
+DL  = "...with neural networks"` },
+  { title:"2. AI = the whole umbrella", why:"AI is any technique that makes a machine do something we'd call 'intelligent' — INCLUDING approaches with zero learning. A chess engine from the 1980s and a hand-coded chatbot are both AI. This is why 'it's AI' tells you almost nothing on its own.", concept:`<div class="bg-indigo-50 border border-indigo-200 p-4 rounded text-xs w-full"><b>Pure AI, no learning:</b><br>chess engines · GPS routing · flowchart bots · expert systems</div>`, code:`// Pure AI: a human wrote every rule.
+if (temperature < 18) heater.turnOn();` },
+  { title:"3. ML = it learns from data", why:"Machine Learning flips the script: instead of a human writing the rules, you show the machine thousands of examples and it INFERS the rule. Show it 10,000 spam emails and it learns what spam looks like — no one wrote 'if contains VIAGRA'.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full space-y-1"><div>traditional: data + RULES → answers</div><div class="text-indigo-700">ML: data + ANSWERS → rules</div></div>`, code:`// ML: the rule is learned from examples.
+model = DecisionTree().fit(emails, labels);
+model.predict(newEmail);  // spam or not` },
+  { title:"4. DL = ML with neural networks", why:"Deep Learning is ML where the model is a neural network with many layers. The 'deep' = many layers. It shines on messy, high-dimensional data — images, language, audio — where hand-engineering features is hopeless. It needs more data + compute than classic ML.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full space-y-1"><div>classic ML: you pick the features</div><div class="text-indigo-700">DL: the network learns the features itself</div></div>`, code:`// DL: a neural network learns features + rule.
+model = nn.Sequential(
+  nn.Linear(784, 128), nn.ReLU(),
+  nn.Linear(128, 10)
+);` },
+  { title:"5. So where's 'GenAI'?", why:"Generative AI (ChatGPT, image generators, voice clones) is a subset of Deep Learning — neural networks that GENERATE new content instead of just classifying. It's the innermost, newest layer of the picture, riding on transformers and diffusion models.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><div class="font-mono">AI ⊃ ML ⊃ DL ⊃ GenAI</div><div class="text-indigo-700 mt-1">ChatGPT, Midjourney, voice clones live here</div></div>`, code:`// GenAI = DL that creates, not just classifies.
+// LLMs (text), diffusion (images), TTS (audio).` },
+  { title:"6. Why the distinction matters", why:"When a product says 'powered by AI', ask which layer. Rules? Then it won't improve with data. Classic ML? Then it needs clean tabular data + is explainable. Deep learning? Then it's powerful but data-hungry, costly, and harder to interpret. The word 'AI' alone hides all of that.", concept:`<div class="grid grid-cols-3 gap-2 text-xs w-full text-center"><div class="bg-slate-100 p-2 rounded">AI<br><span class="text-slate-500">rules, fixed</span></div><div class="bg-indigo-50 p-2 rounded">ML<br><span class="text-slate-500">learns, explainable</span></div><div class="bg-indigo-100 p-2 rounded">DL<br><span class="text-slate-500">powerful, costly</span></div></div>`, code:`// Next time you hear "AI-powered":
+// ask "rules, ML, or deep learning?"` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev");
+const nextB = document.getElementById("next-btn");
+const autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s, i) => {
+  const bn = document.createElement("button");
+  bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm";
+  bn.innerHTML = `<div class="font-semibold">${s.title}</div>`;
+  bn.onclick = () => show(i);
+  stepsEl.appendChild(bn);
+});
+function show(i) {
+  cur = i;
+  const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => {
+    bn.className = idx === i
+      ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold"
+      : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm";
+  });
+}
+prevB.onclick = () => show(Math.max(0, cur - 1));
+nextB.onclick = () => show(Math.min(STEPS.length - 1, cur + 1));
+let stepTimer = null;
+autoB.onclick = () => {
+  if (stepTimer) { clearInterval(stepTimer); stepTimer = null; autoB.textContent = "▶ Auto-play"; return; }
+  autoB.textContent = "⏸ Pause";
+  show(0);
+  stepTimer = setInterval(() => {
+    if (cur >= STEPS.length - 1) { clearInterval(stepTimer); stepTimer = null; autoB.textContent = "▶ Replay"; return; }
+    show(cur + 1);
+  }, 2800);
+};
+show(0);
+</script>
+</body>
+</html>

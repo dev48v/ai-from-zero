@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 2 — Tokens</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .tok { display:inline-block; padding:2px 1px; border-radius:4px; font-family:ui-monospace,monospace; font-size:15px; white-space:pre; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 2</div>
+      <h1 class="text-xl font-bold">🔤 Tokens — How AI Actually Reads Your Text</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Type something. Watch it shatter into tokens.</h2>
+      <p class="text-slate-500 text-center mb-5">A model never sees letters or words — it sees <b>tokens</b> (chunks of ~4 characters). This is an approximation of how it splits text.</p>
+      <textarea id="inp" rows="3" class="w-full p-3 rounded-xl border border-slate-300 outline-none focus:border-indigo-500 text-sm">The strawberry costs $4.99 — unbelievable!</textarea>
+      <div class="flex flex-wrap gap-2 my-3" id="examples"></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-3">
+        <div class="text-xs font-bold uppercase text-indigo-600 mb-2">Tokens</div>
+        <div id="toks" class="leading-8"></div>
+      </div>
+      <div class="grid grid-cols-3 gap-3 text-center">
+        <div class="bg-white rounded-xl border border-slate-200 p-3"><div id="ntok" class="text-2xl font-black text-indigo-600">0</div><div class="text-xs text-slate-500">tokens</div></div>
+        <div class="bg-white rounded-xl border border-slate-200 p-3"><div id="nchar" class="text-2xl font-black">0</div><div class="text-xs text-slate-500">characters</div></div>
+        <div class="bg-white rounded-xl border border-slate-200 p-3"><div id="ratio" class="text-2xl font-black">0</div><div class="text-xs text-slate-500">chars / token</div></div>
+      </div>
+      <p class="text-xs text-slate-400 text-center mt-6">↑ Notice: spaces stick to the next word, numbers + punctuation split off, and rare words break into pieces.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">What a token really is</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">EXAMPLE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 See real tokens</h2>
+    <p class="text-slate-500 mb-8">No code needed — but here's how to inspect the real thing.</p>
+    <ol class="space-y-5">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Play with a real tokenizer</h3></div><p class="text-sm text-slate-600">OpenAI's <b>platform.openai.com/tokenizer</b> and the <code>tiktoken</code> library show exactly how GPT splits any text. Paste a paragraph and watch the count.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Count tokens in code</h3></div><pre>import tiktoken
+enc = tiktoken.get_encoding("cl100k_base")
+len(enc.encode("Hello world"))   # → number of tokens</pre></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Rule of thumb</h3></div><p class="text-sm text-slate-600">English: <b>~4 characters ≈ 1 token</b>, or <b>~0.75 tokens per word</b>. 1,000 tokens ≈ 750 words ≈ this page so far.</p></li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 2 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">Tomorrow: Embeddings — turning these tokens into meaning.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== approximate tokenizer (illustrative, not real BPE) =====
+const COLORS = ["#e0e7ff;#3730a3","#dcfce7;#15803d","#fef3c7;#b45309","#fee2e2;#b91c1c","#cffafe;#0e7490","#f3e8fd;#7c2d92"];
+const inp = document.getElementById("inp"), toksEl = document.getElementById("toks");
+function tokenize(text){
+  // split into words(with leading space), numbers, punctuation
+  const raw = text.match(/\s*[A-Za-z]+|\s*\d+|\s*[^\sA-Za-z\d]|\s+/g) || [];
+  const out = [];
+  for (let piece of raw){
+    // long alpha words → ~4-char subword chunks (mimics BPE on rare words)
+    const lead = piece.match(/^\s*/)[0];
+    const core = piece.slice(lead.length);
+    if (/^[A-Za-z]+$/.test(core) && core.length > 6){
+      let first = true;
+      for (let i=0;i<core.length;i+=4){ out.push((first?lead:"") + core.slice(i,i+4)); first=false; }
+    } else out.push(piece);
+  }
+  return out.filter(t => t.length);
+}
+function hashId(s){ let h=0; for (let i=0;i<s.length;i++) h=(h*31 + s.charCodeAt(i))>>>0; return h % 99000 + 1000; }
+function render(){
+  const text = inp.value;
+  const toks = tokenize(text);
+  toksEl.innerHTML = toks.map((t,i)=>{ const [bg,fg]=COLORS[i%COLORS.length].split(";"); return `<span class="tok" style="background:${bg};color:${fg}" title="token #${hashId(t)}">${t.replace(/ /g,"·")}</span>`; }).join("");
+  document.getElementById("ntok").textContent = toks.length;
+  document.getElementById("nchar").textContent = text.length;
+  document.getElementById("ratio").textContent = toks.length ? (text.length/toks.length).toFixed(1) : "0";
+}
+inp.oninput = render;
+["The strawberry costs $4.99 — unbelievable!","internationalization","🚀 emojis cost extra tokens","def fibonacci(n): return n"].forEach(ex=>{ const b=document.createElement("button"); b.className="text-xs px-3 py-1.5 rounded-full bg-white border border-slate-200 hover:border-indigo-400 hover:text-indigo-600"; b.textContent=ex.length>28?ex.slice(0,28)+"…":ex; b.onclick=()=>{ inp.value=ex; render(); }; document.getElementById("examples").appendChild(b); });
+render();
+
+const STEPS = [
+  { title:"1. Models don't read words", why:"You see words; a language model sees TOKENS — chunks of text, usually a few characters each. Before any 'thinking' happens, your text is chopped into these pieces and each is turned into a number the model can process.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full"><div>"unbelievable" → <span class="font-mono">un · bel · iev · able</span></div><div class="text-indigo-700 mt-1">4 tokens, not 1 word, not 12 letters</div></div>`, code:`text → [tokens] → [token ids] → model
+"Hello world" → ["Hello", " world"] → [9906, 1917]` },
+  { title:"2. Why not just use words or letters?", why:"Letters: too fine — the model would waste effort relearning spelling everywhere. Whole words: too many (millions, plus every typo and name). Subword tokens are the sweet spot: common words = 1 token, rare words split into reusable pieces. A fixed vocabulary (~100k tokens) covers any text.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full space-y-1"><div>letters → too slow, ~100 symbols</div><div>words → too many, millions + typos</div><div class="text-indigo-700">subwords → ~100k, covers everything</div></div>`, code:`// "tokenizing" + "tokenized" + "tokens"
+// all reuse the shared piece "token"` },
+  { title:"3. The ~4-chars rule (and why it matters)", why:"In English, roughly 4 characters ≈ 1 token, or about ¾ of a token per word. This is how everything is priced and limited: API bills are per-token, and a 'context window' (how much the model can read at once) is measured in tokens, not words.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full space-y-1"><div>1,000 tokens ≈ 750 words</div><div>a 200k context ≈ a 300-page book</div></div>`, code:`// cost + limits are per TOKEN:
+// $X per 1M input tokens, 200k-token window` },
+  { title:"4. Why ChatGPT can't count the r's in 'strawberry'", why:"The famous failure. The model never sees s-t-r-a-w... it sees a token like 'straw' + 'berry'. The individual letters are hidden inside the token, so counting characters is genuinely hard for it. It's not stupid — it just doesn't read letters.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full"><div class="font-mono">"strawberry" → ["str","aw","berry"]</div><div class="text-indigo-700 mt-1">the 3 r's are buried inside tokens</div></div>`, code:`// the model sees token IDs, not characters.
+// letter-level tasks are its blind spot.` },
+  { title:"5. Tokens cost money + space", why:"Every token in your prompt AND the model's reply is billed and counts against the context window. Verbose prompts, pasted logs, and long chat history all burn tokens. Trimming, summarising, and concise prompting are real cost levers.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full"><div>prompt tokens + output tokens = your bill</div><div class="text-indigo-700">shorter prompt = cheaper + fits more</div></div>`, code:`// emojis, rare languages, and code
+// often cost MORE tokens per character.` },
+  { title:"6. Tokens are step 1 of everything", why:"Tokenize → turn each token into a vector (embeddings, Day 3) → feed through the transformer → predict the next token. Every LLM, from autocomplete to ChatGPT, starts exactly here. Understand tokens and the rest of AI has a foundation to stand on.", concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">Text → tokens → numbers → meaning.</p></div>`, code:`// next: Day 3 — Embeddings
+// (turning each token id into a meaning-vector)` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+</script>
+</body>
+</html>

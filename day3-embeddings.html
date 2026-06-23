@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 3 — Embeddings</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .word-dot { cursor:pointer; transition: transform .2s, filter .2s; }
+  .word-dot:hover { transform: scale(1.18); filter: drop-shadow(0 0 6px #6366f1aa); }
+  .word-dot.selected { filter: drop-shadow(0 0 8px #6366f1cc); }
+  .word-dot.neighbor { filter: drop-shadow(0 0 6px #f59e0bcc); }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 3</div>
+      <h1 class="text-xl font-bold">🧭 Embeddings — Meaning Turned Into Numbers</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<!-- ===== LOOK TAB ===== -->
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-4xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">The Meaning Map</h2>
+      <p class="text-slate-500 text-center mb-5">Every word lives at a point in space. <b>Similar meanings sit close together.</b> Click any word to see its nearest neighbors.</p>
+
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-4" style="position:relative;">
+        <svg id="map" width="100%" viewBox="0 0 700 420" style="display:block;"></svg>
+        <div id="legend" class="absolute top-3 right-3 text-xs text-slate-400 space-y-1 text-right">
+          <div><span style="color:#6366f1">●</span> royalty</div>
+          <div><span style="color:#10b981">●</span> animals</div>
+          <div><span style="color:#f59e0b">●</span> vehicles</div>
+          <div><span style="color:#ef4444">●</span> emotions</div>
+          <div><span style="color:#0ea5e9">●</span> food</div>
+        </div>
+      </div>
+
+      <div id="sim-panel" class="grid grid-cols-2 gap-4 mb-4" style="display:none!important;"><!-- hidden until click --></div>
+      <div id="sim-wrap" class="hidden">
+        <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Nearest neighbors of <span id="sim-word" class="text-slate-800"></span></div>
+          <div id="sim-list" class="space-y-2"></div>
+        </div>
+        <div id="arith-wrap" class="hidden bg-indigo-50 border border-indigo-200 rounded-2xl p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-1">Vector arithmetic</div>
+          <div id="arith-text" class="text-sm text-indigo-900 font-mono"></div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 text-center mt-4">↑ Each dot = a word's embedding (real embeddings live in 1,000+ dimensions — this is a 2D slice for intuition).</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== UNDERSTAND TAB ===== -->
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How meaning becomes a vector</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">EXAMPLE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== BUILD TAB ===== -->
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Get real embeddings</h2>
+    <p class="text-slate-500 mb-8">You don't need to train anything. An embedding model converts any text to a vector in one API call.</p>
+    <ol class="space-y-5">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div>
+          <h3 class="font-bold text-lg">Pick an embedding model</h3>
+        </div>
+        <p class="text-sm text-slate-600 mb-3">Any major AI provider has one. They all do the same job: <em>text in → vector of numbers out</em>. Common choices:</p>
+        <div class="grid sm:grid-cols-2 gap-2 text-sm">
+          <div class="bg-slate-50 rounded-lg p-3 border border-slate-200"><b>text-embedding-3-small</b> (OpenAI) — 1,536 dims, cheap, great quality</div>
+          <div class="bg-slate-50 rounded-lg p-3 border border-slate-200"><b>all-MiniLM-L6-v2</b> (HuggingFace) — free, runs locally, 384 dims</div>
+          <div class="bg-slate-50 rounded-lg p-3 border border-slate-200"><b>embed-english-v3.0</b> (Cohere) — strong for retrieval tasks</div>
+          <div class="bg-slate-50 rounded-lg p-3 border border-slate-200"><b>nomic-embed-text</b> (Ollama) — fully offline, no API key needed</div>
+        </div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div>
+          <h3 class="font-bold text-lg">One API call = one vector</h3>
+        </div>
+        <p class="text-sm text-slate-600 mb-3">Here's all the code you need (Python). The response is just a list of floats.</p>
+<pre>from openai import OpenAI
+client = OpenAI()
+
+resp = client.embeddings.create(
+    model="text-embedding-3-small",
+    input="The quick brown fox"
+)
+vector = resp.data[0].embedding
+print(len(vector))   # → 1536
+print(vector[:4])    # → [0.021, -0.043, 0.009, 0.067, ...]</pre>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div>
+          <h3 class="font-bold text-lg">Compare two pieces of text</h3>
+        </div>
+        <p class="text-sm text-slate-600 mb-3">Cosine similarity between two vectors tells you how related they are. 1.0 = identical meaning, 0 = unrelated, negative = opposite.</p>
+<pre>import numpy as np
+
+def cosine(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+v1 = embed("dog")
+v2 = embed("puppy")
+v3 = embed("cloud")
+
+print(cosine(v1, v2))  # → ~0.91  (very similar)
+print(cosine(v1, v3))  # → ~0.18  (unrelated)</pre>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div>
+          <h3 class="font-bold text-lg">Try it without code — 3 tools</h3>
+        </div>
+        <ul class="text-sm text-slate-600 space-y-2">
+          <li>🔗 <b><a href="https://projector.tensorflow.org/" target="_blank" class="text-indigo-600 underline">projector.tensorflow.org</a></b> — Google's embedding projector. Load Word2Vec and rotate a 3D cluster of 10,000 words.</li>
+          <li>🔗 <b><a href="https://huggingface.co/spaces/sentence-transformers/semantic-search" target="_blank" class="text-indigo-600 underline">HuggingFace semantic search demo</a></b> — paste a query, see which sentences match by meaning (not keywords).</li>
+          <li>🔗 <b>Weaviate's live playground</b> — vector search on real data, no signup needed.</li>
+        </ul>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center">
+      <h3 class="font-bold text-lg text-indigo-900">🎉 Day 3 of AIFromZero done.</h3>
+      <p class="text-sm text-indigo-700 mt-2">Tomorrow: What a neural net does — the intuition, no math.</p>
+    </div>
+  </div>
+</section>
+
+<script>
+// ===== TAB LOGIC =====
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== MEANING MAP =====
+// Hand-curated 2D positions (0-700 x, 0-420 y) so clusters are visible
+const WORDS = [
+  // royalty cluster (top-left)
+  { w:"king",   x:110, y:95,  color:"#6366f1", group:"royalty" },
+  { w:"queen",  x:165, y:70,  color:"#6366f1", group:"royalty" },
+  { w:"prince", x:90,  y:145, color:"#6366f1", group:"royalty" },
+  { w:"royal",  x:145, y:130, color:"#6366f1", group:"royalty" },
+  { w:"throne", x:205, y:100, color:"#6366f1", group:"royalty" },
+  // gender anchor words (near royalty, slightly away)
+  { w:"man",    x:250, y:150, color:"#818cf8", group:"royalty" },
+  { w:"woman",  x:215, y:180, color:"#818cf8", group:"royalty" },
+
+  // animals cluster (bottom-left)
+  { w:"dog",    x:105, y:305, color:"#10b981", group:"animals" },
+  { w:"puppy",  x:80,  y:345, color:"#10b981", group:"animals" },
+  { w:"cat",    x:155, y:290, color:"#10b981", group:"animals" },
+  { w:"kitten", x:140, y:335, color:"#10b981", group:"animals" },
+  { w:"pet",    x:195, y:315, color:"#10b981", group:"animals" },
+
+  // vehicles cluster (top-right)
+  { w:"car",    x:520, y:90,  color:"#f59e0b", group:"vehicles" },
+  { w:"truck",  x:575, y:70,  color:"#f59e0b", group:"vehicles" },
+  { w:"bus",    x:555, y:120, color:"#f59e0b", group:"vehicles" },
+  { w:"van",    x:605, y:100, color:"#f59e0b", group:"vehicles" },
+  { w:"drive",  x:535, y:155, color:"#f59e0b", group:"vehicles" },
+
+  // emotions cluster (bottom-right)
+  { w:"happy",   x:520, y:310, color:"#ef4444", group:"emotions" },
+  { w:"joyful",  x:570, y:285, color:"#ef4444", group:"emotions" },
+  { w:"sad",     x:575, y:350, color:"#ef4444", group:"emotions" },
+  { w:"angry",   x:530, y:370, color:"#ef4444", group:"emotions" },
+  { w:"excited", x:610, y:330, color:"#ef4444", group:"emotions" },
+
+  // food cluster (center)
+  { w:"pizza",  x:340, y:230, color:"#0ea5e9", group:"food" },
+  { w:"pasta",  x:380, y:205, color:"#0ea5e9", group:"food" },
+  { w:"bread",  x:310, y:265, color:"#0ea5e9", group:"food" },
+  { w:"rice",   x:360, y:260, color:"#0ea5e9", group:"food" },
+];
+
+function dist(a, b) {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+}
+
+// Normalise 2D distance into a 0-1 "similarity" (inverse of distance)
+function sim2d(a, b) {
+  const maxD = Math.sqrt(700 ** 2 + 420 ** 2);
+  return 1 - dist(a, b) / maxD;
+}
+
+const svg = document.getElementById("map");
+const NS = "http://www.w3.org/2000/svg";
+
+function makeSVGEl(tag, attrs) {
+  const el = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+// Draw connecting lines for same-group (soft, dashed)
+const lineLayer = makeSVGEl("g", { opacity: "0.12" });
+svg.appendChild(lineLayer);
+
+for (let i = 0; i < WORDS.length; i++) {
+  for (let j = i + 1; j < WORDS.length; j++) {
+    const a = WORDS[i], b = WORDS[j];
+    if (a.group === b.group && dist(a, b) < 130) {
+      lineLayer.appendChild(makeSVGEl("line", {
+        x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+        stroke: a.color, "stroke-width": "1", "stroke-dasharray": "4 4"
+      }));
+    }
+  }
+}
+
+const dotLayer = makeSVGEl("g", {});
+svg.appendChild(dotLayer);
+
+let selectedIdx = null;
+const gEls = [];
+
+WORDS.forEach((wd, i) => {
+  const g = makeSVGEl("g", { class: "word-dot", transform: `translate(${wd.x},${wd.y})` });
+
+  const circ = makeSVGEl("circle", { r: "10", fill: wd.color, opacity: "0.88" });
+  const lbl = makeSVGEl("text", {
+    "text-anchor": "middle", dy: "26", fill: "#1e293b",
+    "font-size": "11", "font-family": "ui-monospace, monospace", "font-weight": "600"
+  });
+  lbl.textContent = wd.w;
+
+  g.appendChild(circ);
+  g.appendChild(lbl);
+  dotLayer.appendChild(g);
+  gEls.push(g);
+
+  g.addEventListener("click", () => selectWord(i));
+});
+
+function selectWord(idx) {
+  selectedIdx = idx;
+  const clicked = WORDS[idx];
+
+  // Rank all others by 2D distance
+  const ranked = WORDS.map((wd, i) => ({ wd, i, d: dist(clicked, wd) }))
+    .filter(x => x.i !== idx)
+    .sort((a, b) => a.d - b.d);
+
+  const top4 = ranked.slice(0, 4).map(x => x.i);
+
+  // Update dot styles
+  gEls.forEach((g, i) => {
+    g.querySelector("circle").setAttribute("opacity", "0.35");
+    g.classList.remove("selected", "neighbor");
+    if (i === idx) {
+      g.querySelector("circle").setAttribute("opacity", "1");
+      g.classList.add("selected");
+    } else if (top4.includes(i)) {
+      g.querySelector("circle").setAttribute("opacity", "0.85");
+      g.classList.add("neighbor");
+    }
+  });
+
+  // Draw similarity lines from selected to top-4
+  const oldLines = svg.querySelector("#sim-lines");
+  if (oldLines) oldLines.remove();
+  const simLineG = makeSVGEl("g", { id: "sim-lines" });
+  top4.forEach(ni => {
+    const nb = WORDS[ni];
+    simLineG.appendChild(makeSVGEl("line", {
+      x1: clicked.x, y1: clicked.y, x2: nb.x, y2: nb.y,
+      stroke: "#f59e0b", "stroke-width": "1.5", opacity: "0.6"
+    }));
+  });
+  svg.insertBefore(simLineG, dotLayer);
+
+  // Sidebar
+  const simWrap = document.getElementById("sim-wrap");
+  simWrap.classList.remove("hidden");
+  document.getElementById("sim-word").textContent = `"${clicked.w}"`;
+
+  const simList = document.getElementById("sim-list");
+  simList.innerHTML = "";
+  ranked.slice(0, 6).forEach(({ wd, d }) => {
+    const s = sim2d(clicked, wd);
+    const pct = Math.round(s * 200); // scale for bar width
+    const bar = Math.min(pct, 100);
+    simList.insertAdjacentHTML("beforeend", `
+      <div class="flex items-center gap-3 text-sm">
+        <span class="w-20 font-mono text-slate-700">${wd.w}</span>
+        <div class="flex-1 bg-slate-100 rounded-full h-2">
+          <div class="h-2 rounded-full" style="width:${bar}%;background:${wd.color}"></div>
+        </div>
+        <span class="text-xs text-slate-500 w-12 text-right">${s.toFixed(3)}</span>
+      </div>`);
+  });
+
+  // Vector arithmetic easter egg for king/queen/man/woman
+  const arithWrap = document.getElementById("arith-wrap");
+  const arithText = document.getElementById("arith-text");
+  const arithMap = {
+    king:   "king − man + woman ≈ queen  (royalty context, gender swapped)",
+    queen:  "queen − woman + man ≈ king",
+    man:    "man − king + queen ≈ woman",
+    woman:  "woman − queen + man ≈ king",
+    dog:    "dog − cat + kitten ≈ puppy  (young animal)",
+    cat:    "cat − dog + puppy ≈ kitten",
+    happy:  "happy − joyful + sad ≈ neutral emotion",
+    car:    "car − drive + fly ≈ airplane  (vehicle + action)"
+  };
+  if (arithMap[clicked.w]) {
+    arithWrap.classList.remove("hidden");
+    arithText.textContent = arithMap[clicked.w];
+  } else {
+    arithWrap.classList.add("hidden");
+  }
+}
+
+// ===== UNDERSTAND STEPS =====
+const STEPS = [
+  {
+    title: "1. Why turn words into numbers?",
+    why: "Computers can only work with numbers. But we need them to understand meaning — that 'happy' and 'joyful' are close, or that 'cat' and 'kitten' are related. An embedding is a list of numbers (a vector) that encodes where a word 'lives' in meaning-space. Similar meanings → numbers that are numerically close.",
+    concept: `<div class="bg-slate-100 p-4 rounded text-xs w-full space-y-2">
+      <div class="font-mono text-indigo-700">"cat"    → [0.21, -0.43, 0.87, ...]</div>
+      <div class="font-mono text-indigo-700">"kitten" → [0.23, -0.41, 0.85, ...]</div>
+      <div class="font-mono text-slate-500">"cloud"  → [-0.60, 0.18, 0.02, ...]</div>
+      <div class="mt-2 text-slate-600">cat + kitten: nearly identical vectors → very similar meaning</div>
+    </div>`,
+    code: `# an embedding is just a list of floats
+"cat"    → [0.21, -0.43, 0.87, 0.12, -0.05 ...]  # 1536 dims
+"kitten" → [0.23, -0.41, 0.85, 0.10, -0.04 ...]  # almost same
+"cloud"  → [-0.60, 0.18, 0.02, 0.44, 0.71 ...]  # very different`
+  },
+  {
+    title: "2. What is a 'dimension'?",
+    why: "Each number in the vector is one dimension — a dial measuring something loosely like 'animal-ness', 'positivity', 'size', etc. No one designed these dials; the model discovered them by reading billions of sentences. 1,536 dials gives a very rich description of meaning. We can't visualise 1,536 dimensions, so we project down to 2 or 3 to see clusters — that's what the LOOK tab shows.",
+    concept: `<div class="bg-slate-100 p-4 rounded text-xs w-full space-y-1">
+      <div>dim 42  ≈ "animal-ness":   cat=0.87  cloud=-0.60</div>
+      <div>dim 105 ≈ "positivity":    happy=0.91  sad=-0.88</div>
+      <div>dim 300 ≈ "vehicle-ness":  car=0.79  pizza=-0.55</div>
+      <div class="text-slate-400 mt-2">(model discovers these, not us)</div>
+    </div>`,
+    code: `# real embedding models: 384 to 3072 dimensions
+# OpenAI text-embedding-3-large → 3072 dims
+# all-MiniLM-L6-v2              → 384 dims
+# more dims ≠ always better for your task`
+  },
+  {
+    title: "3. Similar meaning = nearby vectors",
+    why: "The key promise of embeddings: words or sentences that mean similar things end up close together in that high-dimensional space. 'Puppy' and 'dog' sit near each other. 'Dog' and 'cloud' are far apart. This is not hand-coded — the model learns it purely from which words appear in similar contexts across massive text corpora.",
+    concept: `<div class="text-center w-full">
+      <div class="inline-block bg-green-50 border border-green-200 rounded-xl p-4 text-sm">
+        <div class="font-bold text-green-800 mb-2">Same cluster = similar meaning</div>
+        <div>🐕 dog · puppy · cat · kitten · pet</div>
+        <div class="text-slate-400 text-xs mt-2">distance between "dog"↔"puppy": ~0.09</div>
+        <div class="text-slate-400 text-xs">distance between "dog"↔"cloud": ~0.74</div>
+      </div>
+    </div>`,
+    code: `# two sentences, semantically similar:
+s1 = "The dog ran across the park"
+s2 = "A puppy sprinted through the garden"
+# their embeddings will be close even though
+# they share almost no words`
+  },
+  {
+    title: "4. Cosine similarity in plain words",
+    why: "We measure 'how close' two vectors are using cosine similarity — it checks the angle between them, not raw distance. Angle = 0° means they point the same way (identical meaning, score = 1.0). Angle = 90° means unrelated (score = 0). Angle = 180° means opposite meaning (score = -1.0). It's 'are these vectors pointing in the same direction?' in 1,536-dimensional space.",
+    concept: `<div class="bg-slate-100 p-4 rounded text-xs w-full space-y-2">
+      <div class="flex items-center gap-2"><span class="text-green-600 font-bold">1.00</span> → identical meaning (same vector)</div>
+      <div class="flex items-center gap-2"><span class="text-indigo-600 font-bold">0.85</span> → very similar ("dog" ↔ "puppy")</div>
+      <div class="flex items-center gap-2"><span class="text-yellow-600 font-bold">0.40</span> → loosely related ("dog" ↔ "animal")</div>
+      <div class="flex items-center gap-2"><span class="text-slate-500 font-bold">0.10</span> → unrelated ("dog" ↔ "cloud")</div>
+      <div class="flex items-center gap-2"><span class="text-red-500 font-bold">-0.2</span> → somewhat opposite ("happy" ↔ "angry")</div>
+    </div>`,
+    code: `import numpy as np
+
+def cosine_sim(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+# returns a float from -1 to 1
+# 1 = same direction = same meaning`
+  },
+  {
+    title: "5. Vector arithmetic: king − man + woman ≈ queen",
+    why: "The famous demo that blew people's minds when Word2Vec published it in 2013. You can do math on meaning. Take the vector for 'king', subtract the 'man' vector, add the 'woman' vector — and the result points almost exactly at 'queen'. The model didn't memorise this fact; it fell out of learning which words appear in similar contexts. This reveals that dimensions encode real semantic relationships.",
+    concept: `<div class="text-center w-full space-y-3">
+      <div class="text-xl font-mono text-indigo-700">king − man + woman</div>
+      <div class="text-2xl">≈</div>
+      <div class="text-xl font-mono text-indigo-700">queen</div>
+      <div class="text-xs text-slate-500 mt-2">subtract gender, keep royalty, add female gender back</div>
+    </div>`,
+    code: `v_king  = embed("king")
+v_man   = embed("man")
+v_woman = embed("woman")
+
+result = v_king - v_man + v_woman
+
+# find closest word to result vector:
+# → "queen"  (cosine ~0.77)`
+  },
+  {
+    title: "6. Where embeddings power everything",
+    why: "Embeddings are the hidden engine behind semantic search (find 'docs about broken login' even if they say 'authentication failure'), RAG (retrieve relevant knowledge before answering), recommendation engines ('you liked X, Y has a similar vector'), duplicate detection, clustering support tickets, and much more. Any time a system needs to understand meaning — not just match keywords — it's using embeddings.",
+    concept: `<div class="bg-slate-100 p-4 rounded text-sm w-full space-y-2">
+      <div>🔍 <b>Semantic search</b> — match by meaning, not keywords</div>
+      <div>📚 <b>RAG</b> — embed your docs, retrieve the right chunk</div>
+      <div>🎯 <b>Recommendations</b> — "items with similar vectors"</div>
+      <div>🗂 <b>Clustering</b> — group support tickets by topic</div>
+      <div>🔁 <b>Deduplication</b> — find near-identical content</div>
+    </div>`,
+    code: `# RAG in 3 lines (conceptually):
+# 1. embed all your documents → store in a vector DB
+# 2. embed the user's question
+# 3. find top-k closest docs → give to the LLM as context`
+  }
+];
+
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s, i) => {
+  const bn = document.createElement("button");
+  bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm";
+  bn.innerHTML = `<div class="font-semibold">${s.title}</div>`;
+  bn.onclick = () => show(i);
+  stepsEl.appendChild(bn);
+});
+function show(i) {
+  cur = i;
+  const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => {
+    bn.className = idx === i
+      ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold"
+      : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm";
+  });
+}
+prevB.onclick = () => show(Math.max(0, cur - 1));
+nextB.onclick = () => show(Math.min(STEPS.length - 1, cur + 1));
+let tm = null;
+autoB.onclick = () => {
+  if (tm) { clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; }
+  autoB.textContent = "⏸ Pause";
+  show(0);
+  tm = setInterval(() => {
+    if (cur >= STEPS.length - 1) { clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; }
+    show(cur + 1);
+  }, 2800);
+};
+show(0);
+</script>
+</body>
+</html>

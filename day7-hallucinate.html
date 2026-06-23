@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 7 — Why LLMs Hallucinate</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .bar { height:10px; border-radius:5px; transition:width .4s; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 7</div>
+      <h1 class="text-xl font-bold">🌫️ Why LLMs Hallucinate — Confident, Fluent, Sometimes Wrong</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 TRY</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">It never says "I don't know" — unless you make it</h2>
+      <p class="text-slate-500 text-center mb-5">An LLM predicts a fluent next word whether or not it knows the truth. Ask something it can't know and it confidently makes one up. Toggle <b>Grounding</b> to see the fix.</p>
+      <div class="flex justify-center mb-4">
+        <button id="ground" class="bg-slate-800 text-white font-semibold px-5 py-2 rounded-xl">Grounding: OFF (raw model)</button>
+      </div>
+      <div class="flex flex-wrap justify-center gap-2 mb-5" id="qs"></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs font-bold uppercase text-slate-500 mb-2">Model answer</div>
+        <div id="ans" class="text-slate-800 mb-4 min-h-[48px]">—</div>
+        <div class="flex items-center gap-3 text-sm">
+          <span class="text-slate-500 w-28">Sounds confident</span>
+          <div class="flex-1 bg-slate-100 rounded-full"><div id="conf" class="bar bg-indigo-500" style="width:0%"></div></div>
+          <span id="confv" class="font-bold text-indigo-600 w-10">0%</span>
+        </div>
+        <div id="flag" class="mt-3 text-sm font-bold"></div>
+      </div>
+      <p class="text-xs text-slate-400 text-center mt-4">↑ Notice the fabricated answers sound JUST as confident as the true ones. Fluency is not truth. Grounding makes it check sources first — and admit when there are none.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Why hallucination happens</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 How to reduce hallucination</h2>
+    <p class="text-slate-500 mb-8">You can't fully eliminate it, but a few habits cut it dramatically.</p>
+    <ol class="space-y-5">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Ground it (RAG)</h3></div><p class="text-sm text-slate-600">Give the model the actual documents and instruct it to answer ONLY from them, citing sources — the single biggest fix (see <a href="../../promptfromzero.php" class="text-indigo-600 underline">PromptFromZero</a>'s RAG days).</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Give it an out</h3></div><p class="text-sm text-slate-600">Explicitly allow "I don't know." Add: <i>"If the context doesn't contain the answer, say you don't know."</i> Without permission to abstain, it will guess.</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Lower the temperature</h3></div><p class="text-sm text-slate-600">For factual tasks, set temperature near 0 so it picks the likeliest (usually safer) token instead of gambling on rare ones (tomorrow's topic).</p></li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6"><div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Verify the important stuff</h3></div><p class="text-sm text-slate-600">Ask for sources you can check, cross-question, or have a second pass verify claims. Treat confident output as a draft, not gospel — especially names, numbers, citations.</p></li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 7 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">Tomorrow: the context window — the model's short-term memory limit.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== HALLUCINATION DEMO =====
+let grounded=false;
+const QS=[
+  { q:"What is the capital of Japan?", known:true, ans:"Tokyo is the capital of Japan.", conf:97 },
+  { q:"Who wrote Romeo and Juliet?", known:true, ans:"William Shakespeare wrote Romeo and Juliet.", conf:96 },
+  { q:"What did the 2027 Zephyr Prize go to?", known:false, ans:"The 2027 Zephyr Prize was awarded to Dr. Elena Vasquez for her work on quantum photosynthesis.", conf:91 },
+  { q:"Summarise the plot of the film 'Crystal Tide' (2025).", known:false, ans:"Crystal Tide follows a marine biologist who discovers a sentient coral reef off the coast of Portugal, blending eco-thriller with family drama.", conf:88 },
+  { q:"What's my company's refund window?", known:false, ans:"Your company offers a 30-day refund window on all unused items.", conf:84, private:true },
+];
+const ansEl=document.getElementById("ans"), confEl=document.getElementById("conf"), confvEl=document.getElementById("confv"), flagEl=document.getElementById("flag");
+function answer(i){
+  const Q=QS[i];
+  if(grounded && !Q.known){
+    ansEl.innerHTML=`<span class="text-slate-600">I don't have a source for that, so I can't answer reliably.${Q.private?" (No matching document was retrieved.)":""}</span>`;
+    confEl.style.width="20%"; confvEl.textContent="—"; confEl.className="bar bg-slate-400";
+    flagEl.innerHTML=`<span class="text-emerald-600">✓ Grounding caught it — abstained instead of fabricating.</span>`;
+  } else {
+    ansEl.textContent=Q.ans;
+    confEl.style.width=Q.conf+"%"; confvEl.textContent=Q.conf+"%"; confEl.className="bar bg-indigo-500";
+    flagEl.innerHTML = Q.known ? `<span class="text-emerald-600">✓ This one's actually true.</span>` : `<span class="text-rose-500">⚠ Hallucination — confidently fabricated. No such fact exists.</span>`;
+  }
+}
+let active=0;
+const qsEl=document.getElementById("qs");
+QS.forEach((Q,i)=>{ const b=document.createElement("button"); b.className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 hover:border-indigo-400 text-left"; b.textContent=Q.q; b.onclick=()=>{ active=i; qsEl.querySelectorAll("button").forEach(x=>x.classList.remove("border-indigo-500","bg-indigo-50","border-2")); b.classList.add("border-indigo-500","bg-indigo-50","border-2"); answer(i); }; qsEl.appendChild(b); });
+document.getElementById("ground").onclick=function(){ grounded=!grounded; this.textContent="Grounding: "+(grounded?"ON (answer only from sources)":"OFF (raw model)"); this.classList.toggle("bg-indigo-600",grounded); this.classList.toggle("bg-slate-800",!grounded); answer(active); };
+qsEl.firstChild.classList.add("border-indigo-500","bg-indigo-50","border-2"); answer(0);
+
+const STEPS = [
+  { title:"1. It predicts plausible, not true", why:"From Day 6: an LLM generates the most LIKELY next word given everything so far. 'Likely' is learned from patterns in its training text — it is not a lookup of verified facts. When the likely-sounding continuation happens to be false, that's a hallucination. The machinery is the same whether it's right or wrong.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">goal = a fluent, probable continuation — not a checked fact</div>`, code:`nextWord = mostLikely(context);  // likely ≠ correct` },
+  { title:"2. It has no 'I don't know' by default", why:"In its training data, questions are followed by answers, not by 'I'm not sure'. So when you ask something it lacks, the most probable continuation is still a confident-looking answer — it fills the gap with something that FITS the pattern. It guesses because guessing is what the text it learned from does.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">question → (training says) an answer follows → it invents one</div>`, code:`// abstaining is rare in the data, so the model rarely abstains` },
+  { title:"3. Confidence ≠ correctness", why:"A made-up answer is generated by the exact same fluent process as a true one, so it SOUNDS identical — same tone, same certainty. The model has no separate 'truth meter'. That's the dangerous part in the demo: the fabricated answers carry the same high confidence as the real ones.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">true answer & fabricated answer → equally fluent + confident</div>`, code:`// there is no internal flag for "this part I actually know"` },
+  { title:"4. Worse on the obscure, recent, or private", why:"Hallucination spikes for things thinly covered in training: niche facts, events after the cutoff, exact numbers/citations, and ANYTHING about your private data (it was never trained on your company's docs). The less real signal it has, the more it improvises.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">rare / recent / private → little signal → more invention</div>`, code:`// "your refund policy?" — it can't know, so it guesses a plausible one` },
+  { title:"5. Grounding is the fix", why:"Give the model the real source text and tell it to answer ONLY from that, citing it — and to say 'I don't know' if the source lacks the answer. Now its fluent generation is anchored to facts you control. Toggle grounding in the demo: the unanswerable questions become honest 'I don't know's.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">give sources + "answer only from these, else say you don't know"</div>`, code:`prompt = "Answer ONLY from the context; else say you don't know.";` },
+  { title:"6. Trust, but verify", why:"You can reduce hallucination (grounding, low temperature, asking for sources, allowing 'I don't know') but not fully erase it — it's intrinsic to how the model works. So treat confident output as a capable draft, and verify anything that matters: names, numbers, quotes, citations.", concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">It optimises for plausible, not true. Ground it, and verify what matters.</p></div>`, code:`// confident draft → check the facts before you rely on them` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+</script>
+</body>
+</html>
