@@ -1,10 +1,10 @@
 # AIFromZero
 
-AI literacy, concept by concept — tokens, embeddings, RAG, agents — explained simply.
+AI literacy concept by concept - tokens, embeddings, RAG, agents, explained simply.
 
 🌐 **Live (all days):** https://dev48v.infy.uk/aifromzero.php
 
-Every lesson is a single, self-contained HTML file with three tabs — 👁 **LOOK** (an interactive demo), 🧠 **UNDERSTAND** (the concept, step by step), 🔨 **BUILD** (do it yourself). No build tools, no install — open any file in a browser.
+Every lesson is a single, self-contained HTML file with three tabs — 👁 **LOOK** (interactive demo), 🧠 **UNDERSTAND** (the concept, step by step), 🔨 **BUILD** (do it yourself). No build tools, no install — open any file in a browser.
 
 ## Days
 - [AIFromZero · Day 1 — AI vs ML vs DL](https://dev48v.infy.uk/ai/days/day1-ai-ml-dl.html) — `day1-ai-ml-dl.html`
@@ -21,6 +21,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 12 — Tokenization](https://dev48v.infy.uk/ai/days/day12-tokenization.html) — `day12-tokenization.html`
 - [AIFromZero · Day 13 — Embeddings](https://dev48v.infy.uk/ai/days/day13-embeddings.html) — `day13-embeddings.html`
 - [AIFromZero · Day 14 — Vector Databases](https://dev48v.infy.uk/ai/days/day14-vector-databases.html) — `day14-vector-databases.html`
+- [AIFromZero · Day 15 — RAG](https://dev48v.infy.uk/ai/days/day15-rag.html) — `day15-rag.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

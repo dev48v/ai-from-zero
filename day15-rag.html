@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 15 — RAG</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .stage { transition: opacity .35s ease, transform .35s ease; }
+  .stage-off { opacity:.25; }
+  .pulse-dot { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 15</div>
+      <h1 class="text-xl font-bold">📚 RAG — Give the LLM Your Own Knowledge</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Watch a question travel the whole RAG pipeline</h2>
+      <p class="text-slate-500 text-center mb-5">Days 13–14 turned text into <b>vectors</b> and stored them in a <b>vector DB</b>. RAG uses that to answer questions about a <b>private knowledge base</b> the model was never trained on. Ask about <b>Northwind Outfitters</b> below and watch: <b>embed → retrieve → augment → generate</b> — with a citation. Then flip the toggle to see what the same model says <b>without</b> RAG.</p>
+
+      <!-- QUESTION BOX -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">① Ask a question about Northwind Outfitters (a fictional private company)</div>
+        <input id="q" type="text" placeholder="e.g. how long do I have to return something?" class="w-full rounded-lg border border-slate-300 px-4 py-3 text-base focus:border-indigo-500 outline-none" />
+        <div class="flex flex-wrap gap-2 mt-3" id="examples"></div>
+        <div class="flex flex-wrap items-center gap-4 mt-4">
+          <button id="run" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg font-bold text-sm">▶ Run the pipeline</button>
+          <label class="flex items-center gap-2 text-sm font-semibold text-slate-600 cursor-pointer select-none">
+            <input id="ragToggle" type="checkbox" checked class="w-4 h-4 accent-indigo-600" />
+            Use RAG <span class="text-xs font-normal text-slate-400">(uncheck = bare model, no knowledge base)</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- PIPELINE -->
+      <div class="grid md:grid-cols-4 gap-3 mb-5">
+        <div data-stage="1" class="stage stage-off bg-white rounded-2xl border-2 border-indigo-200 p-3">
+          <div class="text-[11px] uppercase font-bold text-indigo-600 tracking-wider">① Embed query</div>
+          <div id="s1" class="text-xs text-slate-500 mt-2 min-h-[64px]">Turn the question into a vector.</div>
+        </div>
+        <div data-stage="2" class="stage stage-off bg-white rounded-2xl border-2 border-indigo-200 p-3">
+          <div class="text-[11px] uppercase font-bold text-indigo-600 tracking-wider">② Retrieve top-k</div>
+          <div id="s2" class="text-xs text-slate-500 mt-2 min-h-[64px]">Nearest chunks from the vector store.</div>
+        </div>
+        <div data-stage="3" class="stage stage-off bg-white rounded-2xl border-2 border-indigo-200 p-3">
+          <div class="text-[11px] uppercase font-bold text-indigo-600 tracking-wider">③ Augment prompt</div>
+          <div id="s3" class="text-xs text-slate-500 mt-2 min-h-[64px]">Stuff the chunks in as context.</div>
+        </div>
+        <div data-stage="4" class="stage stage-off bg-white rounded-2xl border-2 border-indigo-200 p-3">
+          <div class="text-[11px] uppercase font-bold text-indigo-600 tracking-wider">④ Generate</div>
+          <div id="s4" class="text-xs text-slate-500 mt-2 min-h-[64px]">Answer, grounded in the context.</div>
+        </div>
+      </div>
+
+      <!-- RETRIEVED CHUNKS -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">② Retrieved chunks — ranked by cosine similarity to the query</div>
+        <div id="chunks" class="space-y-2"><div class="text-slate-400 text-sm">Run the pipeline to retrieve chunks…</div></div>
+      </div>
+
+      <!-- ASSEMBLED PROMPT -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">③ The assembled prompt sent to the model — system + retrieved context + question</div>
+        <pre id="prompt" class="whitespace-pre-wrap">Run the pipeline to assemble the prompt…</pre>
+      </div>
+
+      <!-- ANSWER -->
+      <div id="answerBox" class="bg-white rounded-2xl border-2 border-emerald-200 p-4">
+        <div class="text-xs uppercase font-bold text-emerald-600 tracking-wider mb-2">④ The model's answer</div>
+        <div id="answer" class="text-slate-700 text-sm">Run the pipeline to see the grounded answer…</div>
+        <div id="cite" class="text-xs mt-3"></div>
+      </div>
+
+      <p class="text-xs text-slate-400 text-center mt-5"><b>RAG = retrieve relevant chunks, put them in the prompt, then generate</b> — so the model answers from <b>YOUR data</b> (fresh, private, citable) without retraining. This demo uses ~6 docs with tiny hand-authored vectors so it's deterministic; real systems embed with a model and retrieve from a vector database.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How RAG works</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a RAG pipeline, in code</h2>
+    <p class="text-slate-500 mb-8">The demo uses tiny hand-authored vectors. A real RAG pipeline embeds text with a model, stores the vectors in a vector database (pgvector, Chroma, Pinecone, FAISS), retrieves the top-k chunks for a question, and feeds them to a text-generation model. ~8 steps with copy buttons.</p>
+    <ol class="space-y-5" id="buildSteps"></ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 15 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You can now build RAG end-to-end: chunk → embed → upsert (the offline index), then embed the question → retrieve top-k → augment the prompt → generate → cite the source (the online query). The model now answers from <b>your</b> data — fresh, private, and grounded.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== HAND-AUTHORED KNOWLEDGE BASE + VECTORS (fully offline, deterministic) =====
+// Private docs for the fictional "Northwind Outfitters". A real model was never trained
+// on these, so only RAG can answer from them. Dimensions loosely mean:
+//  [0] returns/refunds  [1] shipping/delivery  [2] warranty/repair  [3] membership/loyalty  [4] hours/stores  [5] payments/billing
+const DOCS = [
+  { id:"KB-01", title:"Returns policy",
+    text:"Northwind Outfitters accepts returns within 45 days of purchase for a full refund, as long as items are unworn with tags attached. Refunds are issued to the original payment method within 5 business days.",
+    vec:[0.97, 0.04, 0.05, 0.0,  0.0,  0.18] },
+  { id:"KB-02", title:"Shipping & delivery",
+    text:"Standard shipping is free on orders over $75 and takes 3 to 5 business days. Express shipping costs $12 and arrives in 1 to 2 business days. We ship within the continental US only.",
+    vec:[0.05, 0.97, 0.04, 0.0,  0.06, 0.10] },
+  { id:"KB-03", title:"Warranty & repairs",
+    text:"All Northwind branded gear carries a 2 year limited warranty against manufacturing defects. Damaged items can be sent to our repair center; covered repairs are free and take about 3 weeks.",
+    vec:[0.06, 0.05, 0.97, 0.04, 0.0,  0.0 ] },
+  { id:"KB-04", title:"Trailhead membership",
+    text:"Trailhead members earn 2 points per dollar, get early access to sales, and receive free express shipping. Membership costs $40 per year and points never expire while the membership is active.",
+    vec:[0.0,  0.18, 0.0,  0.97, 0.04, 0.12] },
+  { id:"KB-05", title:"Store hours & locations",
+    text:"Our flagship stores are open Monday to Saturday from 9am to 8pm and Sunday from 11am to 6pm. We have 14 locations across the Pacific Northwest; see the store locator for the nearest branch.",
+    vec:[0.0,  0.06, 0.0,  0.04, 0.97, 0.02] },
+  { id:"KB-06", title:"Payment & billing",
+    text:"We accept all major credit cards, PayPal, and Northwind gift cards. You can split a single order across two payment methods at checkout. Invoices are emailed automatically after each purchase.",
+    vec:[0.10, 0.08, 0.0,  0.10, 0.0,  0.97] },
+];
+
+// Example questions. Each has a hand-authored embedding so the demo is deterministic.
+// Words deliberately differ from the doc text, to show retrieval works by meaning.
+// `answer` = the grounded reply; `srcId` = the chunk it cites; `bare` = what a model says WITHOUT RAG.
+const EXAMPLES = [
+  { q:"how long do I have to return something?",
+    vec:[0.98, 0.03, 0.05, 0.0, 0.0, 0.14],
+    answer:"You have 45 days from the date of purchase to return an item for a full refund, provided it is unworn with the tags still attached. Refunds go back to your original payment method within 5 business days.",
+    srcId:"KB-01",
+    bare:"I don't have access to Northwind Outfitters' specific return policy, so I can't say for certain. Many retailers allow returns within 14 to 30 days, but you'd need to check their website or receipt to be sure." },
+  { q:"when does standard shipping arrive and is it free?",
+    vec:[0.04, 0.98, 0.03, 0.0, 0.05, 0.08],
+    answer:"Standard shipping is free on orders over $75 and takes 3 to 5 business days. If you need it sooner, express shipping is $12 and arrives in 1 to 2 business days. Shipping is within the continental US only.",
+    srcId:"KB-02",
+    bare:"I'm not aware of Northwind Outfitters' shipping rates or delivery times — that information isn't something I was trained on. You'd have to check their shipping page for the exact details." },
+  { q:"is there a warranty on the gear?",
+    vec:[0.05, 0.04, 0.98, 0.03, 0.0, 0.0],
+    answer:"Yes — all Northwind branded gear has a 2 year limited warranty against manufacturing defects. Damaged items can be sent to the repair center, and covered repairs are free and take about 3 weeks.",
+    srcId:"KB-03",
+    bare:"I can't confirm the warranty terms for Northwind Outfitters specifically. Outdoor brands often offer limited warranties, but the length and what's covered varies a lot, so please verify with the company." },
+  { q:"what perks do members get?",
+    vec:[0.0, 0.14, 0.0, 0.98, 0.04, 0.10],
+    answer:"Trailhead members earn 2 points per dollar, get early access to sales, and receive free express shipping. Membership is $40 per year, and points never expire as long as the membership stays active.",
+    srcId:"KB-04",
+    bare:"I don't have details about a Northwind Outfitters membership program. I'd be guessing if I described its perks — check their loyalty or rewards page for accurate information." },
+  { q:"what time do the shops close on sunday?",
+    vec:[0.0, 0.05, 0.0, 0.03, 0.98, 0.02],
+    answer:"On Sundays the stores are open from 11am to 6pm, so they close at 6pm. Monday through Saturday they're open 9am to 8pm.",
+    srcId:"KB-05",
+    bare:"I don't know the opening hours for Northwind Outfitters' stores. Hours differ by location and day, so the most reliable source is their store locator or a quick call to the branch." },
+  { q:"can I pay with two cards on one order?",
+    vec:[0.08, 0.06, 0.0, 0.08, 0.0, 0.98],
+    answer:"Yes — you can split a single order across two payment methods at checkout. Northwind accepts all major credit cards, PayPal, and gift cards, and an invoice is emailed automatically after purchase.",
+    srcId:"KB-06",
+    bare:"I'm not sure whether Northwind Outfitters lets you split payment across two cards. Some checkouts support split tender and some don't, so you'd need to confirm with them directly." },
+];
+
+function dot(a,b){ let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s; }
+function norm(a){ return Math.sqrt(dot(a,a)); }
+function cosine(a,b){ const d=norm(a)*norm(b); return d===0?0:dot(a,b)/d; }
+
+// Approximate an embedding for a free-typed question by blending example + doc vectors
+// it shares meaningful words with. Same trick as Day 14, kept deterministic.
+const STOP = new Set(["how","to","my","the","a","an","is","are","of","for","do","i","you","your","me","at","in","on","when","where","was","want","back","right","now","near","there","with","and","or","can","get","does","what","time","long","have","something","two","one"]);
+function tokens(s){ return s.toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w && !STOP.has(w)); }
+
+function findExample(text){
+  return EXAMPLES.find(e => e.q.toLowerCase() === text.trim().toLowerCase());
+}
+
+function embedQuery(text){
+  // exact example match → authored vector (deterministic, with canned answer)
+  const hit = findExample(text);
+  if(hit) return hit.vec.slice();
+  // otherwise blend example + doc vectors by shared meaningful words
+  const qt = tokens(text);
+  if(qt.length === 0) return null;
+  const blend = new Array(6).fill(0); let weight = 0;
+  EXAMPLES.forEach(e => {
+    const overlap = qt.filter(w => tokens(e.q).includes(w)).length;
+    if(overlap>0){ for(let i=0;i<6;i++) blend[i]+=e.vec[i]*overlap; weight+=overlap; }
+  });
+  DOCS.forEach(d => {
+    const overlap = qt.filter(w => tokens(d.title+" "+d.text).includes(w)).length;
+    if(overlap>0){ for(let i=0;i<6;i++) blend[i]+=d.vec[i]*overlap; weight+=overlap; }
+  });
+  if(weight===0) return null;
+  for(let i=0;i<6;i++) blend[i]/=weight;
+  return blend;
+}
+
+function retrieve(qv){
+  return DOCS.map(d=>({ ...d, score:cosine(qv, d.vec) }))
+             .sort((a,b)=>b.score-a.score);
+}
+
+// ----- DOM -----
+const qEl = document.getElementById("q");
+const runEl = document.getElementById("run");
+const ragToggle = document.getElementById("ragToggle");
+const chunksEl = document.getElementById("chunks");
+const promptEl = document.getElementById("prompt");
+const answerEl = document.getElementById("answer");
+const citeEl = document.getElementById("cite");
+const answerBox = document.getElementById("answerBox");
+const stageEls = [null, document.querySelector('[data-stage="1"]'), document.querySelector('[data-stage="2"]'), document.querySelector('[data-stage="3"]'), document.querySelector('[data-stage="4"]')];
+const sTxt = [null, document.getElementById("s1"), document.getElementById("s2"), document.getElementById("s3"), document.getElementById("s4")];
+
+function bar(score){
+  const pct = Math.max(0, Math.min(1, score))*100;
+  return `<div class="h-2 w-full bg-slate-100 rounded-full overflow-hidden mt-1"><div class="h-full bg-indigo-600 rounded-full" style="width:${pct.toFixed(0)}%"></div></div>`;
+}
+function resetStages(){
+  for(let i=1;i<=4;i++){ stageEls[i].classList.add("stage-off"); }
+  sTxt[1].innerHTML = "Turn the question into a vector.";
+  sTxt[2].innerHTML = "Nearest chunks from the vector store.";
+  sTxt[3].innerHTML = "Stuff the chunks in as context.";
+  sTxt[4].innerHTML = "Answer, grounded in the context.";
+}
+function litStage(i){ stageEls[i].classList.remove("stage-off"); }
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+let running = false;
+async function runPipeline(){
+  if(running) return;
+  const text = qEl.value.trim();
+  if(!text){ qEl.focus(); return; }
+  running = true; runEl.disabled = true; runEl.classList.add("opacity-60");
+  resetStages();
+  chunksEl.innerHTML = `<div class="text-slate-400 text-sm pulse-dot">Searching the vector store…</div>`;
+  promptEl.textContent = "…";
+  answerEl.innerHTML = `<span class="pulse-dot">Generating…</span>`;
+  citeEl.innerHTML = "";
+
+  const useRag = ragToggle.checked;
+  const qv = embedQuery(text);
+  const ex = findExample(text);
+
+  // ---- ① EMBED ----
+  litStage(1);
+  const qvShown = (qv || [0,0,0,0,0,0]).slice(0,4).map(n=>n.toFixed(2)).join(", ");
+  sTxt[1].innerHTML = `Query → vector:<br><span class="font-mono text-[11px] text-indigo-700">[${qvShown}, …]</span>`;
+  await sleep(650);
+
+  // ---- ② RETRIEVE ----
+  litStage(2);
+  if(!useRag){
+    chunksEl.innerHTML = `<div class="fade-in rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">⚠ RAG is <b>off</b> — no retrieval step. The bare model gets only the raw question, with <b>no access to Northwind's private docs</b>.</div>`;
+    sTxt[2].innerHTML = `<span class="text-rose-600 font-semibold">Skipped — RAG is off.</span>`;
+  } else if(!qv){
+    chunksEl.innerHTML = `<div class="fade-in rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">No chunk is similar enough — the question doesn't match anything in this little knowledge base. Try one of the example questions.</div>`;
+    sTxt[2].innerHTML = `<span class="text-amber-600 font-semibold">No relevant chunk found.</span>`;
+  } else {
+    const ranked = retrieve(qv);
+    const topK = ranked.slice(0,3);
+    sTxt[2].innerHTML = `Top match: <b>${topK[0].id}</b><br><span class="text-slate-400">${topK[0].title} · ${topK[0].score.toFixed(2)}</span>`;
+    chunksEl.innerHTML = topK.map((r,rank)=>`
+      <div class="fade-in rounded-lg border ${rank===0?'border-indigo-300 bg-indigo-50':'border-slate-200'} p-2">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm ${rank===0?'font-bold text-indigo-900':'text-slate-700'}">${rank===0?'🏆 ':''}<span class="font-mono text-xs bg-slate-200 text-slate-600 rounded px-1 mr-1">${r.id}</span>${r.title}</span>
+          <span class="text-xs font-mono ${rank===0?'text-indigo-700 font-bold':'text-slate-400'}">${r.score.toFixed(2)}</span>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">${r.text}</div>
+        ${bar(r.score)}
+      </div>`).join("");
+  }
+  await sleep(750);
+
+  // ---- ③ AUGMENT ----
+  litStage(3);
+  let topK = (useRag && qv) ? retrieve(qv).slice(0,3) : [];
+  if(useRag && qv){
+    const context = topK.map(r=>`[${r.id}] ${r.text}`).join("\n");
+    promptEl.textContent =
+`SYSTEM: You are a support assistant for Northwind Outfitters.
+Answer using ONLY the context below. Cite the source id in [brackets].
+If the answer is not in the context, say you don't know.
+
+CONTEXT:
+${context}
+
+QUESTION: ${text}`;
+    sTxt[3].innerHTML = `Built prompt with <b>${topK.length} chunks</b> as context + the question.`;
+  } else if(useRag){
+    promptEl.textContent =
+`SYSTEM: You are a support assistant for Northwind Outfitters.
+Answer using ONLY the context below.
+
+CONTEXT:
+(no relevant chunks retrieved)
+
+QUESTION: ${text}`;
+    sTxt[3].innerHTML = `No context to add — empty prompt.`;
+  } else {
+    promptEl.textContent = `QUESTION: ${text}`;
+    sTxt[3].innerHTML = `<span class="text-rose-600 font-semibold">No context added — bare question only.</span>`;
+  }
+  await sleep(750);
+
+  // ---- ④ GENERATE ----
+  litStage(4);
+  if(useRag){
+    answerBox.className = "bg-white rounded-2xl border-2 border-emerald-200 p-4";
+    answerBox.querySelector("div").className = "text-xs uppercase font-bold text-emerald-600 tracking-wider mb-2";
+    if(qv && ex){
+      answerEl.innerHTML = `<span class="fade-in inline-block">${ex.answer}</span>`;
+      const src = DOCS.find(d=>d.id===ex.srcId);
+      citeEl.innerHTML = `<span class="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full px-3 py-1 font-semibold">📌 Source: <span class="font-mono">${src.id}</span> — ${src.title}</span> <span class="text-slate-400 ml-1">grounded in retrieved context</span>`;
+      sTxt[4].innerHTML = `<span class="text-emerald-600 font-semibold">Grounded answer + citation.</span>`;
+    } else if(qv){
+      const top = topK[0];
+      answerEl.innerHTML = `<span class="fade-in inline-block">Based on the knowledge base: ${top.text}</span>`;
+      citeEl.innerHTML = `<span class="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full px-3 py-1 font-semibold">📌 Source: <span class="font-mono">${top.id}</span> — ${top.title}</span>`;
+      sTxt[4].innerHTML = `<span class="text-emerald-600 font-semibold">Answer drawn from top chunk.</span>`;
+    } else {
+      answerEl.innerHTML = `<span class="fade-in inline-block text-amber-700">I don't know — there's nothing relevant in the knowledge base for that. (Try an example question.)</span>`;
+      sTxt[4].innerHTML = `<span class="text-amber-600 font-semibold">Honest "I don't know".</span>`;
+    }
+  } else {
+    // BARE MODEL — no RAG: hallucinate or refuse, because it never saw this private data
+    answerBox.className = "bg-white rounded-2xl border-2 border-rose-200 p-4";
+    answerBox.querySelector("div").className = "text-xs uppercase font-bold text-rose-600 tracking-wider mb-2";
+    const bare = ex ? ex.bare : "I don't have any information about Northwind Outfitters' policies — I was never trained on this company's private data, so I can't answer reliably.";
+    answerEl.innerHTML = `<span class="fade-in inline-block text-rose-700">${bare}</span>`;
+    citeEl.innerHTML = `<span class="inline-flex items-center gap-1 bg-rose-50 border border-rose-200 text-rose-700 rounded-full px-3 py-1 font-semibold">🚫 No source — private data was never in training</span>`;
+    sTxt[4].innerHTML = `<span class="text-rose-600 font-semibold">Hallucinates or refuses.</span>`;
+  }
+
+  running = false; runEl.disabled = false; runEl.classList.remove("opacity-60");
+}
+runEl.onclick = runPipeline;
+qEl.addEventListener("keydown", e=>{ if(e.key==="Enter") runPipeline(); });
+ragToggle.addEventListener("change", ()=>{ if(qEl.value.trim()) runPipeline(); });
+
+// ----- EXAMPLE BUTTONS -----
+const examplesEl = document.getElementById("examples");
+EXAMPLES.forEach(e=>{
+  const btn=document.createElement("button");
+  btn.className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-1.5 hover:border-indigo-400";
+  btn.textContent=e.q;
+  btn.onclick=()=>{ qEl.value=e.q; runPipeline(); };
+  examplesEl.appendChild(btn);
+});
+
+// ===== UNDERSTAND STEPS =====
+const STEPS = [
+  { title:"1. The problem: the model doesn't know YOUR data",
+    why:"A language model only knows what was in its training data, which was frozen at some point in the past and never included your private documents. Ask it about your company's return policy, last week's release notes, or an internal wiki page and it simply has no idea. Worse, instead of admitting it doesn't know, it often invents a confident, plausible-sounding answer — a hallucination. Retraining the model on your data every time something changes is far too slow and expensive. We need a way to give the model fresh, private facts at the moment we ask the question.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">private / fresh data was <b>never in training</b> → model guesses or hallucinates 😵</div>`, code:`problem: LLM only knows its frozen training data, not yours` },
+  { title:"2. What RAG is: retrieve, then generate",
+    why:"Retrieval-Augmented Generation is a simple, powerful idea: don't make the model recall the answer from memory — go and fetch the relevant facts first, then let the model write the answer using them. You keep your documents in a searchable store, look up the few passages that relate to the question, paste those passages into the prompt as context, and ask the model to answer from that context. The model's job shrinks from 'know everything' to 'read these notes and respond'. That's why RAG gives answers that are current, private, and grounded in real sources.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>retrieve</b> the relevant facts → put them in the prompt → <b>generate</b> the answer</div>`, code:`RAG = fetch relevant context first, then let the model answer from it` },
+  { title:"3. The offline INDEX pipeline (recap of Days 13–14)",
+    why:"Before you can retrieve anything you have to prepare your data once, ahead of time. You take each document and chunk it into bite-sized pieces, then embed every chunk into a vector that captures its meaning (Day 13), and store those vectors in a vector database (Day 14). This indexing step is done in the background, not while a user waits. Whenever your documents change, you re-run it to refresh the index. The end result is a searchable library of meaning: every chunk of your knowledge sitting as a vector, ready to be found.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">docs → <b>chunk</b> → <b>embed</b> (Day 13) → <b>store</b> in vector DB (Day 14) &nbsp;·&nbsp; done once, offline</div>`, code:`index (offline): chunk docs → embed → store vectors in a vector DB` },
+  { title:"4. The online QUERY pipeline (the four moves)",
+    why:"When a question arrives, RAG runs four steps in order. First, embed the question into a vector with the same model that embedded the documents, so they live in one shared space. Second, retrieve the top-k nearest chunks from the vector store — the passages most likely to contain the answer. Third, augment: build a prompt that combines a short system instruction, those retrieved chunks as context, and the user's question. Fourth, generate: send that prompt to the text model, which writes an answer grounded in the supplied context. Embed, retrieve, augment, generate — that's the whole loop.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>embed</b> question → <b>retrieve</b> top-k → <b>augment</b> prompt → <b>generate</b> answer</div>`, code:`query (online): embed → retrieve top-k → augment prompt → generate` },
+  { title:"5. Chunking: size and overlap matter",
+    why:"How you split documents quietly decides how good your retrieval is. If chunks are too big they mix several topics, so their vector is muddy and retrieval grabs irrelevant text. If chunks are too small they lose the surrounding context needed to make sense. A common sweet spot is a few hundred tokens — roughly a paragraph — with a small overlap between neighbouring chunks so a sentence split across a boundary still appears whole in at least one chunk. Good chunking means each retrieved piece is focused and self-contained, which is half the battle of a working RAG system.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">~a paragraph per chunk + a little <b>overlap</b> → focused, self-contained pieces</div>`, code:`chunking: ~paragraph-sized chunks with small overlap` },
+  { title:"6. Why grounding cuts hallucination + enables citations",
+    why:"When the answer the model needs is sitting right there in the prompt, it no longer has to reach into fuzzy memory and guess — it can read and report. This 'grounding' sharply reduces hallucination, because the model is steered to answer from the supplied passages rather than invent. It also unlocks citations: since you know exactly which chunks you handed over, you can show the user the sources behind every claim and let them verify it. Grounded, cited answers are the difference between a chatbot you can trust in production and one you can't.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">answer lives in the prompt → model <b>reports</b> instead of guesses → fewer hallucinations + <b>citations</b></div>`, code:`grounding: answer from supplied context ⇒ fewer hallucinations + citable sources` },
+  { title:"7. RAG vs fine-tuning: knowledge vs behaviour",
+    why:"These two are often confused but solve different problems — we contrasted them in detail on the fine-tune-vs-RAG day. RAG injects knowledge at query time: it's the right tool when the facts change often, are private, or need to be cited, and you can update them just by editing documents. Fine-tuning bakes behaviour into the model's weights: it's the right tool for teaching a consistent style, format, or skill, and it does not reliably teach new facts. The rule of thumb is simple — use RAG to change WHAT the model knows, fine-tune to change HOW it responds, and combine them when you need both.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>RAG</b> = new knowledge (facts, fresh, citable) &nbsp;·&nbsp; <b>fine-tune</b> = new behaviour (style, format)</div>`, code:`RAG changes what it knows · fine-tuning changes how it responds` },
+  { title:"8. Failure modes: garbage in, garbage out",
+    why:"RAG is only as good as what it retrieves. If the search pulls back the wrong chunks — or misses the chunk that actually holds the answer — the model gets misleading context and produces a confident but wrong answer. The generator can only work with what it's handed, so bad retrieval is the number-one cause of bad RAG answers. Other traps include chunks that are too big or too small, an out-of-date index, and questions that genuinely have no answer in your data. The fix is to treat retrieval quality as the thing to measure and improve first.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">bad retrieval → wrong context → confidently wrong answer &nbsp;·&nbsp; <b>garbage in, garbage out</b></div>`, code:`failure mode: bad retrieval ⇒ bad answer (retrieval is the weak link)` },
+  { title:"9. Making retrieval better: reranking, HyDE, CRAG",
+    why:"Several techniques squeeze more relevance out of the retrieval step. Reranking does a cheap broad search first, then uses a stronger model to re-score the candidates and keep only the truly best ones. HyDE (hypothetical document embeddings) asks the model to draft a fake answer to the question, embeds that, and searches with it — the imagined answer often sits closer to the real chunks than the bare question does. CRAG (corrective RAG) checks whether the retrieved context is actually good enough, and if not, falls back to another source like a web search before generating. Each is a knob to turn when plain top-k retrieval isn't accurate enough.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>rerank</b> the candidates · <b>HyDE</b> search with a draft answer · <b>CRAG</b> verify then correct</div>`, code:`improve retrieval: reranking · HyDE · CRAG (corrective fallback)` },
+  { title:"10. Evaluation + when to use RAG",
+    why:"You can't improve what you don't measure, so RAG is judged on a few axes. Faithfulness asks whether the answer is actually supported by the retrieved context or invented on top of it. Context relevance asks whether the retrieved chunks were the right ones for the question. Answer relevance asks whether the final response truly addresses what was asked. Reach for RAG whenever you need answers over private, large, or frequently-changing knowledge with sources you can cite — support docs, internal wikis, product manuals. If the task is about style or format rather than facts, fine-tuning fits better, and the two can be combined.",
+    concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">Retrieve the right chunks, put them in the prompt, generate a grounded, cited answer. That's RAG — your data, fresh and private, with no retraining.</p></div>`, code:`evaluate: faithfulness · context relevance · answer relevance · use RAG for private/fresh/citable knowledge` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+
+// ===== BUILD STEPS (with copy buttons) =====
+const BUILD=[
+  { title:"Install the tools",
+    desc:"An embeddings model, a vector store, and a text-generation model. We'll use Chroma (local) for the store.",
+    code:`pip install openai chromadb numpy` },
+  { title:"Load and chunk your documents",
+    desc:"Split long docs into focused, paragraph-sized chunks with a little overlap so each piece has one clear meaning.",
+    code:`def chunk(text, size=500, overlap=50):
+    words = text.split()
+    chunks, i = [], 0
+    while i < len(words):
+        chunks.append(" ".join(words[i:i+size]))
+        i += size - overlap          # overlap keeps split sentences whole
+    return chunks
+
+raw_docs = load_my_documents()       # your wiki, PDFs, support pages…
+chunks = [c for d in raw_docs for c in chunk(d)]` },
+  { title:"Embed the chunks and upsert into a vector DB",
+    desc:"Embed each chunk with the model you'll also use for queries, then store vector + text + metadata. 'Upsert' = insert-or-update so re-runs don't duplicate. This is the offline index.",
+    code:`from openai import OpenAI
+import chromadb
+client = OpenAI()
+
+def embed(text):
+    r = client.embeddings.create(model="text-embedding-3-small", input=text)
+    return r.data[0].embedding
+
+db  = chromadb.Client()
+col = db.get_or_create_collection("northwind_kb")
+
+col.upsert(
+    ids=[f"chunk-{i}" for i in range(len(chunks))],
+    documents=chunks,
+    embeddings=[embed(c) for c in chunks],
+    metadatas=[{"source": "kb"} for _ in chunks],
+)` },
+  { title:"Embed the question and search top-k",
+    desc:"At query time, embed the question with the SAME model, then ask the DB for the nearest chunks. This is the retrieval half (Day 14).",
+    code:`def retrieve(question, k=3):
+    qv = embed(question)
+    hits = col.query(query_embeddings=[qv], n_results=k)
+    docs = hits["documents"][0]
+    ids  = hits["ids"][0]
+    return list(zip(ids, docs))
+
+results = retrieve("how long do I have to return something?")
+for cid, text in results:
+    print(cid, "→", text[:80])` },
+  { title:"Build the augmented prompt",
+    desc:"Stuff the retrieved chunks into the prompt as context, with a system instruction telling the model to answer ONLY from that context and to cite the source id.",
+    code:`SYSTEM = (
+    "You are a support assistant for Northwind Outfitters. "
+    "Answer using ONLY the context below. Cite the source id in [brackets]. "
+    "If the answer is not in the context, say you don't know."
+)
+
+def build_prompt(question, results):
+    context = "\\n".join(f"[{cid}] {text}" for cid, text in results)
+    return f"{SYSTEM}\\n\\nCONTEXT:\\n{context}\\n\\nQUESTION: {question}"
+
+prompt = build_prompt("how long do I have to return something?", results)
+print(prompt)` },
+  { title:"Call the text-generation model",
+    desc:"Send the augmented prompt to the model. Because the facts are in the context, the answer is grounded — not recalled from memory.",
+    code:`def generate(prompt):
+    r = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,                # factual, low-creativity answers
+    )
+    return r.choices[0].message.content
+
+answer = generate(prompt)
+print(answer)
+# → "You have 45 days to return an item for a full refund [chunk-0]."` },
+  { title:"Return the answer with its sources",
+    desc:"Wire the steps into one function and hand back both the answer and the chunks it came from, so the UI can show citations the user can verify.",
+    code:`def rag(question, k=3):
+    results = retrieve(question, k)        # embed + search
+    prompt  = build_prompt(question, results)   # augment
+    answer  = generate(prompt)             # generate
+    sources = [cid for cid, _ in results]
+    return {"answer": answer, "sources": sources}
+
+out = rag("is there a warranty on the gear?")
+print(out["answer"])
+print("Sources:", out["sources"])` },
+  { title:"Handle the no-answer case + evaluate",
+    desc:"If retrieval finds nothing relevant, say so instead of guessing. Then measure retrieval and faithfulness so you can improve the weak link.",
+    code:`def rag_safe(question, k=3, min_score=0.2):
+    hits = col.query(query_embeddings=[embed(question)],
+                     n_results=k, include=["distances", "documents", "ids"])
+    # cosine distance: smaller = closer; bail if nothing is close enough
+    best = 1 - hits["distances"][0][0]
+    if best < min_score:
+        return {"answer": "I don't know — that's not in our docs.", "sources": []}
+    results = list(zip(hits["ids"][0], hits["documents"][0]))
+    return {"answer": generate(build_prompt(question, results)),
+            "sources": hits["ids"][0]}
+
+# Evaluate: is the answer supported by the retrieved context (faithfulness)?
+# Are the retrieved chunks relevant to the question (context relevance)?
+# Track these on a test set to catch retrieval regressions early.` },
+];
+const buildEl=document.getElementById("buildSteps");
+BUILD.forEach((s,i)=>{
+  const li=document.createElement("li");
+  li.className="bg-white rounded-2xl border border-slate-200 p-6";
+  const codeId="code"+i;
+  li.innerHTML=`<div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">${i+1}</div><h3 class="font-bold text-lg">${s.title}</h3></div>
+    <p class="text-sm text-slate-600 mb-3">${s.desc}</p>
+    <div class="relative">
+      <button data-copy="${codeId}" class="copy-btn absolute right-2 top-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-md">Copy</button>
+      <pre id="${codeId}"></pre>
+    </div>`;
+  buildEl.appendChild(li);
+  li.querySelector("#"+codeId).textContent=s.code;
+});
+document.querySelectorAll(".copy-btn").forEach(btn=>{
+  btn.onclick=()=>{
+    const code=document.getElementById(btn.dataset.copy).textContent;
+    navigator.clipboard.writeText(code).then(()=>{ const o=btn.textContent; btn.textContent="✓ Copied"; setTimeout(()=>btn.textContent=o,1200); });
+  };
+});
+</script>
+</body>
+</html>
