@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 16 — Multimodal AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .stage { transition: opacity .35s ease, transform .35s ease; }
+  .stage-off { opacity:.25; }
+  .pulse-dot { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+  .point { transition: left .9s cubic-bezier(.4,0,.2,1), top .9s cubic-bezier(.4,0,.2,1), opacity .4s ease, transform .3s ease; }
+  .point-glow { box-shadow:0 0 0 6px rgba(99,102,241,.18); transform:scale(1.25); }
+  /* tiny CSS "photos" */
+  .thumb { width:100%; height:64px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:30px; }
+  .thumb-dog { background:linear-gradient(135deg,#fde68a,#fca5a5); }
+  .thumb-chart { background:linear-gradient(135deg,#bae6fd,#a5b4fc); }
+  .thumb-hand { background:#fffbeb; font-family:"Comic Sans MS","Segoe Script",cursive; font-size:15px; color:#92400e; letter-spacing:.5px; transform:rotate(-3deg); }
+  .wave { display:flex; align-items:center; gap:2px; height:64px; justify-content:center; }
+  .wave span { width:3px; background:#6366f1; border-radius:2px; animation:wv 1s ease-in-out infinite; }
+  @keyframes wv { 0%,100%{ height:8px } 50%{ height:40px } }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 16</div>
+      <h1 class="text-xl font-bold">👁️‍🗨️ Multimodal AI — One Model That Sees, Reads &amp; Hears</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Watch text, images &amp; audio flow into ONE shared space</h2>
+      <p class="text-slate-500 text-center mb-5">Day 13 turned text into <b>vectors</b>. A multimodal model does the same to <b>images</b> and <b>audio</b> too — each modality has its own <b>encoder</b> that projects it into ONE <b>shared embedding space</b>, where a dog photo lands right next to the word "dog". Pick a task below and watch: <b>modality → encoder → shared space → reason across → output</b>.</p>
+
+      <!-- TASK PICKER -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">① Pick a task — the model mixes whichever modalities it needs</div>
+        <div class="flex flex-wrap gap-2 mt-1" id="examples"></div>
+        <div class="flex flex-wrap items-center gap-4 mt-4">
+          <button id="run" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg font-bold text-sm">▶ Run the model</button>
+          <span id="taskLabel" class="text-sm font-semibold text-slate-500">No task picked yet — choose one above.</span>
+        </div>
+      </div>
+
+      <!-- INPUTS: three modalities -->
+      <div class="grid md:grid-cols-3 gap-3 mb-5">
+        <div data-mod="image" class="modcard bg-white rounded-2xl border-2 border-slate-200 p-3">
+          <div class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-2">🖼 Image input</div>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="thumb thumb-dog" title="a dog photo">🐕</div>
+            <div class="thumb thumb-chart" title="a bar chart">📊</div>
+            <div class="thumb thumb-hand" title="handwritten note">hello!</div>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-2">a dog photo · a chart · handwriting</div>
+        </div>
+        <div data-mod="text" class="modcard bg-white rounded-2xl border-2 border-slate-200 p-3">
+          <div class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-2">💬 Text input</div>
+          <div id="textIn" class="thumb bg-slate-100 text-slate-600 text-sm px-2 text-center leading-tight">(no text prompt for this task)</div>
+          <div class="text-[11px] text-slate-400 mt-2">a typed question or instruction</div>
+        </div>
+        <div data-mod="audio" class="modcard bg-white rounded-2xl border-2 border-slate-200 p-3">
+          <div class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-2">🔊 Audio input</div>
+          <div class="wave" id="waveIn"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+          <div class="text-[11px] text-slate-400 mt-2">a spoken clip (a waveform)</div>
+        </div>
+      </div>
+
+      <!-- ENCODERS -->
+      <div class="grid md:grid-cols-3 gap-3 mb-5">
+        <div data-enc="image" class="stage stage-off bg-white rounded-2xl border-2 border-indigo-200 p-3 text-center">
+          <div class="text-[11px] uppercase font-bold text-indigo-600 tracking-wider">Vision encoder</div>
+          <div class="text-xs text-slate-500 mt-1">pixels → vector</div>
+        </div>
+        <div data-enc="text" class="stage stage-off bg-white rounded-2xl border-2 border-indigo-200 p-3 text-center">
+          <div class="text-[11px] uppercase font-bold text-indigo-600 tracking-wider">Text encoder</div>
+          <div class="text-xs text-slate-500 mt-1">tokens → vector</div>
+        </div>
+        <div data-enc="audio" class="stage stage-off bg-white rounded-2xl border-2 border-indigo-200 p-3 text-center">
+          <div class="text-[11px] uppercase font-bold text-indigo-600 tracking-wider">Audio encoder</div>
+          <div class="text-xs text-slate-500 mt-1">sound → vector</div>
+        </div>
+      </div>
+
+      <!-- SHARED SPACE -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">② One shared embedding space — every modality becomes a point here; similar meanings land close together</div>
+        <div id="space" class="relative w-full rounded-xl bg-slate-50 border border-slate-200 overflow-hidden" style="height:240px;">
+          <div class="absolute inset-0 pointer-events-none" style="background-image:linear-gradient(#e2e8f0 1px,transparent 1px),linear-gradient(90deg,#e2e8f0 1px,transparent 1px);background-size:32px 32px;opacity:.5;"></div>
+          <div class="absolute left-2 top-1 text-[10px] text-slate-400 font-mono">2D projection of the shared space</div>
+        </div>
+        <div id="spaceNote" class="text-xs text-slate-400 mt-2">Run a task — each input flies in as a point. Notice the dog photo 🐕 and the word "dog" sit right next to each other.</div>
+      </div>
+
+      <!-- REASONING + OUTPUT -->
+      <div class="grid md:grid-cols-2 gap-3 mb-5">
+        <div data-stage="reason" class="stage stage-off bg-white rounded-2xl border-2 border-indigo-200 p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">③ Reason across modalities</div>
+          <div id="reason" class="text-xs text-slate-500 min-h-[48px]">One transformer reads all the points together.</div>
+        </div>
+        <div id="outBox" data-stage="out" class="stage stage-off bg-white rounded-2xl border-2 border-emerald-200 p-4">
+          <div class="text-xs uppercase font-bold text-emerald-600 tracking-wider mb-2">④ Output</div>
+          <div id="output" class="text-slate-700 text-sm min-h-[48px]">The answer, written across modalities…</div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 text-center mt-5"><b>A multimodal model has an encoder per modality that projects everything into one shared representation</b> — so it can see, read, hear, and answer across them together. It's the same idea as embeddings, extended beyond text. This demo uses tiny hand-placed points so it's deterministic; real models learn the shared space from millions of paired examples (image+caption, audio+transcript).</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How multimodal AI works</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Call a multimodal model, in code</h2>
+    <p class="text-slate-500 mb-8">The demo hand-places points so it's deterministic. In real code you just hand a model an image (as a URL or base64) alongside a text prompt, or hand it an audio file, and it answers across modalities. Below: describe an image, ask a question about it, do OCR, and transcribe audio. ~7 steps with copy buttons.</p>
+    <ol class="space-y-5" id="buildSteps"></ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 16 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You now know how one model sees, reads, and hears: each modality has its own <b>encoder</b> that projects it into ONE <b>shared embedding space</b>, then a single transformer <b>reasons across them</b> to caption images, answer visual questions, read text (OCR), and transcribe audio. Same embeddings idea as Day 13 — just extended beyond text.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== SHARED-SPACE POINTS (fully offline, deterministic) =====
+// Each point is a thing placed in the 2D "shared embedding space". The whole trick of a
+// multimodal model is that a dog photo and the word "dog" land in the SAME spot, because
+// each modality's encoder learned to project meaning into one common space.
+// x,y are percentages inside the space box. Clusters group related meanings.
+const POINTS = {
+  dogImg:   { x:22, y:30, label:"🐕 dog photo",   mod:"image", color:"#f59e0b" },
+  dogWord:  { x:30, y:38, label:'"dog"',          mod:"text",  color:"#6366f1" },
+  chartImg: { x:70, y:26, label:"📊 chart",        mod:"image", color:"#0ea5e9" },
+  handImg:  { x:64, y:64, label:"✍ handwriting",   mod:"image", color:"#d97706" },
+  helloTxt: { x:72, y:72, label:'"hello!"',        mod:"text",  color:"#6366f1" },
+  audioPt:  { x:34, y:70, label:"🔊 audio clip",   mod:"audio", color:"#10b981" },
+  hiTxt:    { x:42, y:62, label:'"hi there"',      mod:"text",  color:"#6366f1" },
+};
+
+// Each task says which input modalities are active, which points fly into the shared space,
+// what the model "reasons", and what it outputs. All hand-authored so it's deterministic.
+const EXAMPLES = [
+  { q:"Describe this image",
+    icon:"🖼→💬",
+    mods:["image"],
+    textPrompt:"(no text prompt for this task)",
+    points:["dogImg"],
+    near:["dogWord"],
+    reason:"The vision encoder turns the dog photo into a point. The model finds it sits right next to the word \"dog\" in the shared space, so it can name what it sees and write a sentence about it.",
+    output:"A golden-brown dog sitting on grass, looking toward the camera with its tongue out." },
+  { q:"Answer a question about the image",
+    icon:"🖼+💬→💬",
+    mods:["image","text"],
+    textPrompt:"What animal is in this picture, and what is it doing?",
+    points:["dogImg","dogWord"],
+    near:["dogWord"],
+    reason:"BOTH the image and the typed question become points in the same space. The model reads them together — the photo gives the scene, the text says what to look for — and reasons across both.",
+    output:"It's a dog. It's sitting on the grass with its tongue out, looking relaxed and happy." },
+  { q:"Read the text in this image (OCR)",
+    icon:"🖼→💬",
+    mods:["image"],
+    textPrompt:"(no text prompt for this task)",
+    points:["handImg","helloTxt"],
+    near:["helloTxt"],
+    reason:"The handwriting photo is encoded into a point that lands next to the matching word in the shared space, so the model can transcribe the squiggles into actual characters — that's optical character recognition.",
+    output:"The handwritten note says: “hello!”" },
+  { q:"Transcribe this audio",
+    icon:"🔊→💬",
+    mods:["audio"],
+    textPrompt:"(no text prompt for this task)",
+    points:["audioPt","hiTxt"],
+    near:["hiTxt"],
+    reason:"The audio encoder turns the sound wave into a point. It lands beside the words that sound like it, so the model can write down what was said — speech-to-text, the way a model like Whisper works.",
+    output:"Transcript: “hi there”" },
+];
+
+// ----- DOM -----
+const runEl = document.getElementById("run");
+const taskLabel = document.getElementById("taskLabel");
+const spaceEl = document.getElementById("space");
+const spaceNote = document.getElementById("spaceNote");
+const reasonEl = document.getElementById("reason");
+const outputEl = document.getElementById("output");
+const textInEl = document.getElementById("textIn");
+const modCards = { image:document.querySelector('[data-mod="image"]'), text:document.querySelector('[data-mod="text"]'), audio:document.querySelector('[data-mod="audio"]') };
+const encCards = { image:document.querySelector('[data-enc="image"]'), text:document.querySelector('[data-enc="text"]'), audio:document.querySelector('[data-enc="audio"]') };
+const reasonStage = document.querySelector('[data-stage="reason"]');
+const outStage = document.querySelector('[data-stage="out"]');
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+function resetScene(){
+  Object.values(modCards).forEach(c=>{ c.classList.remove("border-indigo-400","ring-2","ring-indigo-200"); c.classList.add("border-slate-200"); });
+  Object.values(encCards).forEach(c=>c.classList.add("stage-off"));
+  reasonStage.classList.add("stage-off"); outStage.classList.add("stage-off");
+  // clear any prior points but keep the grid + label
+  spaceEl.querySelectorAll(".point").forEach(p=>p.remove());
+  reasonEl.textContent = "One transformer reads all the points together.";
+  outputEl.innerHTML = "The answer, written across modalities…";
+}
+
+// place a point in the shared space (it flies from center to its slot)
+function placePoint(key, glow){
+  const p = POINTS[key];
+  const el = document.createElement("div");
+  el.className = "point absolute flex items-center";
+  el.style.left = "50%"; el.style.top = "50%"; el.style.transform = "translate(-50%,-50%)"; el.style.opacity = "0";
+  el.innerHTML = `<span style="width:14px;height:14px;border-radius:50%;background:${p.color};display:inline-block;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.2)"></span>
+    <span class="ml-1 text-[11px] font-semibold bg-white/90 rounded px-1 border border-slate-200 whitespace-nowrap" style="color:#334155">${p.label}</span>`;
+  spaceEl.appendChild(el);
+  // next frame → animate to slot
+  requestAnimationFrame(()=>{ requestAnimationFrame(()=>{
+    el.style.left = p.x + "%"; el.style.top = p.y + "%"; el.style.opacity = "1";
+    if(glow) el.querySelector("span").classList.add("point-glow");
+  }); });
+  return el;
+}
+
+let running = false;
+let current = null;
+async function runModel(){
+  if(running || !current) return;
+  const ex = current;
+  running = true; runEl.disabled = true; runEl.classList.add("opacity-60");
+  resetScene();
+
+  // text input panel reflects the task
+  textInEl.textContent = ex.textPrompt;
+
+  // ---- highlight the active input modalities ----
+  ex.mods.forEach(m=>{ modCards[m].classList.remove("border-slate-200"); modCards[m].classList.add("border-indigo-400","ring-2","ring-indigo-200"); });
+  await sleep(500);
+
+  // ---- light up the encoders for the active modalities ----
+  ex.mods.forEach(m=> encCards[m].classList.remove("stage-off"));
+  spaceNote.innerHTML = `<span class="pulse-dot">Encoding ${ex.mods.join(" + ")} → projecting into the shared space…</span>`;
+  await sleep(700);
+
+  // ---- fly inputs into the shared embedding space as points ----
+  for(const key of ex.points){
+    placePoint(key, false);
+    await sleep(450);
+  }
+  // ---- show the "near" neighbours that already live in the space (the alignment payoff) ----
+  await sleep(200);
+  ex.near.forEach(key=>{ if(!ex.points.includes(key)) placePoint(key, true); });
+  // glow the primary point too so the "lands next to" pairing pops
+  spaceEl.querySelectorAll(".point span:first-child").forEach((dot,i)=>{ if(i<2) dot.classList.add("point-glow"); });
+  spaceNote.innerHTML = `Each input is now a <b>point</b> in ONE shared space — notice how related meanings (e.g. a photo and its word) land <b>close together</b>. That alignment is what lets the model mix modalities.`;
+  await sleep(750);
+
+  // ---- ③ reason across ----
+  reasonStage.classList.remove("stage-off");
+  reasonEl.innerHTML = `<span class="fade-in inline-block">${ex.reason}</span>`;
+  await sleep(900);
+
+  // ---- ④ output ----
+  outStage.classList.remove("stage-off");
+  outputEl.innerHTML = `<span class="fade-in inline-block">${ex.output}</span>`;
+
+  running = false; runEl.disabled = false; runEl.classList.remove("opacity-60");
+}
+runEl.onclick = runModel;
+
+// ----- TASK BUTTONS -----
+const examplesEl = document.getElementById("examples");
+EXAMPLES.forEach(e=>{
+  const btn=document.createElement("button");
+  btn.className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-1.5 hover:border-indigo-400";
+  btn.innerHTML = `<span class="font-mono text-indigo-500 mr-1">${e.icon}</span>${e.q}`;
+  btn.onclick=()=>{
+    current = e;
+    examplesEl.querySelectorAll("button").forEach(b=>b.classList.remove("border-indigo-500","bg-indigo-50","border-2"));
+    btn.classList.add("border-indigo-500","bg-indigo-50","border-2");
+    taskLabel.textContent = `Task: ${e.q}`;
+    runModel();
+  };
+  examplesEl.appendChild(btn);
+});
+
+// ===== UNDERSTAND STEPS =====
+const STEPS = [
+  { title:"1. What 'multimodal' means",
+    why:"Most early language models only handled one kind of input: text in, text out. A multimodal model handles several kinds — text, images, audio, and increasingly video — all inside one model. That means you can show it a photo and ask a question about it, hand it a voice clip to transcribe, or give it a screenshot and a written instruction together. The word 'modality' just means a type of data, so 'multimodal' literally means many types at once. It's the difference between a model that can only read and one that can also see and hear.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">one model handles <b>text + images + audio + video</b> &nbsp;·&nbsp; many 'modalities' at once</div>`, code:`multimodal = one model that handles text, images, audio (and video)` },
+  { title:"2. Recap: everything becomes a vector",
+    why:"On Day 13 we saw that text gets turned into a vector — a list of numbers that captures its meaning, so that similar meanings sit close together. Multimodal AI uses exactly the same trick, just for more than text. An image becomes a vector, a sound clip becomes a vector, a sentence becomes a vector. Once everything is a vector, the model can compare and combine them with plain math. So the foundation of seeing and hearing is the very same embeddings idea you already learned — we're just applying it to pixels and sound waves too.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">text → vector · image → vector · audio → vector &nbsp;·&nbsp; <b>same embeddings idea as Day 13</b></div>`, code:`every modality → a vector (same embeddings idea, beyond text)` },
+  { title:"3. The shared embedding space",
+    why:"The magic happens when all those vectors live in ONE shared space, lined up so that a dog photo and the word 'dog' land in nearly the same place. This alignment is what models like CLIP learned to do: pull matching image-and-text pairs together and push mismatched ones apart. Because the space is shared, the model can treat a picture and a word as the same kind of thing and measure how related they are. That single aligned space is the heart of multimodal AI — it's why the model can connect what it sees to what it reads.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">align modalities → 🐕 photo ≈ word "dog" in <b>ONE shared space</b> &nbsp;·&nbsp; CLIP-style</div>`, code:`shared space: align modalities so "dog" text ≈ dog image (CLIP-style)` },
+  { title:"4. Modality encoders",
+    why:"Each kind of input needs its own translator into that shared space, and we call these translators encoders. A vision encoder takes the raw pixels of an image and produces a vector. An audio encoder takes the sound wave and produces a vector. Text is split into tokens and turned into vectors the way we've seen before. Each encoder is specialised for its data type, but they're all trained to output into the same space. So the encoders are the on-ramps: different doors that all lead into one shared room of meaning.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>vision encoder</b> (pixels) · <b>audio encoder</b> (sound) · <b>text tokens</b> &nbsp;→&nbsp; all into the shared space</div>`, code:`encoders: vision (pixels), audio (sound), text (tokens) → shared space` },
+  { title:"5. Fusing modalities into one transformer",
+    why:"Once each input is a vector in the shared space, they're handed to a single transformer — the same architecture behind text models. The transformer reads all the vectors together as one sequence, whether they came from a photo, a sentence, or a sound clip. Its attention mechanism lets every piece influence every other piece, so the model can connect the word in your question to the right region of the image. This 'fusion' is what makes it more than three separate models bolted together: it reasons across modalities in one place, at one time.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">all vectors → <b>one transformer</b> reads them together → attention connects image ↔ text ↔ audio</div>`, code:`fusion: feed all modality vectors into one transformer that reasons jointly` },
+  { title:"6. What it unlocks",
+    why:"Because the model can mix modalities, it can do tasks that pure text models simply can't. It can caption an image, answer questions about a picture (visual Q&A), and read text inside a photo (OCR). It can understand and transcribe speech, and describe what's happening in a sound. Many models can also generate across modalities — produce an image from a description, or speak an answer out loud. One model, many jobs: the same shared space that lets it understand multiple inputs also lets it produce multiple kinds of output.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>captioning · visual Q&A · OCR · audio understanding · generation</b> — all from one model</div>`, code:`unlocks: captioning, visual Q&A, OCR, audio understanding, generation` },
+  { title:"7. How it's trained: paired data",
+    why:"A model only learns to align modalities if you show it lots of examples of them paired together. The classic recipe is millions of images each with a caption, so the model learns that this picture and these words mean the same thing. Audio is paired with its transcript, video with its description, and so on. By repeatedly pulling true pairs together and pushing false pairs apart, the model carves out a shared space where matching things sit close. No paired data, no alignment — the quality of those pairs is what decides how well the model can connect what it sees to what it reads.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">train on <b>paired data</b>: image+caption · audio+transcript · video+description</div>`, code:`training: paired data (image+caption, audio+transcript) aligns the space` },
+  { title:"8. Real examples",
+    why:"You've already used multimodal models. GPT-4o, Gemini, and Claude can all look at an image you upload and answer questions about it — that's vision built into a chat model. Whisper is an audio model that transcribes speech to text in dozens of languages. CLIP, mentioned earlier, is the image-text alignment model that many systems build on, and it powers image search and the text-to-image generators. These aren't research curiosities; they're shipping products you can call with a few lines of code, which is exactly what the BUILD tab shows.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>GPT-4o · Gemini · Claude</b> (vision) &nbsp;·&nbsp; <b>Whisper</b> (audio) &nbsp;·&nbsp; <b>CLIP</b> (image↔text)</div>`, code:`examples: GPT-4o / Gemini / Claude vision · Whisper audio · CLIP alignment` },
+  { title:"9. Limitations",
+    why:"Multimodal models are powerful but not magic. They still hallucinate — they can describe something in an image that isn't there, or mishear an audio clip and transcribe it wrongly. They're costly: an image is worth many tokens, so processing pictures and audio is slower and more expensive than plain text. There are also 'modality gaps' — a model may be excellent at images but weaker at audio, or struggle with low-quality photos, accents, or noisy backgrounds. Treat their outputs the way you'd treat any model's: useful, often impressive, but worth checking when the stakes are high.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">still <b>hallucinate</b> · <b>costly</b> (images = many tokens) · <b>modality gaps</b> (weaker on some inputs)</div>`, code:`limits: still hallucinate, costly, uneven across modalities (modality gaps)` },
+  { title:"10. Where it's going",
+    why:"The clear direction is any-to-any: a single model that takes any mix of text, image, audio, and video as input and produces any mix as output, all in one pass. Video understanding is improving fast, so models will reason about motion and events over time, not just single frames. And real-time multimodality is arriving — models that watch and listen live and respond instantly, like a voice assistant that can also see your screen. The throughline is the same shared-space idea you learned today, scaled up to more modalities, longer context, and faster responses.",
+    concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">An encoder per modality projects text, images, and audio into ONE shared space, then a single transformer reasons across them. Embeddings, extended beyond text.</p></div>`, code:`future: any-to-any, video understanding, real-time multimodal` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let cur = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ cur=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,cur-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,cur+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(cur>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(cur+1); },2800); };
+show(0);
+
+// ===== BUILD STEPS (with copy buttons) =====
+const BUILD=[
+  { title:"Install the tools",
+    desc:"One SDK gives you a multimodal chat model (vision) plus a separate audio model for transcription. Same client for both.",
+    code:`pip install openai` },
+  { title:"Describe an image (image → text)",
+    desc:"Send an image alongside a text instruction. The simplest input is a public image URL — the model's vision encoder handles the pixels for you.",
+    code:`from openai import OpenAI
+client = OpenAI()
+
+resp = client.chat.completions.create(
+    model="gpt-4o",                       # a multimodal (vision) model
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Describe this image in one sentence."},
+            {"type": "image_url",
+             "image_url": {"url": "https://example.com/dog.jpg"}},
+        ],
+    }],
+)
+print(resp.choices[0].message.content)
+# → "A golden-brown dog sitting on grass with its tongue out."` },
+  { title:"Send a local image as base64",
+    desc:"No public URL? Read the file, base64-encode it, and pass it as a data URL. This is how you send private images the model never saw in training.",
+    code:`import base64
+
+def to_data_url(path):
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    return f"data:image/jpeg;base64,{b64}"   # png/webp also fine
+
+content = [
+    {"type": "text", "text": "What animal is this and what is it doing?"},
+    {"type": "image_url",
+     "image_url": {"url": to_data_url("my_dog.jpg")}},
+]
+resp = client.chat.completions.create(model="gpt-4o",
+    messages=[{"role": "user", "content": content}])
+print(resp.choices[0].message.content)` },
+  { title:"Ask a question about the image (visual Q&A)",
+    desc:"Because the image and your question land in the same shared space, the model reasons across both. Just change the text part of the message.",
+    code:`def ask_about_image(image_url, question):
+    return client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": question},
+            {"type": "image_url", "image_url": {"url": image_url}},
+        ]}],
+    ).choices[0].message.content
+
+print(ask_about_image("https://example.com/dog.jpg",
+                      "What color is the dog and is it indoors or outdoors?"))` },
+  { title:"Read text inside an image (OCR)",
+    desc:"OCR is just visual Q&A with an instruction to transcribe. The vision encoder maps the squiggles to the matching characters in the shared space.",
+    code:`text_in_image = ask_about_image(
+    to_data_url("handwritten_note.jpg"),
+    "Transcribe exactly the text written in this image. "
+    "Return only the text, nothing else.",
+)
+print(text_in_image)
+# → "hello!"` },
+  { title:"Transcribe audio (audio → text)",
+    desc:"For sound, use a dedicated audio model like Whisper. Hand it an audio file and it returns the transcript — speech-to-text.",
+    code:`with open("voice_clip.mp3", "rb") as audio:
+    result = client.audio.transcriptions.create(
+        model="whisper-1",               # audio encoder → text
+        file=audio,
+    )
+print(result.text)
+# → "hi there"` },
+  { title:"Combine modalities in one call",
+    desc:"Wire it together: transcribe a voice note, then feed both the spoken request AND an image to the vision model — text + image + audio working as one.",
+    code:`def multimodal_assistant(image_url, voice_clip_path):
+    # 1) audio → text
+    with open(voice_clip_path, "rb") as a:
+        spoken = client.audio.transcriptions.create(
+            model="whisper-1", file=a).text
+    # 2) image + (transcribed) text → answer
+    return client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": spoken},          # what the user said
+            {"type": "image_url", "image_url": {"url": image_url}},
+        ]}],
+    ).choices[0].message.content
+
+print(multimodal_assistant("https://example.com/chart.png",
+                           "summary_request.mp3"))
+# user said "what's the trend in this chart?" → grounded answer` },
+];
+const buildEl=document.getElementById("buildSteps");
+BUILD.forEach((s,i)=>{
+  const li=document.createElement("li");
+  li.className="bg-white rounded-2xl border border-slate-200 p-6";
+  const codeId="code"+i;
+  li.innerHTML=`<div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">${i+1}</div><h3 class="font-bold text-lg">${s.title}</h3></div>
+    <p class="text-sm text-slate-600 mb-3">${s.desc}</p>
+    <div class="relative">
+      <button data-copy="${codeId}" class="copy-btn absolute right-2 top-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-md">Copy</button>
+      <pre id="${codeId}"></pre>
+    </div>`;
+  buildEl.appendChild(li);
+  li.querySelector("#"+codeId).textContent=s.code;
+});
+document.querySelectorAll(".copy-btn").forEach(btn=>{
+  btn.onclick=()=>{
+    const code=document.getElementById(btn.dataset.copy).textContent;
+    navigator.clipboard.writeText(code).then(()=>{ const o=btn.textContent; btn.textContent="✓ Copied"; setTimeout(()=>btn.textContent=o,1200); });
+  };
+});
+</script>
+</body>
+</html>
