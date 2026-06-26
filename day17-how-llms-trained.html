@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 17 — How LLMs Are Trained</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .stage { transition: opacity .35s ease, transform .35s ease; }
+  .stage-off { opacity:.25; }
+  .pulse-dot { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+  /* training-stage rail */
+  .rail-dot { transition: background .35s ease, transform .35s ease, box-shadow .35s ease; }
+  .rail-on { box-shadow:0 0 0 6px rgba(99,102,241,.18); transform:scale(1.15); }
+  .typing { border-right:2px solid #6366f1; animation:caret .8s step-end infinite; }
+  @keyframes caret { 50% { border-color:transparent; } }
+  .answer-line { animation: fadeIn .4s ease-out; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 17</div>
+      <h1 class="text-xl font-bold">🏗️ How LLMs Are Trained — Pretraining, SFT, RLHF</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Watch the SAME question get a better answer after each training stage</h2>
+      <p class="text-slate-500 text-center mb-5">A model is built in <b>three stages</b>. Ask the same thing — <span class="font-mono text-slate-700">"How do I make tea?"</span> — and step through them. After <b>①&nbsp;Pretraining</b> it just autocompletes text. After <b>②&nbsp;SFT</b> it follows the instruction. After <b>③&nbsp;RLHF</b> it's genuinely helpful, well-formatted, and refuses unsafe requests. Same question, three very different answers.</p>
+
+      <!-- STAGE RAIL -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-3">① Step through the three training stages</div>
+        <div class="grid grid-cols-3 gap-3" id="rail"></div>
+        <div class="flex flex-wrap items-center gap-3 mt-4">
+          <button id="prevStage" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Back a stage</button>
+          <button id="nextStage" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg font-bold text-sm">Train next stage →</button>
+          <button id="resetStage" class="bg-slate-100 px-4 py-2 rounded-lg font-semibold text-sm">↺ Reset to base</button>
+          <span id="stageLabel" class="text-sm font-semibold text-slate-500"></span>
+        </div>
+      </div>
+
+      <!-- DATA + OBJECTIVE OF THE CURRENT STAGE -->
+      <div class="grid md:grid-cols-2 gap-3 mb-5">
+        <div data-stage="data" class="stage bg-white rounded-2xl border-2 border-indigo-200 p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">📚 Training data this stage</div>
+          <div id="stageData" class="text-sm text-slate-600 min-h-[48px]">—</div>
+        </div>
+        <div data-stage="obj" class="stage bg-white rounded-2xl border-2 border-indigo-200 p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">🎯 Training objective this stage</div>
+          <div id="stageObj" class="text-sm text-slate-600 min-h-[48px]">—</div>
+        </div>
+      </div>
+
+      <!-- THE SAME PROMPT, ANSWERED BY THE CURRENT MODEL -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 mb-2">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">② Ask the model</div>
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-xs font-bold uppercase text-slate-400 tracking-wider">Prompt</span>
+          <span class="font-mono text-sm bg-slate-100 rounded px-2 py-1 text-slate-700">How do I make tea?</span>
+        </div>
+        <div class="rounded-xl bg-slate-50 border border-slate-200 p-4 min-h-[160px]">
+          <div class="text-[11px] uppercase font-bold tracking-wider mb-2" id="modelTag">Base model · just predicts the next token</div>
+          <div id="answer" class="text-slate-700 text-sm leading-relaxed whitespace-pre-line"></div>
+        </div>
+      </div>
+
+      <!-- REFUSAL / SAFETY PROBE (only meaningful at RLHF) -->
+      <div data-stage="safe" class="stage stage-off bg-white rounded-2xl border-2 border-emerald-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-emerald-600 tracking-wider mb-2">③ The safety payoff of RLHF</div>
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-xs font-bold uppercase text-slate-400 tracking-wider">Unsafe prompt</span>
+          <span class="font-mono text-sm bg-slate-100 rounded px-2 py-1 text-slate-700">How do I pick a stranger's lock?</span>
+        </div>
+        <div id="safeAnswer" class="text-sm text-slate-600 min-h-[24px]">A raw or instruction-only model would often just answer. After RLHF, the model learned humans prefer a polite refusal — so it declines.</div>
+      </div>
+
+      <p class="text-xs text-slate-400 text-center mt-5"><b>A raw model only predicts the next token; instruction tuning teaches it to follow requests; RLHF aligns it to human preferences (helpful, honest, harmless).</b> This demo uses hand-written answers so each stage is deterministic; real models learn these behaviours from huge corpora, curated instruction sets, and millions of human preference judgements.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How LLMs are trained</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Train an LLM, stage by stage (conceptual code)</h2>
+    <p class="text-slate-500 mb-8">You almost never pretrain from scratch — that costs millions of dollars and a data centre. In practice you take an open <b>base model</b> and run the cheap, high-leverage stages: instruction fine-tuning and preference optimization. Below is the full pipeline laid out as code-ish steps so you can see exactly what each stage does. ~7 steps with copy buttons.</p>
+    <ol class="space-y-5" id="buildSteps"></ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 17 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You now know how a chat model is built: <b>pretraining</b> learns language and world knowledge by predicting the next token on the internet, <b>SFT</b> teaches it to follow instructions from curated examples, and <b>RLHF</b> aligns it to human preferences via a reward model. Same model — three stages turn a text predictor into a helpful assistant.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== TRAINING-STAGE DEMO (fully offline, deterministic) =====
+// The SAME prompt — "How do I make tea?" — gets answered differently by the model after each
+// stage. Stepping ① → ② → ③ shows what each stage ADDS: pretraining gives a text-predictor that
+// rambles, SFT makes it follow the instruction, RLHF makes it helpful/formatted/safe.
+const STAGES = [
+  { key:"pretrain",
+    name:"① Pretraining",
+    tag:"Base model · just predicts the next token",
+    tagColor:"text-slate-500",
+    data:"A huge slice of the public internet — web pages, books, code, forums. Trillions of tokens, no labels, no instructions. The model just reads raw text.",
+    obj:"<b>Next-token prediction.</b> Hide the next word and train the model to guess it. Repeat across trillions of tokens until it has absorbed grammar, facts, and world knowledge — but no idea it's supposed to be helpful.",
+    // base model just CONTINUES the text like autocomplete — it doesn't answer
+    answer:`...is a question many people ask. How do I make coffee? How do I make toast?
+These are common questions on cooking forums. Related searches: how do I make
+tea without a kettle, how do I make tea taste better, how do I make...`,
+    safe:false },
+  { key:"sft",
+    name:"② Supervised fine-tuning (SFT)",
+    tag:"Instruction-tuned model · follows the request",
+    tagColor:"text-indigo-600",
+    data:"Tens of thousands of curated <b>instruction → response</b> pairs written by humans: a question, and a good answer to it. Small and high-quality, not the whole internet.",
+    obj:"<b>Imitate the demonstrations.</b> Same next-token training, but now on example answers — so the model learns the SHAPE of 'instruction in, helpful answer out' and starts actually following requests instead of continuing them.",
+    // now it follows the instruction and gives steps — but plainly
+    answer:`Boil water. Put a tea bag in a cup. Pour the hot water over the tea bag.
+Let it steep for a few minutes, then remove the bag. Add milk or sugar if you like.`,
+    safe:false },
+  { key:"rlhf",
+    name:"③ RLHF",
+    tag:"Aligned model · helpful, formatted & safe",
+    tagColor:"text-emerald-600",
+    data:"Humans <b>rank</b> several model answers from best to worst. Those rankings train a <b>reward model</b> that scores any answer the way people would.",
+    obj:"<b>Optimize for human preference.</b> Use reinforcement learning (PPO, or the simpler DPO) to nudge the model toward answers the reward model rates highly — clearer, better-formatted, and refusing unsafe requests.",
+    // now helpful, well-formatted
+    answer:`Here's a simple way to make a great cup of tea:
+
+1. Boil fresh water (about 95°C for black tea).
+2. Add one tea bag or a teaspoon of loose tea to your cup.
+3. Pour the water over it and steep 3–5 minutes to taste.
+4. Remove the bag, then add milk, sugar, or lemon if you like.
+
+Tip: shorter steeping = lighter flavour, longer = stronger and more bitter. Enjoy! ☕`,
+    safe:true },
+];
+
+// ----- DOM -----
+const railEl       = document.getElementById("rail");
+const nextStageB   = document.getElementById("nextStage");
+const prevStageB   = document.getElementById("prevStage");
+const resetStageB  = document.getElementById("resetStage");
+const stageLabel   = document.getElementById("stageLabel");
+const stageDataEl  = document.getElementById("stageData");
+const stageObjEl   = document.getElementById("stageObj");
+const modelTag     = document.getElementById("modelTag");
+const answerEl     = document.getElementById("answer");
+const safeStage    = document.querySelector('[data-stage="safe"]');
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+// build the stage rail
+STAGES.forEach((s,i)=>{
+  const d=document.createElement("div");
+  d.className="rail-dot rounded-xl border-2 border-slate-200 bg-white p-3 text-center";
+  d.dataset.idx=i;
+  d.innerHTML=`<div class="text-sm font-bold text-slate-700">${s.name}</div>
+    <div class="text-[11px] text-slate-400 mt-1">${s.key==="pretrain"?"predict next token":s.key==="sft"?"follow instructions":"align to humans"}</div>`;
+  railEl.appendChild(d);
+});
+const railDots = railEl.querySelectorAll(".rail-dot");
+
+let cur = 0;            // current stage index reached
+let typing = false;
+
+function renderRail(){
+  railDots.forEach((d,i)=>{
+    const reached = i<=cur;
+    d.classList.toggle("rail-on", i===cur);
+    d.classList.toggle("border-indigo-500", reached);
+    d.classList.toggle("bg-indigo-50", reached);
+    d.classList.toggle("border-slate-200", !reached);
+    d.classList.toggle("bg-white", !reached);
+    d.classList.toggle("opacity-40", !reached);
+  });
+}
+
+async function typeAnswer(text){
+  typing = true;
+  answerEl.classList.add("typing");
+  answerEl.textContent = "";
+  for(let i=0;i<text.length;i++){
+    answerEl.textContent += text[i];
+    // type fast but visible; skip the sleep on whitespace bursts to keep it snappy
+    if(i % 2 === 0) await sleep(8);
+  }
+  answerEl.classList.remove("typing");
+  typing = false;
+}
+
+async function showStage(i){
+  if(typing) return;
+  cur = Math.max(0, Math.min(STAGES.length-1, i));
+  const s = STAGES[cur];
+  renderRail();
+  stageLabel.textContent = `Now: ${s.name}`;
+  stageDataEl.innerHTML = `<span class="fade-in inline-block">${s.data}</span>`;
+  stageObjEl.innerHTML  = `<span class="fade-in inline-block">${s.obj}</span>`;
+  modelTag.textContent  = s.tag;
+  modelTag.className = `text-[11px] uppercase font-bold tracking-wider mb-2 ${s.tagColor}`;
+  // safety card only lights up at RLHF
+  safeStage.classList.toggle("stage-off", !s.safe);
+  // button states
+  prevStageB.disabled = cur===0; prevStageB.classList.toggle("opacity-50", cur===0);
+  if(cur>=STAGES.length-1){ nextStageB.textContent="✓ Fully trained"; nextStageB.disabled=true; nextStageB.classList.add("opacity-60"); }
+  else { nextStageB.textContent="Train next stage →"; nextStageB.disabled=false; nextStageB.classList.remove("opacity-60"); }
+  await typeAnswer(s.answer);
+}
+
+nextStageB.onclick  = ()=>{ if(cur<STAGES.length-1) showStage(cur+1); };
+prevStageB.onclick  = ()=>{ if(cur>0) showStage(cur-1); };
+resetStageB.onclick = ()=>showStage(0);
+showStage(0);
+
+// ===== UNDERSTAND STEPS =====
+const STEPS = [
+  { title:"1. The goal: a helpful assistant, not just a text predictor",
+    why:"What we want at the end is a model that, when you ask it something, gives a useful, clear, safe answer. But a model doesn't start out knowing how to do that — it has to be built up in stages. The big idea of this day is that getting there takes three very different training phases, each adding a new ability on top of the last. The first phase makes the model fluent in language, the second teaches it to follow instructions, and the third teaches it to match what humans actually prefer. Keep that end goal in mind: every stage exists to close the gap between 'predicts text' and 'genuinely helps you'.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">goal: <b>helpful · honest · harmless</b> assistant &nbsp;·&nbsp; built in <b>3 stages</b></div>`, code:`goal: turn a raw text predictor into a helpful, honest, harmless assistant` },
+  { title:"2. Stage 1 — Pretraining (next-token prediction)",
+    why:"Pretraining is where the model reads an enormous slice of the internet — web pages, books, code, conversations — adding up to trillions of words. The only task it's given is deceptively simple: predict the next token. Show it 'the capital of France is ___' and train it to guess 'Paris'. Doing this billions of times forces the model to absorb grammar, facts, reasoning patterns, and a huge amount of world knowledge, because predicting the next word well requires actually understanding the text. This is the most expensive stage by far, and it produces what we call a base model. No instructions yet — just raw next-token skill.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">internet text → <b>predict the next token</b> → world knowledge + language &nbsp;·&nbsp; "base model"</div>`, code:`stage 1: pretrain on the internet by predicting the next token → base model` },
+  { title:"3. The base model behaves like autocomplete",
+    why:"A base model is powerful but oddly unhelpful. Because all it learned was 'continue this text,' it treats your question as a passage to extend rather than a request to answer. Ask 'How do I make tea?' and it might reply with 'is a question many people ask. How do I make coffee?' — it's pattern-matching what usually follows those words on the web, not helping you. It has the knowledge, but no manners and no concept of being asked to do something. This is the key gap the next two stages exist to fix: the model knows a lot, but doesn't yet know it's supposed to be an assistant.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">"How do I make tea?" → <b>"...is a question many people ask. How do I..."</b> &nbsp;·&nbsp; it just continues text</div>`, code:`base model = fancy autocomplete: it continues text, it doesn't answer you` },
+  { title:"4. Stage 2 — Supervised fine-tuning (SFT)",
+    why:"To teach the model to follow instructions, we show it examples of exactly that. Humans write tens of thousands of high-quality pairs: an instruction, and a good response to it. We then fine-tune the base model on these pairs using the same next-token training, so it learns the shape of 'request in, helpful answer out.' After SFT the model stops autocompleting and starts responding — ask it to make tea and it gives you the steps. The data here is tiny compared to pretraining, but it's carefully curated, because the model is essentially imitating the demonstrations. Quality of examples matters far more than quantity at this stage.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">curated <b>instruction → response</b> pairs → fine-tune → model <b>follows instructions</b></div>`, code:`stage 2: SFT on curated instruction→response pairs → it follows requests` },
+  { title:"5. Stage 3 — RLHF (reward model + RL)",
+    why:"Even after SFT, answers can be bland, badly formatted, or unsafe — and there are usually many valid responses, some clearly better than others. RLHF fixes this by learning from preferences. First, the model generates several answers and humans rank them from best to worst. Those rankings train a separate reward model that learns to score any answer the way people would. Then we use reinforcement learning — classically PPO, or the simpler modern alternative DPO — to nudge the main model toward answers the reward model rates highly. The result is a policy that doesn't just follow instructions, but follows them the way humans prefer.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">humans rank answers → train <b>reward model</b> → <b>RL (PPO / DPO)</b> optimizes the policy</div>`, code:`stage 3: RLHF — humans rank → reward model → RL (PPO/DPO) tunes the policy` },
+  { title:"6. Why RLHF matters",
+    why:"RLHF is what turns a competent model into a pleasant, trustworthy one. It teaches the model to be helpful — to actually address what you asked, in a clear and well-structured way with headings, lists, and the right level of detail. It teaches formatting and tone, so answers read like a thoughtful person wrote them. Crucially, it also teaches refusals: by rewarding polite declines to harmful requests, RLHF gives the model a sense of safety boundaries it never had before. This is why an SFT-only model and an RLHF model can give wildly different answers to the same prompt — one merely follows, the other aligns to what people actually want.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">RLHF adds: <b>helpfulness · clean formatting · refusals / safety</b></div>`, code:`why RLHF: better helpfulness, formatting, tone, and safe refusals` },
+  { title:"7. The data and cost of each stage",
+    why:"The three stages differ wildly in what they cost. Pretraining is the money pit: trillions of tokens, thousands of GPUs running for months, budgets in the millions or tens of millions of dollars — only a handful of labs do it. SFT and RLHF, by contrast, are dominated by human labour rather than compute: you pay skilled people to write instruction examples and to rank outputs. That data is expensive per item but small in volume, so the total cost is far lower. This cost asymmetry is exactly why most teams never pretrain — they take someone else's base model and only run the cheaper alignment stages on top.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">pretraining = <b>$$$$ compute</b> &nbsp;·&nbsp; SFT + RLHF = <b>human labour</b> (smaller, curated)</div>`, code:`cost: pretraining = $$$$ compute; SFT/RLHF = human labour, smaller data` },
+  { title:"8. Alignment ≠ truth (it can still hallucinate)",
+    why:"It's tempting to think a well-aligned model is also a correct one, but those are different things. RLHF aligns the model to what humans prefer to read — confident, fluent, well-formatted answers — and that's not the same as what's true. A model can produce a beautifully worded, perfectly polite answer that is simply wrong, an effect called hallucination. Alignment can even make this worse by making mistakes sound more convincing. The training pipeline makes models helpful and safe, not infallible. So treat outputs the way you'd treat a confident colleague: useful and often right, but worth verifying when the stakes are high.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">aligned ≠ correct &nbsp;·&nbsp; a polished answer can still <b>hallucinate</b> — always verify</div>`, code:`caveat: alignment makes answers preferred, not true — it can still hallucinate` },
+  { title:"9. Newer twists — DPO and AI feedback",
+    why:"The classic RLHF recipe is being simplified. DPO (Direct Preference Optimization) skips the separate reward model and the fiddly RL loop: it optimizes the model directly on the ranked preference pairs, which is easier to run and more stable, so many teams now prefer it. A second shift is reducing the human bottleneck: instead of people ranking every answer, another model generates feedback against a written set of principles — an approach known as constitutional AI or, more broadly, RLAIF (reinforcement learning from AI feedback). These methods aim for the same goal — aligning the model to good behaviour — while cutting cost and scaling the preference data far beyond what humans alone could label.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>DPO</b> (skip the reward model) &nbsp;·&nbsp; <b>constitutional AI / RLAIF</b> (model-generated feedback)</div>`, code:`twists: DPO (no reward model) · constitutional AI / RLAIF (AI feedback)` },
+  { title:"10. Why 'base' vs 'chat/instruct' models differ",
+    why:"When you download an open model, you'll often see two flavours: a 'base' version and a 'chat' or 'instruct' version. Now you know exactly what separates them. The base model has only been through pretraining — it's the raw text predictor, great for further fine-tuning but awkward to chat with. The chat or instruct version has also been through SFT and usually RLHF, so it follows instructions and behaves like an assistant out of the box. Picking the right one matters: grab the base model if you plan to fine-tune it for a specific task, and grab the chat/instruct model if you just want something that answers questions well today.",
+    concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">Pretraining learns language, SFT learns to follow instructions, RLHF aligns to human preference. 'Base' = stage 1 only; 'chat/instruct' = all three.</p></div>`, code:`base = pretrained only; chat/instruct = pretrained + SFT + RLHF` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curStep = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curStep=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curStep-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curStep+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curStep>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curStep+1); },2800); };
+show(0);
+
+// ===== BUILD STEPS (with copy buttons) =====
+const BUILD=[
+  { title:"Pick your starting point (don't pretrain from scratch)",
+    desc:"Pretraining a large model costs millions of dollars and a fleet of GPUs. In practice you download an existing open base model and run the cheap, high-leverage stages on top. This is the single most important practical decision.",
+    code:`# Almost everyone starts from an open BASE model, not from zero.
+# Base = pretrained only (raw text predictor).
+# You'll add SFT + preference tuning yourself.
+
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+base = "meta-llama/Llama-3.1-8B"        # a BASE model, not the -Instruct one
+model = AutoModelForCausalLM.from_pretrained(base)
+tok   = AutoTokenizer.from_pretrained(base)` },
+  { title:"Stage 1 (concept) — assemble a pretraining corpus",
+    desc:"If you WERE pretraining, you'd gather a massive, cleaned text corpus: web pages, books, and code, deduplicated and filtered. This is shown for understanding — you'll skip it by reusing the base model above.",
+    code:`# CONCEPTUAL — what pretraining data looks like.
+# Trillions of tokens of raw text, no labels, no instructions.
+
+corpus = load_dataset("web_crawl", "books", "code", streaming=True)
+corpus = corpus.filter(is_high_quality).map(deduplicate)
+
+# Tokenize into one long stream the model will learn to continue.
+tokens = corpus.map(lambda ex: tok(ex["text"]))` },
+  { title:"Stage 1 (concept) — the next-token objective",
+    desc:"Pretraining's entire objective is: given the tokens so far, predict the next one. The loss is cross-entropy between the predicted next token and the real one. This is what builds language skill and world knowledge.",
+    code:`# CONCEPTUAL — the core pretraining loop.
+for batch in tokens:                       # batch = a window of text
+    inputs  = batch[:-1]                    # all tokens except the last
+    targets = batch[1:]                     # the "next token" for each position
+    logits  = model(inputs)
+    loss = cross_entropy(logits, targets)  # did we predict the next token?
+    loss.backward(); optimizer.step()
+# Repeat over trillions of tokens → a "base model".` },
+  { title:"Stage 2 — Supervised fine-tuning (SFT)",
+    desc:"Now teach the base model to FOLLOW instructions. Fine-tune it on curated instruction→response pairs, formatted as a chat template. Same next-token loss, but only on the response tokens you want it to imitate.",
+    code:`from trl import SFTTrainer
+
+# Curated examples: each is an instruction and a GOOD answer.
+sft_data = [
+  {"prompt": "How do I make tea?",
+   "completion": "Boil water, add a tea bag, steep 3-5 min, then..."},
+  {"prompt": "Summarize this paragraph: ...",
+   "completion": "..."},
+  # ...tens of thousands of high-quality pairs
+]
+
+trainer = SFTTrainer(model=model, train_dataset=sft_data,
+                     tokenizer=tok)
+trainer.train()        # model now FOLLOWS instructions instead of autocompleting` },
+  { title:"Stage 3a — Train a reward model from human rankings",
+    desc:"Have the SFT model produce several answers per prompt, let humans rank them best-to-worst, and train a reward model to predict those preferences. It learns to score 'how much would a human like this answer?'",
+    code:`from trl import RewardTrainer
+
+# Each row: a prompt, plus a "chosen" (preferred) and "rejected" answer,
+# taken from human rankings of the model's own outputs.
+pref_data = [
+  {"prompt": "How do I make tea?",
+   "chosen":   "Here's a simple way:\\n1. Boil fresh water...",
+   "rejected": "Boil water. Put tea bag in cup. Done."},
+  # ...lots of ranked pairs
+]
+
+reward_model = RewardTrainer(model=base_for_reward,
+                             train_dataset=pref_data)
+reward_model.train()   # now it can SCORE any answer like a human would` },
+  { title:"Stage 3b — RL fine-tune the policy (PPO)",
+    desc:"Use reinforcement learning to push the SFT model toward answers the reward model rates highly. PPO is the classic algorithm: generate, score with the reward model, and update — staying close to the original so it doesn't drift.",
+    code:`from trl import PPOTrainer
+
+ppo = PPOTrainer(model=model, reward_model=reward_model,
+                 tokenizer=tok)
+
+for prompt in prompts:
+    response = ppo.generate(prompt)          # model proposes an answer
+    score    = reward_model(prompt, response) # how human-preferred is it?
+    ppo.step(prompt, response, score)        # nudge model toward high scores
+# Result: a model aligned to human preference (helpful + safe).` },
+  { title:"Stage 3 (modern) — or skip the reward model with DPO",
+    desc:"DPO (Direct Preference Optimization) optimizes directly on the chosen/rejected pairs — no separate reward model, no RL loop. It's simpler and more stable, so many teams now use it instead of PPO. Same preference data as 3a.",
+    code:`from trl import DPOTrainer
+
+# DPO trains the model straight on the ranked pairs.
+# No reward model, no PPO loop — just chosen > rejected.
+dpo = DPOTrainer(model=model, ref_model=base,
+                 train_dataset=pref_data,   # same chosen/rejected data
+                 tokenizer=tok)
+dpo.train()
+# Aligned model, far less machinery than full RLHF/PPO.` },
+];
+const buildEl=document.getElementById("buildSteps");
+BUILD.forEach((s,i)=>{
+  const li=document.createElement("li");
+  li.className="bg-white rounded-2xl border border-slate-200 p-6";
+  const codeId="code"+i;
+  li.innerHTML=`<div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">${i+1}</div><h3 class="font-bold text-lg">${s.title}</h3></div>
+    <p class="text-sm text-slate-600 mb-3">${s.desc}</p>
+    <div class="relative">
+      <button data-copy="${codeId}" class="copy-btn absolute right-2 top-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-md">Copy</button>
+      <pre id="${codeId}"></pre>
+    </div>`;
+  buildEl.appendChild(li);
+  li.querySelector("#"+codeId).textContent=s.code;
+});
+document.querySelectorAll(".copy-btn").forEach(btn=>{
+  btn.onclick=()=>{
+    const code=document.getElementById(btn.dataset.copy).textContent;
+    navigator.clipboard.writeText(code).then(()=>{ const o=btn.textContent; btn.textContent="✓ Copied"; setTimeout(()=>btn.textContent=o,1200); });
+  };
+});
+</script>
+</body>
+</html>

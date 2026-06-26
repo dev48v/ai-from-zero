@@ -1,6 +1,6 @@
 # AIFromZero
 
-AI literacy concept by concept - tokens, embeddings, RAG, agents, multimodal, explained simply.
+AI literacy concept by concept - tokens, embeddings, RAG, agents, explained simply.
 
 🌐 **Live (all days):** https://dev48v.infy.uk/aifromzero.php
 
@@ -23,6 +23,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 14 — Vector Databases](https://dev48v.infy.uk/ai/days/day14-vector-databases.html) — `day14-vector-databases.html`
 - [AIFromZero · Day 15 — RAG](https://dev48v.infy.uk/ai/days/day15-rag.html) — `day15-rag.html`
 - [AIFromZero · Day 16 — Multimodal AI](https://dev48v.infy.uk/ai/days/day16-multimodal.html) — `day16-multimodal.html`
+- [AIFromZero · Day 17 — How LLMs Are Trained](https://dev48v.infy.uk/ai/days/day17-how-llms-trained.html) — `day17-how-llms-trained.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
