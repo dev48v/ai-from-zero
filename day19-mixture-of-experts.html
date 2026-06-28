@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 19 — Mixture of Experts</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .stage { transition: opacity .35s ease, transform .35s ease; }
+  .stage-off { opacity:.25; }
+  .pulse-dot { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+  /* expert cards */
+  .expert { transition: background .35s ease, transform .35s ease, box-shadow .35s ease, border-color .35s ease, opacity .35s ease; }
+  .expert-on { box-shadow:0 0 0 6px rgba(99,102,241,.18); transform:translateY(-4px); }
+  .expert-dark { opacity:.32; }
+  .token-chip { transition: transform .25s ease, opacity .25s ease; }
+  .toggle-on { background:#6366f1; }
+  .toggle-knob { transition: transform .2s ease; }
+  .bar { transition: width .4s ease; }
+  .wire { transition: stroke .35s ease, opacity .35s ease, stroke-width .35s ease; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 19</div>
+      <h1 class="text-xl font-bold">🧠 Mixture of Experts — Big Models, Cheap Inference</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Watch a router send each token to only a few experts — huge model, tiny per-token compute</h2>
+      <p class="text-slate-500 text-center mb-5">This layer holds <b>8 expert sub-networks</b> plus a small <b>router</b>. Feed a sentence through one word at a time: the router <b>scores all 8 experts</b> for that token and routes it to the <b>top-2</b>. Only those two <b>light up</b> and do work — the other six stay <b>dark</b> (sparse activation). Flip to <b>Dense</b> mode and all 8 fire for every token (full compute). Same layer, a quarter of the work per token.</p>
+
+      <!-- MODE TOGGLE + STEP CONTROLS -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-5 flex flex-wrap items-center gap-4">
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-bold text-slate-700">Mode</span>
+          <button id="modeToggle" role="switch" aria-checked="false" class="w-14 h-7 rounded-full bg-indigo-600 toggle-on relative px-0.5">
+            <span class="toggle-knob block w-6 h-6 rounded-full bg-white shadow" style="transform:translateX(0)"></span>
+          </button>
+          <span id="modeState" class="text-sm font-semibold text-indigo-600">MoE — top-2 of 8 active (sparse)</span>
+        </div>
+        <div class="flex items-center gap-2 ml-auto">
+          <button id="prevTok" class="bg-slate-100 px-4 py-2 rounded-lg font-semibold text-sm">← Prev token</button>
+          <button id="nextTok" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next token →</button>
+          <button id="autoTok" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-feed</button>
+        </div>
+      </div>
+
+      <!-- TOKEN STREAM -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">① Token stream (one token enters the layer at a time)</div>
+        <div class="flex flex-wrap gap-2" id="tokens"></div>
+      </div>
+
+      <!-- ROUTER + EXPERTS -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-3">② The router scores the experts, then routes the token</div>
+
+        <!-- current token + router -->
+        <div class="flex flex-col md:flex-row items-center gap-4 mb-4">
+          <div class="rounded-xl bg-slate-900 text-white px-4 py-3 text-center min-w-[120px]">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400">current token</div>
+            <div id="curTok" class="text-lg font-bold font-mono">—</div>
+          </div>
+          <div class="text-2xl text-slate-300">→</div>
+          <div class="rounded-xl border-2 border-indigo-300 bg-indigo-50 px-4 py-3 text-center">
+            <div class="text-[10px] uppercase tracking-wider text-indigo-500">🎛️ router / gating net</div>
+            <div class="text-xs text-slate-600 mt-1">scores 8 experts → softmax → pick <b id="kLabel">top-2</b></div>
+          </div>
+          <div class="text-2xl text-slate-300">→</div>
+          <div class="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-center">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400">active experts this token</div>
+            <div id="activeTally" class="text-lg font-bold text-indigo-600 font-mono">2 / 8</div>
+          </div>
+        </div>
+
+        <!-- the 8 experts -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3" id="experts"></div>
+      </div>
+
+      <!-- COMPUTE COMPARISON -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 mb-2">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-3">③ Capacity vs. compute (per token)</div>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <div class="flex justify-between text-xs font-semibold text-slate-500 mb-1"><span>Total parameters (capacity)</span><span id="capLabel">8 experts held in memory</span></div>
+            <div class="h-5 rounded-full bg-slate-200 overflow-hidden"><div class="bar h-full bg-slate-400" style="width:100%"></div></div>
+            <div class="text-[11px] text-slate-400 mt-1">All experts always live in memory — that's the full capacity of the model.</div>
+          </div>
+          <div>
+            <div class="flex justify-between text-xs font-semibold text-slate-500 mb-1"><span>Active compute (this token)</span><span id="computeLabel">2 / 8 experts run</span></div>
+            <div class="h-5 rounded-full bg-slate-200 overflow-hidden"><div id="computeBar" class="bar h-full bg-indigo-500" style="width:25%"></div></div>
+            <div class="text-[11px] text-slate-400 mt-1" id="computeNote">Only the routed experts do math → ≈ a quarter of the FLOPs of the dense layer.</div>
+          </div>
+        </div>
+        <div id="specNote" class="mt-4 text-sm font-semibold text-slate-600"></div>
+      </div>
+
+      <p class="text-xs text-slate-400 text-center mt-5"><b>Instead of every token using the whole network, a router sends each token to a few specialized experts.</b> So a model can hold hundreds of billions of parameters (huge capacity) yet only activate a small slice per token (cheap compute) — and over a sentence, different tokens flow to different experts, so experts quietly specialize. This demo uses hand-tuned routing so each token's path is deterministic; real routers learn their scores during training, and routing is far noisier.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Mixture of Experts, step by step</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a tiny Mixture-of-Experts layer</h2>
+    <p class="text-slate-500 mb-8">A MoE layer is surprisingly small in code: a list of ordinary expert networks, one linear <b>router</b> that scores them, a <b>top-k</b> pick, a <b>weighted combine</b> of the chosen experts' outputs, and an <b>auxiliary load-balancing loss</b> so the router spreads work out instead of overusing a couple of favorites. Below is a minimal PyTorch-style sketch you can paste and grow — the same shape used by production sparse models such as Mixtral (8 experts, <code>top_k=2</code>). Copy each step as a starting point.</p>
+    <ol class="space-y-5" id="buildSteps"></ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 19 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You now know what Mixture of Experts is — <b>many expert sub-networks plus a router that activates only a few per token</b> — why it works (it <b>decouples total capacity from per-token compute</b>: huge parameter counts, small active FLOPs), how the <b>gating network</b> picks the <b>top-k</b> experts, why a <b>load-balancing loss</b> is needed so the router doesn't collapse onto a few favorites, the <b>tradeoffs</b> (all experts must live in memory; distributed training adds communication), and where it shows up — sparse models like <b>Mixtral 8x7B</b>.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== MIXTURE-OF-EXPERTS DEMO (fully offline, deterministic) =====
+// 8 experts + a router. For each token the router scores all experts;
+// MoE mode = route to top-2 (only those light up). Dense mode = all 8 fire.
+// Different tokens go to different experts -> experts specialize.
+const N_EXPERTS = 8;
+const TOP_K = 2;
+
+// each expert has a name/flavour so specialization is legible
+const EXPERTS = [
+  { name:"Expert 1", flavour:"function words" },
+  { name:"Expert 2", flavour:"nouns / things" },
+  { name:"Expert 3", flavour:"verbs / actions" },
+  { name:"Expert 4", flavour:"numbers / code" },
+  { name:"Expert 5", flavour:"punctuation" },
+  { name:"Expert 6", flavour:"names / places" },
+  { name:"Expert 7", flavour:"adjectives" },
+  { name:"Expert 8", flavour:"rare / misc" },
+];
+
+// the sentence we stream through, one token at a time.
+// each token carries hand-tuned router scores for the 8 experts (0..1),
+// chosen so different token types prefer different experts (specialization).
+const TOKENS = [
+  { tok:"The",     scores:[.94,.10,.08,.04,.20,.12,.30,.06] }, // function word
+  { tok:"router",  scores:[.18,.88,.22,.40,.06,.30,.24,.20] }, // noun/thing
+  { tok:"sends",   scores:[.20,.18,.91,.10,.08,.16,.22,.14] }, // verb/action
+  { tok:"each",    scores:[.90,.14,.20,.06,.18,.10,.34,.08] }, // function word
+  { tok:"token",   scores:[.16,.93,.18,.36,.05,.26,.20,.22] }, // noun/thing
+  { tok:"to",      scores:[.92,.08,.12,.05,.22,.14,.28,.06] }, // function word
+  { tok:"2",       scores:[.10,.20,.14,.95,.04,.18,.10,.40] }, // number/code
+  { tok:"experts", scores:[.15,.89,.20,.30,.06,.24,.18,.44] }, // noun/thing (rare-ish)
+  { tok:".",       scores:[.22,.06,.08,.05,.94,.08,.12,.04] }, // punctuation
+];
+
+// ----- DOM -----
+const tokensEl    = document.getElementById("tokens");
+const expertsEl   = document.getElementById("experts");
+const curTokEl    = document.getElementById("curTok");
+const tallyEl     = document.getElementById("activeTally");
+const computeBar  = document.getElementById("computeBar");
+const computeLabel= document.getElementById("computeLabel");
+const computeNote = document.getElementById("computeNote");
+const specNote    = document.getElementById("specNote");
+const modeToggle  = document.getElementById("modeToggle");
+const modeKnob    = modeToggle.querySelector(".toggle-knob");
+const modeState   = document.getElementById("modeState");
+const kLabel      = document.getElementById("kLabel");
+const capLabel    = document.getElementById("capLabel");
+const prevTokB    = document.getElementById("prevTok");
+const nextTokB    = document.getElementById("nextTok");
+const autoTokB    = document.getElementById("autoTok");
+
+let sparse = true;      // true = MoE (top-2), false = Dense (all 8)
+let curIdx = 0;         // current token index
+let autoTm = null;
+
+// track which experts each expert has handled, to show specialization
+const expertHits = Array(N_EXPERTS).fill(0);
+
+// build token chips
+TOKENS.forEach((t,i)=>{
+  const c=document.createElement("span");
+  c.className="token-chip px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-sm font-mono cursor-pointer hover:border-indigo-400";
+  c.textContent=t.tok;
+  c.dataset.idx=i;
+  c.onclick=()=>{ curIdx=i; render(); };
+  tokensEl.appendChild(c);
+});
+const tokenChips = tokensEl.querySelectorAll(".token-chip");
+
+// build expert cards
+EXPERTS.forEach((e,i)=>{
+  const el=document.createElement("div");
+  el.className="expert rounded-xl border-2 border-slate-200 bg-white p-3 text-center";
+  el.dataset.idx=i;
+  el.innerHTML=`<div class="text-sm font-bold text-slate-700">${e.name}</div>
+    <div class="text-[11px] text-slate-400 mt-0.5">${e.flavour}</div>
+    <div class="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div class="bar score-bar h-full bg-indigo-400" style="width:0%"></div></div>
+    <div class="text-[10px] mt-1 font-mono text-slate-400 score-num">score —</div>`;
+  expertsEl.appendChild(el);
+});
+const expertCards = expertsEl.querySelectorAll(".expert");
+
+// top-k indices from a score array
+function topK(scores,k){
+  return scores
+    .map((s,i)=>({s,i}))
+    .sort((a,b)=>b.s-a.s)
+    .slice(0,k)
+    .map(o=>o.i);
+}
+
+function render(){
+  const t = TOKENS[curIdx];
+  curTokEl.textContent = '"'+t.tok+'"';
+  const k = sparse ? TOP_K : N_EXPERTS;
+  const chosen = sparse ? topK(t.scores,TOP_K) : [...Array(N_EXPERTS).keys()];
+
+  // token chips highlight current
+  tokenChips.forEach((c,idx)=>{
+    c.classList.toggle("bg-indigo-600", idx===curIdx);
+    c.classList.toggle("text-white", idx===curIdx);
+    c.classList.toggle("border-indigo-600", idx===curIdx);
+    c.classList.toggle("bg-slate-50", idx!==curIdx);
+  });
+
+  // experts: light up the chosen ones, darken the rest; show router scores
+  expertCards.forEach((el,i)=>{
+    const on = chosen.includes(i);
+    el.classList.toggle("expert-on", on);
+    el.classList.toggle("expert-dark", !on);
+    el.classList.toggle("border-indigo-500", on);
+    el.classList.toggle("bg-indigo-50", on);
+    el.classList.toggle("border-slate-200", !on);
+    el.classList.toggle("bg-white", !on);
+    const pct = Math.round(t.scores[i]*100);
+    el.querySelector(".score-bar").style.width = pct + "%";
+    el.querySelector(".score-bar").classList.toggle("bg-indigo-500", on);
+    el.querySelector(".score-bar").classList.toggle("bg-slate-300", !on);
+    el.querySelector(".score-num").textContent = "score " + t.scores[i].toFixed(2) + (on ? " ✓" : "");
+    el.querySelector(".score-num").classList.toggle("text-indigo-600", on);
+    el.querySelector(".score-num").classList.toggle("text-slate-400", !on);
+  });
+
+  // tally + compute bar
+  tallyEl.textContent = k + " / " + N_EXPERTS;
+  const computePct = Math.round((k/N_EXPERTS)*100);
+  computeBar.style.width = computePct + "%";
+  computeBar.classList.toggle("bg-indigo-500", sparse);
+  computeBar.classList.toggle("bg-rose-400", !sparse);
+  computeLabel.textContent = k + " / " + N_EXPERTS + " experts run";
+  computeNote.textContent = sparse
+    ? "Only the routed experts do math → ≈ a quarter of the FLOPs of the dense layer."
+    : "Every expert runs for every token → full compute, no savings.";
+
+  // specialization note: which experts this token went to
+  if(sparse){
+    const names = chosen.map(i=>EXPERTS[i].name + " (" + EXPERTS[i].flavour + ")").join(" + ");
+    specNote.innerHTML = `Router routed <b>"${t.tok}"</b> → <span class="text-indigo-600">${names}</span>. `
+      + `Capacity stays at all ${N_EXPERTS} experts, but compute is only <b>${TOP_K}/${N_EXPERTS}</b>. `
+      + `Different token types land on different experts — that's specialization.`;
+  } else {
+    specNote.innerHTML = `<span class="text-rose-600">Dense mode:</span> all ${N_EXPERTS} experts fire for <b>"${t.tok}"</b> — `
+      + `same capacity, but you pay full compute on every token. Flip back to MoE to see the savings.`;
+  }
+}
+
+modeToggle.onclick = ()=>{
+  sparse = !sparse;
+  modeToggle.setAttribute("aria-checked", String(!sparse)); // dense = "checked off" visually below
+  modeToggle.classList.toggle("toggle-on", sparse);
+  modeToggle.classList.toggle("bg-indigo-600", sparse);
+  modeToggle.classList.toggle("bg-rose-400", !sparse);
+  modeKnob.style.transform = sparse ? "translateX(0)" : "translateX(28px)";
+  modeState.textContent = sparse ? "MoE — top-2 of 8 active (sparse)" : "Dense — all 8 active (full compute)";
+  modeState.className = "text-sm font-semibold " + (sparse ? "text-indigo-600" : "text-rose-600");
+  kLabel.textContent = sparse ? "top-2" : "all 8";
+  capLabel.textContent = sparse ? "8 experts held in memory" : "8 experts held in memory";
+  render();
+};
+
+prevTokB.onclick = ()=>{ curIdx = (curIdx - 1 + TOKENS.length) % TOKENS.length; render(); };
+nextTokB.onclick = ()=>{ curIdx = (curIdx + 1) % TOKENS.length; render(); };
+autoTokB.onclick = ()=>{
+  if(autoTm){ clearInterval(autoTm); autoTm=null; autoTokB.textContent="▶ Auto-feed"; return; }
+  autoTokB.textContent="⏸ Pause";
+  autoTm = setInterval(()=>{ curIdx = (curIdx + 1) % TOKENS.length; render(); }, 1400);
+};
+
+// initial render
+render();
+
+// ===== UNDERSTAND STEPS =====
+const STEPS = [
+  { title:"1. The scaling problem",
+    why:"Language models tend to get better as you add parameters — more parameters mean more capacity to store patterns, facts, and skills. But in an ordinary dense network every single parameter is used for every single token you process. So if you double the parameters to make the model smarter, you also double the compute cost of every word it reads and writes, in training and forever after at inference. That linkage is the wall: capacity and cost rise together, and at frontier scale the cost becomes the limiting factor. Mixture of Experts exists to break that link.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">dense model: <b>more parameters</b> → more capacity, but <b>every token uses every parameter</b> → compute rises just as fast</div>`, code:`problem: in a dense net, capacity and per-token compute are chained together` },
+
+  { title:"2. The MoE idea — many experts, use a few",
+    why:"Mixture of Experts replaces one big feed-forward block with many smaller ones, called experts, and then uses only a few of them for any given token. Picture eight expert sub-networks sitting side by side; instead of running all eight on every token, the layer picks a small subset — say two — and runs only those. The model still owns all eight experts' worth of parameters, so its total capacity is large, but the work done per token corresponds to just the two that were chosen. This is called sparse activation: most of the network sits idle for any single token. That one move is the heart of MoE.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>N experts side by side</b> &nbsp;·&nbsp; run only <b>a few per token</b> (sparse activation) &nbsp;·&nbsp; the rest stay idle</div>`, code:`MoE: split into N experts, activate only k of them per token (sparse)` },
+
+  { title:"3. The router / gating network",
+    why:"Something has to decide which experts handle each token, and that job belongs to a tiny network called the router, or gate. For every token it looks at that token's representation and produces a score for each expert — a softmax over the experts saying how well each one fits. The layer then keeps only the highest-scoring experts (the top-k) and ignores the rest. The router is trained jointly with the experts by ordinary gradient descent, so over time it learns useful routing decisions rather than random ones. It's small and cheap compared to the experts, yet it's the brain that makes the whole sparse scheme work.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">token → <b>router</b> → score every expert (softmax) → <b>pick top-k</b> highest scorers</div>`, code:`router: a small net scores experts per token; keep the top-k (e.g. top-2)` },
+
+  { title:"4. Sparse vs dense — total vs ACTIVE params",
+    why:"The key number to internalize is the gap between total parameters and active parameters. Total parameters count every weight the model owns — all the experts together — and that's what gives it capacity. Active parameters count only the weights actually used on a given token — the chosen experts plus the shared parts — and that's what determines compute. In a dense model these two numbers are the same. In MoE they diverge sharply: a model might hold the parameters of eight experts yet activate only two, so it has roughly four times the capacity at the same per-token cost. When you read a model spec, watch for both numbers; they tell very different stories.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>total params</b> = all experts (capacity) &nbsp;≠&nbsp; <b>active params</b> = chosen experts (compute) &nbsp;·&nbsp; dense: they're equal</div>`, code:`sparse: total params (capacity) >> active params per token (compute)` },
+
+  { title:"5. Why it's efficient",
+    why:"MoE is efficient because it decouples capacity from per-token compute — the very thing dense models can't do. By activating only k of N experts, you can grow total parameters enormously while keeping the FLOPs per token, and therefore the inference cost and latency, roughly fixed. In practice a sparse model can match a much larger dense model's quality while running at the cost of a far smaller one. That's why frontier-scale systems lean on it: you get the knowledge and skill that come with huge parameter counts without paying huge compute on every single token. Capacity becomes cheap to add; only the active slice costs you.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>grow total params freely</b>, hold active params ≈ fixed → big capacity, ≈ constant compute &amp; latency</div>`, code:`efficiency: decouple capacity (total params) from cost (active params/token)` },
+
+  { title:"6. Experts specialize",
+    why:"Because the router learns to send similar tokens to the same experts, the experts naturally drift toward specializing. One might end up handling code and numbers, another punctuation, another a particular topic or language — not because anyone labelled them, but because the joint training rewards consistent routing. This emergent division of labour is part of why MoE works: each expert can become very good at its slice of the input distribution instead of being a jack-of-all-trades. The specialization is usually fuzzy and not human-interpretable, but the effect is real: different token types reliably flow to different experts, which the LOOK demo makes visible.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">router sends similar tokens to the same experts → experts <b>specialize</b> (code, punctuation, a topic…) — emergent, not labelled</div>`, code:`specialization: consistent routing makes each expert good at its own slice` },
+
+  { title:"7. Load balancing — don't overuse a few experts",
+    why:"Left alone, the router has a nasty failure mode: it can discover one or two experts that work early on and send everything to them, leaving the other experts starved and untrained. That collapses the whole benefit — you've paid for many experts but effectively use a handful. To prevent it, MoE adds an auxiliary load-balancing loss that gently penalizes uneven routing, pushing the router to spread tokens across all experts. Implementations also cap how many tokens each expert may take per batch (a capacity factor); overflow tokens are dropped or rerouted. Balancing isn't a nicety — without it, training quietly wastes most of the model.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">router can <b>collapse onto a few experts</b> → add an <b>auxiliary load-balancing loss</b> + per-expert capacity caps to spread tokens</div>`, code:`load balancing: aux loss + capacity caps so the router uses ALL experts` },
+
+  { title:"8. Training challenges + routing instability",
+    why:"Sparse models are trickier to train than dense ones. The top-k selection is a hard, discrete choice, so gradients don't flow cleanly to experts that weren't picked, and small changes in router scores can flip which expert a token goes to — making training noisy and sometimes unstable. Routing can oscillate, experts can collapse despite the balancing loss, and results can be sensitive to hyperparameters like the number of experts, k, and the capacity factor. A lot of MoE research is precisely about taming this: smoother gating, better balancing terms, added noise for exploration, and stabilizing tricks. The payoff is large, but it doesn't come for free.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>discrete top-k</b> = noisy gradients &nbsp;·&nbsp; routing can <b>oscillate / collapse</b> &nbsp;·&nbsp; sensitive to #experts, k, capacity</div>`, code:`training: discrete routing is unstable — needs balancing, noise, careful tuning` },
+
+  { title:"9. Where it's used",
+    why:"Mixture of Experts has moved from research curiosity to production technique. The most openly documented example is Mixtral 8x7B, a sparse model with eight experts where the router activates two per token — the '8x7B' name signals eight experts of roughly seven billion parameters each, while only about two experts' worth run at a time. Many other frontier-scale systems are widely believed to use MoE internally, even when the details aren't published, precisely because it's the most practical way to keep growing capacity without compute exploding. When you see a model with a large total parameter count but a much smaller 'active' count, MoE is almost certainly behind it.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>Mixtral 8x7B</b> = 8 experts, top-2 per token &nbsp;·&nbsp; the "8x7B" naming = #experts × size &nbsp;·&nbsp; many frontier models are sparse</div>`, code:`in the wild: Mixtral 8x7B (8 experts, top-2); large total / small active params` },
+
+  { title:"10. Tradeoffs",
+    why:"MoE buys cheap compute but charges you elsewhere, and it's worth knowing the bill. First, memory: every expert's parameters must be loaded and held even though only a few run per token, so total memory footprint tracks the large total parameter count, not the small active one. Second, communication: in distributed training and serving, tokens have to be shipped to whichever device holds their chosen expert (all-to-all communication), which adds engineering complexity and network cost. Add the training instability from the previous step, and MoE is clearly a specialist tool, not a free lunch — brilliant when you need huge capacity at fixed per-token cost, but with real memory and systems overhead to manage.",
+    concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">MoE = big capacity at fixed per-token compute — but you pay in MEMORY (hold all experts) and COMMS (route tokens across devices). A specialist tool, not a free lunch.</p></div>`, code:`tradeoffs: must hold ALL experts in memory + all-to-all comms in distributed setups` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curStep = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curStep=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curStep-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curStep+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curStep>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curStep+1); },2800); };
+show(0);
+
+// ===== BUILD STEPS (with copy buttons) =====
+const BUILD=[
+  { title:"Define N expert networks",
+    desc:"An expert is just an ordinary feed-forward block. A MoE layer holds a list of them — say 8. They're identical in shape but learn different weights, so each can specialize. Nothing fancy here: the magic is in WHICH ones we run per token.",
+    code:`import torch, torch.nn as nn, torch.nn.functional as F
+
+class Expert(nn.Module):           # a plain feed-forward block
+    def __init__(self, d_model, d_ff):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_model, d_ff), nn.GELU(),
+            nn.Linear(d_ff, d_model),
+        )
+    def forward(self, x):          # x: (tokens, d_model)
+        return self.net(x)
+
+N_EXPERTS = 8
+d_model, d_ff = 512, 2048
+experts = nn.ModuleList([Expert(d_model, d_ff) for _ in range(N_EXPERTS)])
+# All 8 experts' params exist (capacity) — but we won't run all 8 per token.` },
+
+  { title:"Add a gating / router linear layer",
+    desc:"The router is a single linear layer that maps each token to one score per expert. A softmax turns the scores into routing weights. This tiny network is what learns to send each token to the right experts.",
+    code:`class Router(nn.Module):
+    def __init__(self, d_model, n_experts):
+        super().__init__()
+        self.gate = nn.Linear(d_model, n_experts, bias=False)
+    def forward(self, x):                  # x: (tokens, d_model)
+        logits = self.gate(x)              # (tokens, n_experts)
+        return logits                      # raw scores; softmax applied at top-k
+
+router = Router(d_model, N_EXPERTS)
+# Cheap compared to the experts — but it's the brain of the layer.` },
+
+  { title:"Softmax + top-k gate (pick the experts)",
+    desc:"For each token, take the router logits, keep only the k highest (top-k = sparse activation), softmax those into weights, and zero out the rest. This is the line that makes MoE sparse: only k of N experts will run.",
+    code:`TOP_K = 2
+
+def gate(logits):                          # logits: (tokens, n_experts)
+    # keep the top-k experts per token
+    topk_val, topk_idx = logits.topk(TOP_K, dim=-1)   # (tokens, k)
+    # softmax ONLY over the chosen k so weights sum to 1
+    topk_w = F.softmax(topk_val, dim=-1)              # (tokens, k)
+    return topk_idx, topk_w
+
+idx, w = gate(router(x))
+# idx = which experts each token uses; w = how much to weight each one.
+# The other (N - k) experts are never run for this token.` },
+
+  { title:"Dispatch each token to its chosen experts",
+    desc:"Now route. For each chosen expert, gather the tokens assigned to it, run just those tokens through that expert, and scatter the results back. Only k experts ever touch a given token, so per-token compute stays small no matter how many experts exist.",
+    code:`def moe_forward(x, experts, idx, w):
+    out = torch.zeros_like(x)
+    for e in range(len(experts)):
+        # mask: which tokens picked expert e (in either of their k slots)?
+        sel = (idx == e)                       # (tokens, k) bool
+        token_mask = sel.any(dim=-1)           # (tokens,)
+        if token_mask.sum() == 0:
+            continue
+        xe = x[token_mask]                     # only those tokens
+        ye = experts[e](xe)                    # run expert ONCE on its tokens
+        # weight by the router's gate value for expert e
+        we = (w * sel).sum(dim=-1)[token_mask].unsqueeze(-1)
+        out[token_mask] += ye * we
+    return out
+# Each token's output = weighted sum of ONLY its top-k experts.` },
+
+  { title:"Weighted-combine the chosen experts' outputs",
+    desc:"The token's final output is the gate-weighted sum of its top-k experts (already done above via `ye * we`). Conceptually: y = sum over chosen experts of weight_e * Expert_e(x). The weights come from the router's softmax, so the model learns how much to trust each pick.",
+    code:`# Conceptually, for one token x:
+#   chosen = top_k(router(x))
+#   y = sum( w_e * Expert_e(x)  for e in chosen )
+#
+# Wrap the whole thing as a drop-in layer:
+class MoELayer(nn.Module):
+    def __init__(self, d_model, d_ff, n_experts=8, k=2):
+        super().__init__()
+        self.experts = nn.ModuleList([Expert(d_model, d_ff) for _ in range(n_experts)])
+        self.router  = Router(d_model, n_experts)
+        self.k = k
+    def forward(self, x):
+        idx, w = gate(self.router(x))          # uses TOP_K = self.k
+        return moe_forward(x, self.experts, idx, w)
+# Swap this in for a normal feed-forward block in a transformer.` },
+
+  { title:"Add a load-balancing auxiliary loss",
+    desc:"Without this, the router collapses onto a couple of favorite experts. The classic fix penalizes the product of (fraction of tokens routed to each expert) and (average router probability for that expert), pushing usage to be uniform. Add it to your main loss with a small coefficient.",
+    code:`def load_balancing_loss(logits, idx, n_experts):
+    probs = F.softmax(logits, dim=-1)              # (tokens, n_experts)
+    # f_e: fraction of tokens that routed to expert e (top-k assignment)
+    one_hot = F.one_hot(idx, n_experts).float().sum(dim=1)  # (tokens, n_experts)
+    f = one_hot.mean(dim=0)                        # importance by COUNT
+    # P_e: mean router probability mass on expert e
+    P = probs.mean(dim=0)                          # importance by PROB
+    return n_experts * (f * P).sum()               # minimized when uniform
+
+aux = load_balancing_loss(router(x), idx, N_EXPERTS)
+total_loss = task_loss + 0.01 * aux                # small coefficient
+# Without this term, a few experts hog everything and the rest go to waste.` },
+
+  { title:"Match a real config (Mixtral-style)",
+    desc:"Production sparse models use exactly this shape. Mixtral 8x7B sets 8 experts with top_k=2 per token: large total capacity, only ~2 experts' worth of compute per token. Cap tokens per expert (capacity factor) so no single expert overflows in a batch.",
+    code:`config = dict(
+    n_experts      = 8,     # total experts (capacity)
+    top_k          = 2,     # experts run PER TOKEN (active compute)
+    d_model        = 4096,
+    d_ff           = 14336,
+    capacity_factor= 1.25,  # max tokens/expert/batch = cap_factor * tokens / n_experts
+)
+# "8x7B" => 8 experts ~7B each; only top_k=2 active per token.
+# Total params are huge; active params per token stay small.
+# Overflow tokens (beyond an expert's capacity) are dropped or rerouted.` },
+];
+const buildEl=document.getElementById("buildSteps");
+BUILD.forEach((s,i)=>{
+  const li=document.createElement("li");
+  li.className="bg-white rounded-2xl border border-slate-200 p-6";
+  const codeId="code"+i;
+  li.innerHTML=`<div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">${i+1}</div><h3 class="font-bold text-lg">${s.title}</h3></div>
+    <p class="text-sm text-slate-600 mb-3">${s.desc}</p>
+    <div class="relative">
+      <button data-copy="${codeId}" class="copy-btn absolute right-2 top-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-md">Copy</button>
+      <pre id="${codeId}"></pre>
+    </div>`;
+  buildEl.appendChild(li);
+  li.querySelector("#"+codeId).textContent=s.code;
+});
+document.querySelectorAll(".copy-btn").forEach(btn=>{
+  btn.onclick=()=>{
+    const code=document.getElementById(btn.dataset.copy).textContent;
+    navigator.clipboard.writeText(code).then(()=>{ const o=btn.textContent; btn.textContent="✓ Copied"; setTimeout(()=>btn.textContent=o,1200); });
+  };
+});
+</script>
+</body>
+</html>

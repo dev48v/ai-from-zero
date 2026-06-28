@@ -25,6 +25,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 16 — Multimodal AI](https://dev48v.infy.uk/ai/days/day16-multimodal.html) — `day16-multimodal.html`
 - [AIFromZero · Day 17 — How LLMs Are Trained](https://dev48v.infy.uk/ai/days/day17-how-llms-trained.html) — `day17-how-llms-trained.html`
 - [AIFromZero · Day 18 — Prompt Injection & Jailbreaks](https://dev48v.infy.uk/ai/days/day18-prompt-injection.html) — `day18-prompt-injection.html`
+- [AIFromZero · Day 19 — Mixture of Experts](https://dev48v.infy.uk/ai/days/day19-mixture-of-experts.html) — `day19-mixture-of-experts.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
