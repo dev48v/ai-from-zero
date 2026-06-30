@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 20 — Quantization</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .stage { transition: opacity .35s ease, transform .35s ease; }
+  .stage-off { opacity:.25; }
+  .pulse-dot { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+  /* weight rows */
+  .wrow { transition: background .35s ease, border-color .35s ease; }
+  .bar { transition: width .4s ease, left .4s ease, background .35s ease; }
+  .toggle-on { background:#6366f1; }
+  .seg { transition: background .25s ease, color .25s ease, border-color .25s ease; }
+  .dot { transition: left .45s cubic-bezier(.2,.8,.2,1), background .3s ease; }
+  .lvl { transition: opacity .35s ease; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 20</div>
+      <h1 class="text-xl font-bold">🗜️ Quantization — Run Big Models on Small Hardware</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">Squeeze a model's weights into fewer bits — watch the size shrink and the numbers snap to a grid</h2>
+      <p class="text-slate-500 text-center mb-5">Every weight in a model is just a number. At full precision (<b>FP32</b>) each one takes <b>32 bits</b> = 4 bytes. Pick a smaller <b>bit-width</b> below and the demo <b>really quantizes</b>: it maps the weights' <b>min…max range</b> onto a small set of <b>2<sup>bits</sup> levels</b>, rounds every weight to its nearest level, and shows the <b>rounding error</b>. Watch the continuous values <b>snap onto the grid</b>, the <b>memory</b> readout collapse, and the <b>quality</b> dip a little at INT4. Same model — ~4–8× smaller and faster.</p>
+
+      <!-- BIT-WIDTH SELECTOR -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-5 flex flex-wrap items-center gap-4">
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-bold text-slate-700">Bit-width</span>
+          <div id="bitSel" class="flex rounded-lg overflow-hidden border border-slate-200">
+            <button data-bits="32" class="seg px-4 py-2 text-sm font-semibold">FP32</button>
+            <button data-bits="16" class="seg px-4 py-2 text-sm font-semibold border-l border-slate-200">FP16</button>
+            <button data-bits="8"  class="seg px-4 py-2 text-sm font-semibold border-l border-slate-200">INT8</button>
+            <button data-bits="4"  class="seg px-4 py-2 text-sm font-semibold border-l border-slate-200">INT4</button>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 ml-auto">
+          <button id="reshuffle" class="bg-slate-100 px-4 py-2 rounded-lg font-semibold text-sm">🎲 New weights</button>
+        </div>
+      </div>
+
+      <!-- QUANTIZATION GRID (number line of levels) -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">① The quantization grid — the weights' range split into <span id="lvlCount">∞</span> levels</div>
+        <p class="text-[11px] text-slate-400 mb-3" id="gridNote">FP32 is so fine-grained it's effectively continuous — every weight keeps its exact value.</p>
+        <div class="relative h-24 mx-2">
+          <!-- the line -->
+          <div class="absolute top-12 left-0 right-0 h-0.5 bg-slate-300"></div>
+          <!-- level ticks injected here -->
+          <div id="levels"></div>
+          <!-- weight dots injected here -->
+          <div id="dots"></div>
+        </div>
+        <div class="flex justify-between text-[11px] font-mono text-slate-400 mt-1 mx-2"><span id="minLbl">min</span><span id="maxLbl">max</span></div>
+      </div>
+
+      <!-- PER-WEIGHT TABLE -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-3">② Each weight: full value → nearest level → rounding error</div>
+        <div class="grid grid-cols-[auto_1fr_1fr_1fr] gap-x-4 gap-y-1 text-sm">
+          <div class="text-[11px] uppercase font-bold text-slate-400">weight</div>
+          <div class="text-[11px] uppercase font-bold text-slate-400">original (FP32)</div>
+          <div class="text-[11px] uppercase font-bold text-slate-400">quantized value</div>
+          <div class="text-[11px] uppercase font-bold text-slate-400">rounding error</div>
+          <div class="col-span-4 h-px bg-slate-100"></div>
+          <div id="rows" class="contents"></div>
+        </div>
+      </div>
+
+      <!-- MEMORY + QUALITY -->
+      <div class="grid md:grid-cols-2 gap-5 mb-2">
+        <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-3">③ Memory for a 7B-parameter model</div>
+          <div class="text-3xl font-extrabold font-mono text-slate-800" id="memBig">28 GB</div>
+          <div class="text-xs text-slate-500 mt-1" id="memMath">7B params × 4 bytes (FP32) = 28 GB</div>
+          <div class="mt-3 h-5 rounded-full bg-slate-200 overflow-hidden"><div id="memBar" class="bar h-full bg-indigo-500" style="width:100%"></div></div>
+          <div class="text-[11px] text-slate-400 mt-2" id="memVs">FP32 = 28 GB → INT8 = 7 GB → INT4 = 3.5 GB. Fewer bits per weight = a smaller, cheaper, faster model.</div>
+        </div>
+        <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-3">④ Quality & speed tradeoff</div>
+          <div class="flex items-end gap-3">
+            <div class="text-3xl font-extrabold font-mono" id="qualBig">100%</div>
+            <div class="text-sm font-semibold pb-1" id="qualTag">lossless</div>
+          </div>
+          <div class="mt-2 h-3 rounded-full bg-slate-200 overflow-hidden"><div id="qualBar" class="bar h-full bg-emerald-500" style="width:100%"></div></div>
+          <div class="grid grid-cols-3 gap-2 mt-4 text-center">
+            <div class="rounded-lg bg-slate-50 border border-slate-200 p-2"><div class="text-[10px] uppercase text-slate-400">size</div><div id="sizeIco" class="text-lg font-bold text-slate-700">●●●●</div></div>
+            <div class="rounded-lg bg-slate-50 border border-slate-200 p-2"><div class="text-[10px] uppercase text-slate-400">speed</div><div id="speedIco" class="text-lg font-bold text-slate-700">🐢</div></div>
+            <div class="rounded-lg bg-slate-50 border border-slate-200 p-2"><div class="text-[10px] uppercase text-slate-400">cost</div><div id="costIco" class="text-lg font-bold text-slate-700">$$$$</div></div>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-3" id="qualNote">Full precision: nothing is lost, but you need the most memory and the biggest GPU.</div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 text-center mt-5"><b>Quantization stores each weight in fewer bits (32 → 8 → 4)</b> — the same model gets roughly 4–8× smaller and faster with only a small quality drop, which is how big LLMs run on a laptop, phone, or a single GPU. The numbers above are a real round-trip: weights are mapped to a fixed number of integer levels, rounded, and dequantized — the error you see is exactly the precision you traded away for size and speed. Real LLM quantizers do this per-channel or per-block (not over the whole tensor) and protect a few outliers, so quality holds up better than this whole-tensor toy.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Quantization, step by step</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Quantize weights yourself, then load a model in 4-bit</h2>
+    <p class="text-slate-500 mb-8">Quantization is a tiny bit of arithmetic: find the range of the weights, split it into a fixed number of integer levels, snap each weight to the nearest level, and remember a <b>scale</b> (and zero-point) so you can turn the integers back into floats. Below you build that round-trip from scratch, measure the error and the size win, then see the one-liners real tools use — <code>bitsandbytes</code> <code>load_in_4bit</code> and a GGUF <code>Q4_K_M</code> file for <code>llama.cpp</code>. Copy each step as a starting point.</p>
+    <ol class="space-y-5" id="buildSteps"></ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 20 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You now know what quantization is — <b>storing each weight in fewer bits</b> by mapping a float range onto a small set of integer <b>levels</b> with a <b>scale</b> — why it matters (<b>7B params × 4 bytes = 28 GB</b> in FP32, but only ~7 GB in INT8 and ~3.5 GB in INT4), how it works (<b>scale = range / (2<sup>bits</sup>−1)</b>, <b>q = round((w−min)/scale)</b>, <b>dequant w′ = q·scale + min</b>), where the small <b>quality drop</b> comes from (rounding error, worst at INT4), how real models keep quality up (<b>per-channel / per-block scales, outlier protection, mixed precision</b>), and the tools that do it for you — <b>GGUF / llama.cpp, GPTQ, AWQ, bitsandbytes</b>. This is how a 70B model runs on one gaming GPU.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== QUANTIZATION DEMO (fully offline, real rounding to levels) =====
+// A handful of FP32 weights. Pick a bit-width; we map the weights' min..max
+// range onto 2^bits levels, round each weight to the nearest level, dequantize,
+// and show value / error / memory / quality. FP32 = "continuous" (no rounding).
+const PARAMS_B = 7;            // 7 billion params, for the memory readout
+const BYTES = { 32:4, 16:2, 8:1, 4:0.5 };       // bytes per weight at each bit-width
+const QUALITY = { 32:100, 16:99.6, 8:98, 4:94 }; // illustrative quality retention %
+
+// the model weights we display (FP32). regenerated by "New weights".
+let WEIGHTS = [];
+function makeWeights(){
+  // spread of plausible weight values, a couple of outliers
+  const base = [0.83, -1.42, 0.12, 2.05, -0.37, 1.18, -0.91, 0.46];
+  WEIGHTS = base.map(v => +(v + (Math.random()-0.5)*0.6).toFixed(3));
+}
+makeWeights();
+
+let bits = 32;   // current bit-width
+
+// ----- DOM -----
+const bitSel    = document.getElementById("bitSel");
+const segs      = bitSel.querySelectorAll(".seg");
+const reshuffle = document.getElementById("reshuffle");
+const levelsEl  = document.getElementById("levels");
+const dotsEl    = document.getElementById("dots");
+const rowsEl    = document.getElementById("rows");
+const lvlCount  = document.getElementById("lvlCount");
+const gridNote  = document.getElementById("gridNote");
+const minLbl    = document.getElementById("minLbl");
+const maxLbl    = document.getElementById("maxLbl");
+const memBig    = document.getElementById("memBig");
+const memMath   = document.getElementById("memMath");
+const memBar    = document.getElementById("memBar");
+const qualBig   = document.getElementById("qualBig");
+const qualTag   = document.getElementById("qualTag");
+const qualBar   = document.getElementById("qualBar");
+const qualNote  = document.getElementById("qualNote");
+const sizeIco   = document.getElementById("sizeIco");
+const speedIco  = document.getElementById("speedIco");
+const costIco   = document.getElementById("costIco");
+
+// quantize one weight to `b` bits over [min,max]. returns {q, deq, scale}
+function quantize(w, min, max, b){
+  if(b >= 16){ return { q:null, deq:w, scale:0 }; }   // treat FP16/FP32 as exact here
+  const levels = Math.pow(2, b);                       // 2^bits discrete values
+  const scale  = (max - min) / (levels - 1);           // step between levels
+  if(scale === 0) return { q:0, deq:min, scale:0 };
+  const q   = Math.round((w - min) / scale);           // nearest integer level
+  const deq = q * scale + min;                          // dequantize back to float
+  return { q, deq, scale, levels };
+}
+
+function fmtGB(b){
+  const gb = PARAMS_B * b;            // 7e9 * bytes / 1e9 GB  == 7 * bytes
+  return (gb % 1 === 0 ? gb : gb.toFixed(1)) + " GB";
+}
+
+function render(){
+  // active segment styling
+  segs.forEach(s=>{
+    const on = +s.dataset.bits === bits;
+    s.classList.toggle("bg-indigo-600", on);
+    s.classList.toggle("text-white", on);
+    s.classList.toggle("bg-white", !on);
+    s.classList.toggle("text-slate-600", !on);
+  });
+
+  const min = Math.min(...WEIGHTS), max = Math.max(...WEIGHTS);
+  const span = (max - min) || 1;
+  minLbl.textContent = min.toFixed(3);
+  maxLbl.textContent = max.toFixed(3);
+
+  const continuous = bits >= 16;
+  const levels = continuous ? Infinity : Math.pow(2, bits);
+  lvlCount.textContent = continuous ? "∞" : (Math.pow(2, bits) + " (2^" + bits + ")");
+
+  // ---- grid: draw level ticks ----
+  levelsEl.innerHTML = "";
+  if(!continuous){
+    for(let i=0;i<levels;i++){
+      const lx = (levels===1) ? 50 : (i/(levels-1))*100;
+      const tick = document.createElement("div");
+      tick.className = "lvl absolute";
+      tick.style.left = lx + "%";
+      tick.style.top = "30px";
+      tick.innerHTML = `<div class="w-0.5 h-6 bg-indigo-300 -translate-x-1/2"></div>`;
+      levelsEl.appendChild(tick);
+    }
+  }
+
+  // ---- grid: draw weight dots (original position + snapped color) ----
+  dotsEl.innerHTML = "";
+  WEIGHTS.forEach((w,idx)=>{
+    const {deq} = quantize(w, min, max, bits);
+    const ox = ((w   - min)/span)*100;     // original position
+    const dx = ((deq - min)/span)*100;     // snapped position
+    // line from original to snapped (the rounding move)
+    const dot = document.createElement("div");
+    dot.className = "dot absolute w-3 h-3 rounded-full -translate-x-1/2 -translate-y-1/2";
+    dot.style.left = dx + "%";
+    dot.style.top = "48px";
+    dot.style.background = continuous ? "#6366f1" : "#4338ca";
+    dot.title = "weight " + (idx+1);
+    dotsEl.appendChild(dot);
+    if(!continuous && Math.abs(ox-dx) > 0.5){
+      const ghost = document.createElement("div");
+      ghost.className = "absolute w-2 h-2 rounded-full -translate-x-1/2 -translate-y-1/2 bg-slate-300";
+      ghost.style.left = ox + "%";
+      ghost.style.top = "48px";
+      dotsEl.appendChild(ghost);
+    }
+  });
+
+  gridNote.textContent = continuous
+    ? (bits===32
+        ? "FP32 is so fine-grained it's effectively continuous — every weight keeps its exact value."
+        : "FP16 halves the bytes but is still floating point — for this toy we treat it as keeping the exact value.")
+    : "Grey = original value, indigo = nearest level it snapped to. Fewer bits = fewer levels = bigger snaps.";
+
+  // ---- per-weight table ----
+  rowsEl.innerHTML = "";
+  WEIGHTS.forEach((w,idx)=>{
+    const {deq} = quantize(w, min, max, bits);
+    const err = deq - w;
+    const errStr = continuous ? "0.000" : (err>=0?"+":"") + err.toFixed(3);
+    const errColor = continuous ? "text-emerald-600"
+      : (Math.abs(err) > span*0.04 ? "text-rose-600" : "text-amber-600");
+    const block = document.createElement("div");
+    block.className = "contents";
+    block.innerHTML =
+      `<div class="font-mono text-slate-400 py-1">w${idx+1}</div>`+
+      `<div class="font-mono text-slate-700 py-1">${w.toFixed(3)}</div>`+
+      `<div class="font-mono font-bold text-indigo-700 py-1">${deq.toFixed(3)}</div>`+
+      `<div class="font-mono py-1 ${errColor}">${errStr}</div>`;
+    rowsEl.appendChild(block);
+  });
+
+  // ---- memory readout ----
+  const by = BYTES[bits];
+  memBig.textContent = fmtGB(by);
+  const byLbl = by===4?"4 bytes":by===2?"2 bytes":by===1?"1 byte":"0.5 byte";
+  const fmtName = bits===32?"FP32":bits===16?"FP16":bits===8?"INT8":"INT4";
+  memMath.textContent = `7B params × ${byLbl} (${fmtName}) = ${fmtGB(by)}`;
+  memBar.style.width = (by/4*100) + "%";   // relative to FP32
+
+  // ---- quality readout ----
+  const q = QUALITY[bits];
+  qualBig.textContent = q + "%";
+  qualBar.style.width = q + "%";
+  const good = q >= 98;
+  qualBar.classList.toggle("bg-emerald-500", q>=98);
+  qualBar.classList.toggle("bg-amber-400", q<98 && q>=96);
+  qualBar.classList.toggle("bg-rose-400", q<96);
+  qualTag.textContent = bits===32?"lossless" : bits===16?"≈ lossless" : bits===8?"tiny drop" : "small drop";
+  qualTag.className = "text-sm font-semibold pb-1 " + (good?"text-emerald-600":(q<96?"text-rose-600":"text-amber-600"));
+
+  // little icon rows
+  const sizeMap  = {32:"●●●●",16:"●●●○",8:"●●○○",4:"●○○○"};
+  const speedMap = {32:"🐢",16:"🚶",8:"🏃",4:"⚡"};
+  const costMap  = {32:"$$$$",16:"$$$",8:"$$",4:"$"};
+  sizeIco.textContent  = sizeMap[bits];
+  speedIco.textContent = speedMap[bits];
+  costIco.textContent  = costMap[bits];
+
+  qualNote.textContent = continuous
+    ? (bits===32
+        ? "Full precision: nothing is lost, but you need the most memory and the biggest GPU."
+        : "Half precision: barely any quality loss and half the memory — a common training/serving default.")
+    : (bits===8
+        ? "INT8: ~4× smaller and faster, with only a tiny quality drop — a very common deployment choice."
+        : "INT4: ~8× smaller and runs on modest hardware; quality dips a little — fine for many uses.");
+}
+
+// wire selector
+segs.forEach(s=> s.onclick = ()=>{ bits = +s.dataset.bits; render(); });
+reshuffle.onclick = ()=>{ makeWeights(); render(); };
+
+// initial render
+render();
+
+// ===== UNDERSTAND STEPS =====
+const STEPS = [
+  { title:"1. The problem — big models are huge",
+    why:"Every number a model learns, called a weight, has to be stored somewhere, and modern language models have billions of them. By default each weight is a 32-bit floating-point number, which is 4 bytes. Multiply that out: a 7-billion-parameter model needs roughly 7,000,000,000 × 4 bytes ≈ 28 gigabytes just to hold its weights, before you add the memory needed to actually run it. That doesn't fit on a phone, a laptop, or most single GPUs, and renting hardware big enough costs real money every hour. The size of the weights is the wall between a powerful model and ordinary hardware, and quantization is the most common way through it.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">7B params × <b>4 bytes</b> (FP32) = <b>28 GB</b> of weights &nbsp;·&nbsp; too big for a phone, laptop, or one small GPU</div>`, code:`problem: 7B params x 4 bytes (FP32) = 28 GB just for the weights` },
+
+  { title:"2. What quantization is — fewer bits per weight",
+    why:"Quantization simply means storing each weight using fewer bits. Instead of spending 32 bits on every number, you spend 16, or 8, or even 4. Fewer bits per weight means the whole file of weights gets smaller in direct proportion: halve the bits and you roughly halve the memory. The weights still represent the same trained model — you are not changing what it learned, only how precisely each number is written down. Think of it like rounding prices to the nearest dollar instead of tracking every cent: you lose a little accuracy but the books get a lot lighter and faster to work with.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">store each weight in <b>fewer bits</b>: 32 → 16 → 8 → 4 &nbsp;·&nbsp; same model, each number written less precisely</div>`, code:`quantization: store each weight in fewer bits -> smaller, faster model` },
+
+  { title:"3. The precision ladder — FP32 → FP16 → INT8 → INT4",
+    why:"There's a ladder of common formats. FP32 is full 32-bit float, the default after training. FP16 and BF16 are 16-bit floats that halve the size with almost no quality loss, and are a standard choice for training and serving. Below that you usually switch from floats to integers: INT8 packs each weight into one byte (8 bits), and INT4 into half a byte (4 bits). The memory math follows the bits directly — for a 7B model: FP32 ≈ 28 GB, FP16 ≈ 14 GB, INT8 ≈ 7 GB, INT4 ≈ 3.5 GB. Each rung down roughly halves the footprint, which is what turns a data-center model into a laptop model.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">7B model: <b>FP32 28 GB</b> → <b>FP16 14 GB</b> → <b>INT8 7 GB</b> → <b>INT4 3.5 GB</b> &nbsp;·&nbsp; each rung ≈ halves memory</div>`, code:`ladder: FP32(28GB) -> FP16(14GB) -> INT8(7GB) -> INT4(3.5GB) for 7B` },
+
+  { title:"4. How it works — map a float range to integer levels",
+    why:"The trick to using integers is a tiny bit of arithmetic. First look at a group of weights and find their smallest and largest values — that's the range. With b bits you get 2 to the power b discrete levels to spread across that range; INT8 gives 256 levels, INT4 only 16. You compute a scale, the step size between levels, as the range divided by (levels − 1). Then each weight becomes the nearest integer level: q = round((w − min) / scale). You store those small integers plus the single scale value. To use a weight again you dequantize: w′ = q × scale + min. That round-trip is the whole mechanism.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>scale = range / (2^bits − 1)</b> &nbsp;·&nbsp; <b>q = round((w − min)/scale)</b> &nbsp;·&nbsp; back to float: <b>w′ = q·scale + min</b></div>`, code:`map: scale=(max-min)/(2^bits-1); q=round((w-min)/scale); w'=q*scale+min` },
+
+  { title:"5. Rounding error — why quality drops a little",
+    why:"Because there are only so many levels, almost every weight has to round to the nearest one, and the gap between the true value and the stored level is the rounding error. With many levels (INT8's 256) the gaps are tiny and the error is negligible; with few levels (INT4's 16) the gaps are wider and the rounding is coarser, so a model's outputs shift a bit more. Those tiny per-weight errors add up across billions of weights and show as a small drop in quality — usually barely noticeable at INT8 and modest at INT4. The whole game of good quantization is keeping that accumulated error as small as possible while still using few bits.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">fewer levels → <b>wider gaps</b> → <b>bigger rounding error</b> per weight → small quality drop (worst at INT4)</div>`, code:`error: each weight rounds to nearest level; fewer bits = coarser = more loss` },
+
+  { title:"6. PTQ vs QAT — when you quantize",
+    why:"There are two moments you can quantize. Post-training quantization (PTQ) takes an already-trained model and compresses its weights afterward, often using a small sample of data just to pick good ranges. It's fast, cheap, and needs no retraining, which is why most downloadable quantized models are made this way. Quantization-aware training (QAT) instead simulates the rounding during training, so the model learns weights that survive low precision well. QAT costs much more compute but usually recovers more quality, especially at very low bit-widths like INT4 where rounding hurts most. For everyday use PTQ is the default; QAT is reached for when you need the last few points of accuracy.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>PTQ</b>: compress after training (fast, no retrain) &nbsp;vs&nbsp; <b>QAT</b>: train with rounding simulated (costlier, better at low bits)</div>`, code:`PTQ = quantize after training (cheap); QAT = train aware of rounding (better)` },
+
+  { title:"7. Mixed precision — keep some parts high-precision",
+    why:"Not every number is equally safe to squash. A few weights and activations are outliers — unusually large values that, if rounded coarsely, would wreck the model's output. Naive whole-tensor quantization fails exactly because one big outlier stretches the range and makes every other level too coarse. So real methods use mixed precision: they quantize most of the model to low bits but keep sensitive layers or outlier channels in higher precision, and they compute a separate scale for each row, channel, or small block of weights instead of one scale for the whole tensor. This is why a well-quantized 4-bit model can stay close to the original despite the aggressive compression.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">protect <b>outliers</b> &amp; sensitive layers in higher precision &nbsp;·&nbsp; <b>per-channel / per-block scales</b>, not one scale for everything</div>`, code:`mixed precision: per-channel/block scales + keep outliers high-precision` },
+
+  { title:"8. The toolbox — GGUF, GPTQ, AWQ, bitsandbytes",
+    why:"You rarely write quantization by hand; mature tools do it. GGUF is the file format used by llama.cpp to run quantized models on CPUs and laptops, with named recipes like Q4_K_M that mix bit-widths cleverly. GPTQ and AWQ are PTQ methods that pick smart per-channel scales (AWQ protects the most important weights) and produce strong 4-bit models for GPUs. bitsandbytes lets you load a model in 8-bit or 4-bit with a single flag inside common training libraries. These cover the usual paths: GGUF for CPU/laptop inference, GPTQ/AWQ for efficient GPU serving, and bitsandbytes for quick in-framework loading.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>GGUF</b>/llama.cpp (CPU/laptop, e.g. Q4_K_M) &nbsp;·&nbsp; <b>GPTQ</b>/<b>AWQ</b> (4-bit GPU) &nbsp;·&nbsp; <b>bitsandbytes</b> (load_in_4bit)</div>`, code:`tools: GGUF/llama.cpp, GPTQ, AWQ, bitsandbytes(load_in_4bit)` },
+
+  { title:"9. The tradeoff — pick bits for your hardware",
+    why:"Quantization is a dial, not a switch, and you set it to fit your hardware. Lower bits mean a smaller file, faster math, and lower cost, paid for with a little accuracy. The practical sweet spots: FP16 when you have plenty of VRAM and want near-perfect quality; INT8 for a roughly 4× shrink with barely any loss; INT4 when memory is tight and you can accept a modest drop. The right choice is whatever fits your GPU or laptop while staying good enough for your task — there's no universally best bit-width, only the best one for the box you're running on and the quality you need.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">lower bits = <b>smaller + faster + cheaper</b>, slightly less accurate &nbsp;·&nbsp; pick the bits that fit your hardware</div>`, code:`tradeoff: fewer bits = smaller/faster/cheaper, small accuracy loss` },
+
+  { title:"10. Why it democratizes AI",
+    why:"Put it together and quantization changes who can run large models. A 70-billion-parameter model that would need around 140 GB in FP16 — a multi-GPU server — fits in roughly 35 GB at 4-bit, close to what a single high-end gaming GPU offers, and 7B-class models drop small enough to run on a laptop or even a phone. That means hobbyists, researchers, and small companies can run capable models locally, privately, and cheaply, without renting a data center. By trading a sliver of accuracy for a huge cut in memory and cost, quantization is the main reason powerful AI runs on hardware ordinary people already own.",
+    concept:`<div class="text-center w-full"><div class="text-5xl mb-2">🎉</div><p class="font-bold text-slate-700">Quantization stores weights in fewer bits — ~4–8× smaller and faster for a small quality drop. That's how a 70B model runs on one gaming GPU and 7B models run on a laptop or phone.</p></div>`, code:`democratizes: 70B in 4-bit ~35GB fits one GPU; 7B fits a laptop/phone` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curStep = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curStep=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curStep-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curStep+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curStep>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curStep+1); },2800); };
+show(0);
+
+// ===== BUILD STEPS (with copy buttons) =====
+const BUILD=[
+  { title:"Find the range of the weights",
+    desc:"Quantization starts by looking at the numbers you want to compress. Grab a tensor of weights and find its min and max — that range is what you'll spread your integer levels across. Doing this per-channel or per-block (one range per row) instead of for the whole tensor is what keeps quality high, but the idea is the same.",
+    code:`import numpy as np
+
+# a tiny block of FP32 weights (in practice: one channel/row of a layer)
+w = np.array([0.83, -1.42, 0.12, 2.05, -0.37, 1.18, -0.91, 0.46],
+             dtype=np.float32)
+
+w_min, w_max = w.min(), w.max()      # the range we will quantize over
+print("range:", w_min, "->", w_max) # everything maps inside [min, max]` },
+
+  { title:"Compute the scale (step between levels)",
+    desc:"With b bits you have 2**b discrete levels. The scale is the size of one step: the range divided by (levels − 1). This single float is stored alongside the integers and is all you need to convert back. INT8 = 256 levels (fine steps); INT4 = 16 levels (coarse steps).",
+    code:`bits   = 4                       # try 8 or 4
+levels = 2 ** bits               # INT4 -> 16, INT8 -> 256
+scale  = (w_max - w_min) / (levels - 1)   # step between adjacent levels
+zero   = w_min                   # min maps to integer level 0 (the zero-point)
+
+print("levels:", levels, " scale:", scale)` },
+
+  { title:"Quantize — round each weight to the nearest level",
+    desc:"This is the core line. Subtract the min, divide by the scale, and round to the nearest whole number. The result is a small integer in [0, levels−1] — that's what actually gets stored. Clip just in case rounding pushes a value past the top level.",
+    code:`# q = round((w - min) / scale), then keep it inside [0, levels-1]
+q = np.round((w - zero) / scale).astype(np.int32)
+q = np.clip(q, 0, levels - 1)
+
+print("quantized ints:", q)      # e.g. INT4 -> values 0..15
+# You now store: q (small ints) + scale + zero  -- that's the whole model.` },
+
+  { title:"Dequantize — turn the integers back into floats",
+    desc:"To use the weights at inference you reverse the map: multiply the integer by the scale and add back the min/zero-point. You won't get the exact original number back — you get the nearest level — and that difference is the rounding error quantization trades for size.",
+    code:`# w' = q * scale + zero   (recover an approximate float)
+w_deq = q.astype(np.float32) * scale + zero
+
+for orig, approx in zip(w, w_deq):
+    print(f"{orig:+.3f} -> {approx:+.3f}  (err {approx-orig:+.3f})")` },
+
+  { title:"Measure the error and the size win",
+    desc:"Always check what you traded. Compare the dequantized weights to the originals (mean absolute error), and compute the memory saved: FP32 is 4 bytes/weight, INT8 is 1, INT4 is 0.5 (two weights packed per byte, plus a small per-block scale). For a 7B model that's 28 GB → 7 GB → 3.5 GB.",
+    code:`mae = np.abs(w_deq - w).mean()
+print("mean abs error:", round(float(mae), 4))
+
+def model_gb(n_params_b, bits):
+    return n_params_b * (bits / 8)       # bytes/weight = bits/8
+for b in (32, 16, 8, 4):
+    print(f"7B @ {b:>2}-bit: {model_gb(7, b):>4} GB")
+# 7B @ 32-bit: 28 GB | 16-bit: 14 | 8-bit: 7 | 4-bit: 3.5` },
+
+  { title:"Load a real model in 4-bit (bitsandbytes)",
+    desc:"In practice you don't hand-roll this. bitsandbytes quantizes on the fly: pass load_in_4bit and a big model that wouldn't fit in FP16 loads in a few GB. nf4 is a 4-bit type tuned for weights; double-quantization shrinks the scales too. One config, no math by hand.",
+    code:`from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+import torch
+
+cfg = BitsAndBytesConfig(
+    load_in_4bit=True,                 # 4-bit weights
+    bnb_4bit_quant_type="nf4",         # 4-bit type tuned for weights
+    bnb_4bit_use_double_quant=True,    # also quantize the scales
+    bnb_4bit_compute_dtype=torch.float16,
+)
+model = AutoModelForCausalLM.from_pretrained(
+    "some-7b-model", quantization_config=cfg, device_map="auto")
+# A 7B model that needs ~14 GB in FP16 now loads in ~4-5 GB.` },
+
+  { title:"Or run a GGUF file with llama.cpp",
+    desc:"For CPU and laptop inference the common path is a GGUF file with a named recipe like Q4_K_M — a 4-bit mixed scheme that keeps the most sensitive parts a touch higher. Download the quantized file once and run it locally; no GPU required, no quantization code on your side.",
+    code:`# 1) Quantize an FP16 GGUF down to 4-bit (Q4_K_M) with llama.cpp tools:
+#    ./llama-quantize model-f16.gguf model-Q4_K_M.gguf Q4_K_M
+#
+# 2) Run it locally on CPU/laptop:
+./llama-cli -m model-Q4_K_M.gguf -p "Summarize quantization in one line."
+
+# Q4_K_M = ~4-bit weights, mixed precision on sensitive tensors.
+# A 7B model runs in a few GB of RAM, no data-center GPU needed.` },
+];
+const buildEl=document.getElementById("buildSteps");
+BUILD.forEach((s,i)=>{
+  const li=document.createElement("li");
+  li.className="bg-white rounded-2xl border border-slate-200 p-6";
+  const codeId="code"+i;
+  li.innerHTML=`<div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">${i+1}</div><h3 class="font-bold text-lg">${s.title}</h3></div>
+    <p class="text-sm text-slate-600 mb-3">${s.desc}</p>
+    <div class="relative">
+      <button data-copy="${codeId}" class="copy-btn absolute right-2 top-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-md">Copy</button>
+      <pre id="${codeId}"></pre>
+    </div>`;
+  buildEl.appendChild(li);
+  li.querySelector("#"+codeId).textContent=s.code;
+});
+document.querySelectorAll(".copy-btn").forEach(btn=>{
+  btn.onclick=()=>{
+    const code=document.getElementById(btn.dataset.copy).textContent;
+    navigator.clipboard.writeText(code).then(()=>{ const o=btn.textContent; btn.textContent="✓ Copied"; setTimeout(()=>btn.textContent=o,1200); });
+  };
+});
+</script>
+</body>
+</html>
