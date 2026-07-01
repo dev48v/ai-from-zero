@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 22 — The KV-Cache</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .slot { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; margin:2px;
+          border-radius:6px; font-size:12px; font-weight:700; }
+  .cached { background:#e0e7ff; color:#4338ca; }
+  .fresh  { background:#4f46e5; color:#fff; }
+  .empty  { background:#f1f5f9; color:#cbd5e1; }
+  .stat { font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 22</div>
+      <h1 class="text-xl font-bold">🗄️ The KV-Cache — Why LLMs Don't Re-Read the Prompt</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-4xl mx-auto text-center">
+      <h2 class="text-2xl font-bold mb-1">Generate a sentence twice — once re-reading everything, once with a cache.</h2>
+      <p class="text-slate-500 mb-4">To pick each new word, a Transformer's attention looks back at every previous token. The naïve way recomputes the Key and Value vectors for <em>all</em> prior tokens at every single step — that's quadratic, and most of it is repeated work. The <strong>KV-cache</strong> stores each token's K/V the first time and reuses them, so each new step computes K/V for just <em>one</em> new token. Press ▶ and watch the operation counters diverge.</p>
+      <div class="flex justify-center gap-5 mb-3 text-sm font-bold text-slate-600 flex-wrap">
+        <div>Token: <span id="tk" class="stat text-indigo-600">0</span>/<span id="tkTot" class="stat">0</span></div>
+        <div>No-cache ops: <span id="noc" class="stat text-slate-500">0</span></div>
+        <div>Cached ops: <span id="wc" class="stat text-indigo-600">0</span></div>
+        <div>Speedup: <span id="sp" class="stat text-indigo-600">—</span></div>
+      </div>
+      <div class="bg-white rounded-2xl border border-indigo-200 p-4 max-w-2xl mx-auto">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">KV-cache (fills as we go)</div>
+        <div id="cacheRow" class="mb-3"></div>
+        <div class="text-sm text-slate-600" id="sentence"></div>
+      </div>
+      <div class="flex justify-center mt-4 gap-2 flex-wrap">
+        <button id="runBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-semibold text-sm">▶ Generate</button>
+        <button id="resetBtn" class="bg-slate-200 hover:bg-slate-300 px-4 py-2 rounded-lg font-semibold text-sm">↺ Reset</button>
+        <span class="self-center text-sm font-bold text-slate-500 ml-2">Context length</span>
+        <input id="lenR" type="range" min="8" max="120" value="24" class="w-40 accent-indigo-600 self-center">
+        <span id="lenV" class="stat text-indigo-600 self-center">24</span>
+      </div>
+      <p class="text-xs text-slate-400 mt-3">Without a cache, generating N tokens costs work proportional to 1+2+3+…+N = <strong>N(N+1)/2</strong> (quadratic). With the cache it's proportional to <strong>N</strong> (linear) — each step reuses all prior K/V and computes only the newest. The blue slots are freshly computed; the light slots are cache hits (free). The cache is also why long contexts are expensive: it grows with every token and lives in GPU memory.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How the KV-cache works</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / MATH FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 The mental model</h2>
+    <p class="text-slate-500 mb-8">You rarely implement the KV-cache yourself — the inference engine does — but here's exactly what it's doing inside the decode loop.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Attention needs every past token's K &amp; V</h3></div>
+        <p class="text-sm text-slate-600 mb-3">For the new token's Query, attention scores it against the Key of every previous token, then mixes their Values. So to generate token <code>t</code> you need K and V for tokens <code>1…t</code>.</p>
+        <div class="relative"><pre># to produce the next token, attention does:
+scores = Q_new · K[1..t]ᵀ         # compare against all past keys
+weights = softmax(scores)
+out = weights · V[1..t]           # blend all past values</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">The naïve loop recomputes everything</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Without a cache, each step re-runs the whole sequence through the layers to rebuild K/V for tokens <code>1…t</code>. Token <code>1</code>'s K/V is recomputed <code>N</code> times. Total work ≈ N²/2.</p>
+        <div class="relative"><pre># NAIVE: O(N²) — recompute K/V for the full prefix each step
+for t in range(N):
+    K, V = model.encode(tokens[:t+1])   # ← redoes tokens 1..t every time
+    next = attend(Q_t, K, V)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Cache K/V, compute only the new token</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Past tokens never change under causal masking, so their K/V never change either. Store them once; each step appends just the new token's K/V and attends over the whole cache. Work per step is constant → O(N) total.</p>
+        <div class="relative"><pre># CACHED: O(N) — append one token's K/V per step
+K_cache, V_cache = [], []
+for t in range(N):
+    k, v = model.kv(token_t)        # ← ONE token only
+    K_cache.append(k); V_cache.append(v)
+    next = attend(Q_t, K_cache, V_cache)   # reuse all prior K/V</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">The memory cost of long context</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The cache stores K and V for every token, every layer, every attention head. Its size grows linearly with context length — which is exactly why a 128k-token context is expensive: the KV-cache can consume many gigabytes of GPU memory. Tricks like paged attention (vLLM), grouped-query attention, and quantised caches exist to tame it.</p>
+        <div class="relative"><pre># KV-cache memory ≈
+#   2 (K and V) × layers × heads × head_dim
+#   × context_length × bytes_per_value
+# grows with context_length → why 128k context is pricey</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 22 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw why generation would be quadratic without the KV-cache, and how caching each token's Key/Value turns it linear — the single most important optimisation in LLM inference. It also explains prefill-vs-decode latency, why the first token is slow, and why long context costs so much GPU memory. <strong>👉 Tomorrow — Day 23: LoRA &amp; fine-tuning on a budget.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== KV-CACHE SIM =====
+const WORDS = "The quick brown fox jumps over the lazy dog and then it runs across the wide green field under a bright morning sky while birds sing softly above the tall old oak trees near the river".split(" ");
+const cacheRow = document.getElementById("cacheRow"), sentence = document.getElementById("sentence");
+const lenR = document.getElementById("lenR"), lenV = document.getElementById("lenV");
+let N = 24, t = 0, noc = 0, wc = 0, timer = null;
+
+function reset(){
+  stop(); t = 0; noc = 0; wc = 0;
+  document.getElementById("tkTot").textContent = N;
+  render();
+}
+function render(){
+  document.getElementById("tk").textContent = t;
+  document.getElementById("noc").textContent = noc.toLocaleString();
+  document.getElementById("wc").textContent = wc.toLocaleString();
+  document.getElementById("sp").textContent = wc ? (noc/wc).toFixed(1)+"×" : "—";
+  let html = "";
+  for (let i=0;i<N;i++){
+    if (i < t-1) html += `<span class="slot cached" title="cache hit">${i+1}</span>`;
+    else if (i === t-1) html += `<span class="slot fresh" title="just computed">${i+1}</span>`;
+    else html += `<span class="slot empty">·</span>`;
+  }
+  cacheRow.innerHTML = html;
+  sentence.textContent = WORDS.slice(0, t).join(" ") + (t<N && t>0 ? " …" : "");
+}
+function step(){
+  if (t >= N){ stop(); return; }
+  t++;
+  noc += t;   // no-cache: recompute K/V for all t tokens this step
+  wc  += 1;   // cached: only the new token
+  render();
+}
+function stop(){ if (timer){ clearInterval(timer); timer=null; document.getElementById("runBtn").textContent="▶ Generate"; } }
+document.getElementById("runBtn").onclick = () => {
+  if (timer){ stop(); return; }
+  if (t >= N) reset();
+  document.getElementById("runBtn").textContent = "⏸ Pause";
+  timer = setInterval(step, Math.max(40, 900/N));
+};
+document.getElementById("resetBtn").onclick = reset;
+lenR.oninput = () => { N = +lenR.value; lenV.textContent = N; reset(); };
+reset();
+
+// ===== UNDERSTAND step engine =====
+const STEPS = [
+ { title:"1. LLMs generate one token at a time", why:"A language model produces text autoregressively: it emits one token, appends it to the sequence, and runs again to produce the next. Each of those runs is a full forward pass through every layer of the network. Because the model must attend back over the whole conversation so far to decide the next word, the naïve cost of each step grows with how much text already exists — and you pay it once per token generated. That compounding is what the KV-cache is designed to eliminate.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">emit token → append → run again<br>each step attends over ALL prior tokens<br>cost per step grows with length</div>`, code:`# decode loop
+while not done:
+    logits = model(sequence)      # full forward pass
+    next_token = sample(logits)
+    sequence.append(next_token)   # then do it all again` },
+ { title:"2. Attention looks back at Keys and Values", why:"Inside each attention layer, every token is turned into three vectors: a Query (what am I looking for?), a Key (what do I offer?), and a Value (what content do I carry?). To compute the output for the newest token, its Query is compared against the Keys of all previous tokens to get attention weights, and those weights blend the previous tokens' Values. So generating token t genuinely requires the K and V of tokens 1 through t — that's the raw material the cache will store.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">each token → Query, Key, Value<br>new Q · all past K → weights<br>weights · all past V → output<br>need K,V for tokens 1..t</div>`, code:`Q, K, V = project(tokens)          # per token
+scores  = Q_new @ K[:t].T          # vs every past key
+out     = softmax(scores) @ V[:t]  # blend past values` },
+ { title:"3. The naïve approach is quadratic", why:"Without a cache, each generation step re-encodes the entire prefix from scratch to rebuild the Keys and Values for tokens 1…t. Step 1 processes 1 token, step 2 processes 2, …, step N processes N. The total work is 1+2+3+…+N = N(N+1)/2, which grows with the square of the sequence length. Token 1's K/V gets recomputed on every single step even though it never changes. For long outputs this repeated work dominates and makes generation painfully slow.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">step1: 1 · step2: 2 · … · stepN: N<br>total = 1+2+…+N = N(N+1)/2<br>= O(N²) · token 1 redone N times</div>`, code:`# NAIVE — recompute the whole prefix each step
+for t in range(N):
+    K, V = encode(tokens[:t+1])   # O(t) work
+    out  = attend(Q_t, K, V)
+# total ≈ N(N+1)/2  → quadratic` },
+ { title:"4. The key insight: past K/V never change", why:"Language models use causal masking — a token can only attend to earlier tokens, never later ones. A consequence: adding a new token at the end does not change the Key and Value vectors of any earlier token. They are computed from the (unchanging) tokens before them. That means recomputing them every step is pure waste. If we simply remember each token's K and V the first time we compute it, we never need to compute it again.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">causal mask: token sees only the past<br>⇒ a new token can't change old K/V<br>⇒ old K/V are constant → cache them once</div>`, code:`# Causal masking means:
+#   K[i], V[i] depend only on tokens ≤ i
+#   appending token t+1 doesn't touch K[1..t]
+# → they're safe to store and reuse forever` },
+ { title:"5. Cache them → linear generation", why:"The KV-cache stores every token's Key and Value the first time it's seen. At each new step you compute K/V for just the one new token, append them to the cache, and run attention over the whole cache. Now the per-step work is constant instead of growing, so generating N tokens costs O(N) total instead of O(N²). This is the single biggest reason real-time LLM chat is feasible — it turns a quadratic wall into a linear stroll.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">each step: compute 1 new K/V, append<br>attend over the full cache<br>work/step = constant → O(N) total<br>quadratic → linear ✅</div>`, code:`# CACHED — one token's K/V per step
+K_cache, V_cache = [], []
+for t in range(N):
+    k, v = kv(token_t)            # O(1) new work
+    K_cache.append(k); V_cache.append(v)
+    out = attend(Q_t, K_cache, V_cache)` },
+ { title:"6. Prefill vs decode — two phases", why:"This reframes inference into two phases. Prefill: the model ingests your entire prompt in one big parallel pass, filling the cache for all prompt tokens — this is compute-heavy and is why the first token can take a moment on a long prompt. Decode: it then generates output tokens one at a time, each a cheap cache-append step. So 'time to first token' (dominated by prefill) and 'time per output token' (dominated by decode) are different numbers — a distinction that matters a lot when you're optimising latency.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">PREFILL: prompt → fill cache (parallel, heavy)<br>= time-to-first-token<br>DECODE: 1 token/step (cheap, cached)<br>= time-per-output-token</div>`, code:`# Phase 1 — PREFILL (once):
+K_cache, V_cache = kv(prompt_tokens)   # big parallel pass
+# Phase 2 — DECODE (per output token):
+#   append one K/V, attend, sample, repeat` },
+ { title:"7. The memory price of context length", why:"The cache isn't free — it lives in GPU memory and stores K and V for every token, in every layer, for every attention head. Its size is roughly 2 × layers × heads × head_dim × context_length × bytes. Because it scales with context length, a 128k-token conversation can require many gigabytes just for the cache, often becoming the binding constraint on how many users a GPU can serve at once. This is the direct trade behind long-context pricing: you're paying for the memory the cache occupies.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">cache size ≈<br>2 × layers × heads × dim × tokens × bytes<br>grows with context → GBs at 128k<br>= the long-context cost driver</div>`, code:`# For a big model, KV-cache per token can be
+# tens of KB × (thousands of tokens) = GBs.
+# It, not compute, often limits batch size /
+# concurrent users on a GPU.` },
+ { title:"8. Taming the cache: paging, GQA, prompt caching", why:"Because the cache is precious, a whole toolbox exists to manage it. Paged attention (vLLM) stores the cache in non-contiguous pages like virtual memory, slashing waste and enabling far higher throughput. Grouped-query and multi-query attention share Keys/Values across heads to shrink the cache. Quantising the cache to 8- or 4-bit halves or quarters its size. And prompt caching — the feature that makes reusing a long system prompt cheap across requests — is literally persisting and reusing the prefill KV-cache. Everything you see about fast, cheap, long-context LLMs traces back to how the KV-cache is handled.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">paged attention (vLLM) → less waste<br>GQA / MQA → share K,V across heads<br>quantised cache → 4/8-bit<br>prompt caching = reuse prefill KV</div>`, code:`# Real systems optimise the cache:
+#   • PagedAttention  (vLLM) — virtual-memory pages
+#   • GQA / MQA       — fewer K/V per layer
+#   • KV quantization — 8/4-bit storage
+#   • prompt caching  — persist & reuse prefill` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curS=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curS-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curS+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curS>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curS+1); },3200); };
+show(0);
+
+function copy(btn){ const pre=btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o=btn.textContent; btn.textContent="✓ Copied!"; setTimeout(()=>btn.textContent=o,1500); }
+</script>
+</body>
+</html>
