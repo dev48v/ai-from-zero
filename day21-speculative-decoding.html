@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AIFromZero · Day 21 — Speculative Decoding</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .pulse-dot { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+  /* token chips */
+  .tok { transition: background .35s ease, border-color .35s ease, color .35s ease, transform .35s ease, opacity .35s ease; }
+  .bar { transition: width .4s ease, background .35s ease; }
+  .tok-pop { animation: pop .35s ease-out; }
+  @keyframes pop { from { transform:scale(.6); opacity:0; } to { transform:scale(1); opacity:1; } }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 21</div>
+      <h1 class="text-xl font-bold">⚡ Speculative Decoding — Draft + Verify for 2–3× Faster LLMs</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">A tiny fast model guesses ahead — the big model checks all the guesses in ONE pass</h2>
+      <p class="text-slate-500 text-center mb-5">Normally a big LLM writes <b>one token per forward pass</b> — slow, because each pass is expensive and you can't skip ahead. Speculative decoding adds a small, cheap <b>draft</b> model that proposes the next <b>K tokens</b>. The big <b>target</b> model then verifies all K <b>at once</b> in a single pass: it keeps every proposed token up to the <b>first one it disagrees with</b>, throws away the rest, and adds <b>one correction token</b> of its own. Drag the <b>draft accuracy</b> slider below — as the draft gets better, more tokens are accepted per target pass and the <b>speedup climbs</b>. This is a real simulation: the accept/reject you see is computed from the slider against a fixed target sentence.</p>
+
+      <!-- CONTROLS -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-5 flex flex-wrap items-center gap-6">
+        <div class="flex items-center gap-3 grow min-w-[280px]">
+          <span class="text-sm font-bold text-slate-700 whitespace-nowrap">Draft accuracy</span>
+          <input id="acc" type="range" min="0" max="100" value="70" class="grow accent-indigo-600">
+          <span id="accVal" class="text-sm font-mono font-bold text-indigo-700 w-12 text-right">70%</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-bold text-slate-700 whitespace-nowrap">K (tokens proposed)</span>
+          <div id="kSel" class="flex rounded-lg overflow-hidden border border-slate-200">
+            <button data-k="2" class="seg px-3 py-2 text-sm font-semibold">2</button>
+            <button data-k="4" class="seg px-3 py-2 text-sm font-semibold border-l border-slate-200">4</button>
+            <button data-k="6" class="seg px-3 py-2 text-sm font-semibold border-l border-slate-200">6</button>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 ml-auto">
+          <button id="step" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ One round</button>
+          <button id="run"  class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">⏩ Auto-run</button>
+          <button id="reset" class="bg-slate-100 px-4 py-2 rounded-lg font-semibold text-sm">↺ Reset</button>
+        </div>
+      </div>
+
+      <!-- THE SENTENCE BEING GENERATED -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">① The text so far — the target model's true output, built token by token</div>
+        <div id="output" class="flex flex-wrap gap-1.5 min-h-[44px] text-sm items-center"></div>
+        <p class="text-[11px] text-slate-400 mt-2" id="outNote">Press <b>One round</b>: the draft proposes the next K tokens, the target verifies them in a single pass.</p>
+      </div>
+
+      <!-- THE CURRENT ROUND -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-3">② This round: draft proposes → target verifies (green kept · red first mismatch · grey discarded)</div>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <div class="text-[11px] uppercase font-bold text-slate-400 mb-2">Draft model proposes K tokens (cheap, sequential guesses)</div>
+            <div id="draftRow" class="flex flex-wrap gap-1.5 min-h-[36px] text-sm items-center"><span class="text-slate-300 text-xs">— run a round —</span></div>
+          </div>
+          <div>
+            <div class="text-[11px] uppercase font-bold text-slate-400 mb-2">Target model verifies ALL of them in ONE parallel pass</div>
+            <div id="verifyRow" class="flex flex-wrap gap-1.5 min-h-[36px] text-sm items-center"><span class="text-slate-300 text-xs">— run a round —</span></div>
+          </div>
+        </div>
+        <div class="mt-3 text-[11px] text-slate-500" id="roundNote">Each round costs <b>one</b> target forward pass no matter how many tokens are proposed — that's where the speed comes from.</div>
+      </div>
+
+      <!-- SCOREBOARD -->
+      <div class="grid md:grid-cols-3 gap-5 mb-2">
+        <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-3">③ Speedup vs vanilla decoding</div>
+          <div class="flex items-end gap-3">
+            <div class="text-4xl font-extrabold font-mono text-slate-800" id="speedBig">1.0×</div>
+            <div class="text-sm font-semibold pb-1 text-slate-500" id="speedTag">tokens per target pass</div>
+          </div>
+          <div class="mt-3 h-3 rounded-full bg-slate-200 overflow-hidden"><div id="speedBar" class="bar h-full bg-emerald-500" style="width:20%"></div></div>
+          <div class="text-[11px] text-slate-400 mt-2" id="speedNote">Vanilla = exactly 1 token per target pass (1.0×). Speculative gets more per pass when the draft guesses well.</div>
+        </div>
+        <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-3">④ Accept rate this session</div>
+          <div class="text-4xl font-extrabold font-mono text-indigo-700" id="acceptBig">—</div>
+          <div class="text-xs text-slate-500 mt-1" id="acceptMath">proposed tokens accepted / total proposed</div>
+          <div class="mt-3 grid grid-cols-2 gap-2 text-center">
+            <div class="rounded-lg bg-emerald-50 border border-emerald-200 p-2"><div class="text-[10px] uppercase text-emerald-600">accepted</div><div id="accCnt" class="text-xl font-bold text-emerald-700 font-mono">0</div></div>
+            <div class="rounded-lg bg-rose-50 border border-rose-200 p-2"><div class="text-[10px] uppercase text-rose-600">rejected</div><div id="rejCnt" class="text-xl font-bold text-rose-700 font-mono">0</div></div>
+          </div>
+        </div>
+        <div class="bg-white rounded-2xl border-2 border-indigo-200 p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-3">⑤ Cost so far — passes to write the text</div>
+          <div class="space-y-2 text-sm">
+            <div class="flex justify-between"><span class="text-slate-500">Tokens written</span><span id="tokWritten" class="font-mono font-bold">0</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Target passes used</span><span id="passUsed" class="font-mono font-bold text-indigo-700">0</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Vanilla would need</span><span id="passVanilla" class="font-mono font-bold text-slate-400">0</span></div>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-3" id="costNote">Fewer target passes for the same text = faster and cheaper. The gap is the speculative win.</div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 text-center mt-5"><b>Speculative decoding keeps the target model's exact output</b> — the small draft only proposes; the big target still decides every token, so the final text is identical to normal decoding. The accept/reject above is a genuine simulation: for each proposed token we roll against the draft-accuracy setting to decide whether the draft matched the target's true next token, keep the run of matches, stop at the first miss, and add the target's correction — exactly the real acceptance rule. Real systems use a small model (or extra "Medusa" heads / n-gram lookups) as the drafter and a probabilistic accept test that provably preserves the target's distribution.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Speculative decoding, step by step</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">IN ONE LINE</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-4xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a speculative decoder: draft, propose K, verify, accept</h2>
+    <p class="text-slate-500 mb-8">Speculative decoding is a loop with four moving parts: pick a small <b>draft</b> model, decide how many tokens <b>K</b> it guesses ahead, run the big <b>target</b> over the draft's guesses in a <b>single pass</b>, and apply the <b>acceptance test</b> that keeps the run of correct guesses plus one correction. Below you build that loop from scratch with a simple greedy accept rule, then swap in the probabilistic rule that makes it provably lossless, and finally see the one-liners real serving stacks use (<code>vLLM</code>, <code>transformers</code> assisted generation). Copy each step as a starting point.</p>
+    <ol class="space-y-5" id="buildSteps"></ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 21 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You now know what speculative decoding is — a <b>small fast draft model proposes K tokens ahead</b> and the <b>big target verifies them all in one parallel pass</b> — why it matters (autoregressive decoding is <b>one token per expensive, memory-bound forward pass</b>), how it works (<b>accept the run of matching tokens, stop at the first mismatch, add one correction token</b>), why it's <b>lossless</b> (the accept/reject test preserves the target's exact distribution, so output is identical to normal decoding), and what drives the win (<b>higher draft accuracy → more accepted tokens per target pass → 2–3× speedup</b>). This is how ChatGPT-scale models serve tokens faster without changing a single output.</p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===== SPECULATIVE DECODING DEMO (fully offline, real accept/reject sim) =====
+// A fixed "target" sentence is the ground truth the big model would produce.
+// Each round: the draft proposes the next K tokens. For each proposed token we
+// roll against the draft-accuracy slider to decide if the draft's guess matched
+// the target's true token. We keep the leading run of matches, stop at the first
+// mismatch (that token is rejected), then the target contributes ONE correction
+// token (its true token at that position). One target forward pass per round.
+const TARGET = ("the quick brown fox jumps over the lazy dog while the calm river "
+  + "flows past the old stone bridge and the warm sun sets slowly behind green hills")
+  .split(" ");
+
+let acc = 70;        // draft accuracy %
+let K = 4;           // tokens proposed per round
+let pos = 0;         // how many target tokens are finalized (written)
+let accepted = 0;    // total draft tokens accepted (matched)
+let rejected = 0;    // total draft tokens rejected (first-mismatch events)
+let passes = 0;      // target forward passes used
+let running = null;
+
+// ----- DOM -----
+const accEl   = document.getElementById("acc");
+const accVal  = document.getElementById("accVal");
+const kSel    = document.getElementById("kSel");
+const segs    = kSel.querySelectorAll(".seg");
+const stepBtn = document.getElementById("step");
+const runBtn  = document.getElementById("run");
+const resetBtn= document.getElementById("reset");
+const outEl   = document.getElementById("output");
+const outNote = document.getElementById("outNote");
+const draftRow= document.getElementById("draftRow");
+const verifyRow=document.getElementById("verifyRow");
+const roundNote=document.getElementById("roundNote");
+const speedBig= document.getElementById("speedBig");
+const speedBar= document.getElementById("speedBar");
+const speedNote=document.getElementById("speedNote");
+const acceptBig=document.getElementById("acceptBig");
+const accCnt  = document.getElementById("accCnt");
+const rejCnt  = document.getElementById("rejCnt");
+const tokWritten=document.getElementById("tokWritten");
+const passUsed= document.getElementById("passUsed");
+const passVanilla=document.getElementById("passVanilla");
+
+function chip(text, cls){
+  return `<span class="tok tok-pop px-2 py-1 rounded-md border ${cls}">${text}</span>`;
+}
+
+function renderOutput(){
+  outEl.innerHTML = pos === 0
+    ? `<span class="text-slate-300 text-xs">— nothing written yet —</span>`
+    : TARGET.slice(0, pos).map(w => chip(w, "bg-slate-100 border-slate-200 text-slate-700")).join("");
+}
+
+function renderScore(){
+  // tokens written per target pass = speedup vs vanilla (which is 1 token/pass)
+  const speed = passes === 0 ? 1 : pos / passes;
+  speedBig.textContent = speed.toFixed(2) + "×";
+  speedBar.style.width = Math.min(100, (speed / (K + 1)) * 100) + "%";
+  speedBar.classList.toggle("bg-emerald-500", speed >= 1.6);
+  speedBar.classList.toggle("bg-amber-400", speed < 1.6 && speed >= 1.15);
+  speedBar.classList.toggle("bg-rose-400", speed < 1.15);
+  speedNote.textContent = passes === 0
+    ? "Vanilla = exactly 1 token per target pass (1.0×). Run a round to see the speculative speedup."
+    : `You wrote ${pos} tokens in ${passes} target pass${passes===1?"":"es"} → ${speed.toFixed(2)} tokens per pass.`;
+
+  const totalProposed = accepted + rejected;
+  acceptBig.textContent = totalProposed === 0 ? "—" : Math.round(accepted / totalProposed * 100) + "%";
+  accCnt.textContent = accepted;
+  rejCnt.textContent = rejected;
+
+  tokWritten.textContent = pos;
+  passUsed.textContent = passes;
+  passVanilla.textContent = pos;   // vanilla needs 1 pass per token
+}
+
+// run ONE speculative round; returns false when the target text is finished
+function oneRound(){
+  if(pos >= TARGET.length) return false;
+
+  const remaining = TARGET.length - pos;
+  const k = Math.min(K, remaining);   // can't propose past the end
+  passes++;                            // exactly one target forward pass this round
+
+  // draft proposes k tokens; for each we roll acceptance against draft accuracy.
+  // A proposal is "matched" if it equals the target's true token at that offset.
+  // We simulate that with a Bernoulli(acc) roll — a correct guess is a match.
+  const proposals = [];   // {text, matched}
+  let firstMiss = -1;
+  for(let i=0;i<k;i++){
+    const matched = Math.random() < (acc/100);
+    const trueTok = TARGET[pos + i];
+    // if it matched, the draft's shown token equals the true one; if not, show a plausible wrong guess
+    const shown = matched ? trueTok : "«" + (WRONG[(pos+i) % WRONG.length]) + "»";
+    proposals.push({ shown, trueTok, matched });
+    if(!matched && firstMiss === -1) firstMiss = i;
+  }
+
+  // acceptance: keep the leading run of matches up to (not including) firstMiss
+  const acceptCount = firstMiss === -1 ? k : firstMiss;
+  accepted += acceptCount;
+  if(firstMiss !== -1) rejected += 1;   // exactly one token is the rejected/mismatch point
+
+  // render the draft row
+  draftRow.innerHTML = proposals.map((p,i)=>{
+    if(i < acceptCount)      return chip(p.shown, "bg-emerald-50 border-emerald-300 text-emerald-700");
+    if(i === firstMiss)      return chip(p.shown, "bg-rose-50 border-rose-300 text-rose-700 line-through");
+    return chip(p.shown, "bg-slate-50 border-slate-200 text-slate-400 opacity-60");   // discarded after first miss
+  }).join("");
+
+  // render the target verification row: accepted tokens (green) + one correction (indigo)
+  const verified = [];
+  for(let i=0;i<acceptCount;i++) verified.push(chip("✓ " + TARGET[pos+i], "bg-emerald-50 border-emerald-300 text-emerald-700"));
+  // the correction token: the target's true token at the mismatch position (always exists unless we accepted all k)
+  let corrText = "";
+  if(acceptCount < k){
+    verified.push(chip("＋ " + TARGET[pos + acceptCount], "bg-indigo-50 border-indigo-400 text-indigo-700 font-bold"));
+    corrText = " + 1 correction token from the target";
+  } else if(pos + acceptCount < TARGET.length){
+    // all k accepted: the target also gives a free bonus token from the same pass
+    verified.push(chip("＋ " + TARGET[pos + acceptCount], "bg-indigo-50 border-indigo-400 text-indigo-700 font-bold"));
+    corrText = " + 1 bonus token (all K accepted!)";
+  }
+  verifyRow.innerHTML = verified.join("");
+
+  // finalize: accepted matches + 1 target token (correction OR bonus), capped at the end
+  const advance = Math.min(acceptCount + 1, remaining);
+  pos += advance;
+
+  roundNote.innerHTML = `This round: draft proposed <b>${k}</b>, target accepted <b>${acceptCount}</b>${corrText} — `
+    + `<b>${advance}</b> token${advance===1?"":"s"} written for the cost of <b>1</b> target pass.`;
+  outNote.innerHTML = pos >= TARGET.length
+    ? "Done — the full sentence is written. Notice it's identical to what the target model would produce alone."
+    : "Press <b>One round</b> again, or <b>Auto-run</b> to the end. Slide draft accuracy to change the accept rate.";
+
+  renderOutput();
+  renderScore();
+  return pos < TARGET.length;
+}
+
+function resetAll(){
+  if(running){ clearInterval(running); running=null; runBtn.textContent="⏩ Auto-run"; }
+  pos=0; accepted=0; rejected=0; passes=0;
+  draftRow.innerHTML = `<span class="text-slate-300 text-xs">— run a round —</span>`;
+  verifyRow.innerHTML = `<span class="text-slate-300 text-xs">— run a round —</span>`;
+  roundNote.innerHTML = "Each round costs <b>one</b> target forward pass no matter how many tokens are proposed — that's where the speed comes from.";
+  outNote.innerHTML = "Press <b>One round</b>: the draft proposes the next K tokens, the target verifies them in a single pass.";
+  renderOutput(); renderScore();
+}
+
+// a small pool of "wrong guess" words to show when the draft misses
+const WRONG = ["cat","runs","blue","under","sits","near","new","metal","road","fast","cold","moon","rises","up","behind","gray","valleys"];
+
+// wire controls
+accEl.oninput = ()=>{ acc = +accEl.value; accVal.textContent = acc + "%"; };
+segs.forEach(s=> s.onclick = ()=>{ K = +s.dataset.k; renderSeg(); });
+function renderSeg(){ segs.forEach(s=>{ const on = +s.dataset.k === K; s.classList.toggle("bg-indigo-600",on); s.classList.toggle("text-white",on); s.classList.toggle("bg-white",!on); s.classList.toggle("text-slate-600",!on); }); }
+stepBtn.onclick = ()=> oneRound();
+runBtn.onclick = ()=>{
+  if(running){ clearInterval(running); running=null; runBtn.textContent="⏩ Auto-run"; return; }
+  if(pos >= TARGET.length) resetAll();
+  runBtn.textContent="⏸ Pause";
+  running = setInterval(()=>{ if(!oneRound()){ clearInterval(running); running=null; runBtn.textContent="⏩ Replay"; } }, 900);
+};
+resetBtn.onclick = resetAll;
+
+// initial
+renderSeg();
+resetAll();
+
+// ===== UNDERSTAND STEPS =====
+const STEPS = [
+  { title:"1. The problem — decoding is one token at a time",
+    why:"A language model writes text autoregressively: it produces one token, appends it to the input, and runs the whole network again to produce the next. That means generating a 200-token answer takes 200 separate forward passes through a model with billions of parameters, and you can't start token 5 until token 4 is finished. Worse, each pass is memory-bound — most of the time is spent shuttling the model's huge weights from memory, not doing math — so the hardware sits underused. This sequential, one-token-per-pass loop is the single biggest reason large models feel slow to respond, and it's exactly what speculative decoding attacks.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">vanilla decoding: <b>1 token = 1 full forward pass</b> &nbsp;·&nbsp; 200 tokens = 200 passes, each one waiting on the last</div>`, code:`problem: autoregressive = 1 token per expensive, memory-bound forward pass` },
+
+  { title:"2. The key insight — verifying is cheaper than generating",
+    why:"Here's the trick that makes everything work: a model can check several tokens in parallel far more cheaply than it can generate them one by one. Because each forward pass is dominated by loading the weights, running the model over five candidate tokens at once costs almost the same as running it over one — you pay the memory cost once and get five checks for nearly free. Generation is sequential and slow; verification is parallel and cheap. So if some other, faster process could guess the next few tokens, the big model could confirm a whole batch of them in a single pass instead of grinding them out one at a time. That asymmetry is the whole foundation of speculative decoding.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>generating</b> K tokens = K slow passes &nbsp;·&nbsp; <b>verifying</b> K tokens = 1 pass (nearly free) &nbsp;→ guess, then check in bulk</div>`, code:`insight: checking K tokens in parallel ~= cost of generating 1 token` },
+
+  { title:"3. Two models — a small draft and a big target",
+    why:"Speculative decoding uses two models that share the same vocabulary. The big, accurate one is the target — it's the model whose output you actually want, and its answers must not change. The small, fast one is the draft (often a much smaller version of the same family, or lightweight extra heads bolted onto the target). The draft's only job is to guess ahead cheaply. It doesn't need to be very accurate; it just needs to be right often enough that its guesses are usually confirmed. You keep the quality of the big model and borrow the speed of the small one — the target stays the sole authority on what the final text is.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center"><b>draft</b> (small, fast, cheap guesses) &nbsp;+&nbsp; <b>target</b> (big, accurate, the real output) &nbsp;·&nbsp; same vocabulary</div>`, code:`two models: small draft proposes, big target decides (shared vocab)` },
+
+  { title:"4. Propose K tokens ahead with the draft",
+    why:"Each round begins with the draft model generating a short run of K candidate tokens — typically three to eight — by decoding normally on its own. Because the draft is small, these K sequential passes are quick and cheap compared to a single pass of the target. The result is a little chain of speculative tokens: the draft's best guess for how the text continues from the current point. K is a tuning knob — propose too few and you don't save much per target pass; propose too many and the later guesses are likely wrong and wasted. These K tokens are pure speculation until the target weighs in.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">draft decodes <b>K tokens</b> (e.g. 4) ahead on its own &nbsp;·&nbsp; cheap because the draft is small &nbsp;·&nbsp; K = tuning knob</div>`, code:`propose: draft greedily/sample K tokens ahead (cheap sequential passes)` },
+
+  { title:"5. Verify all K in one parallel target pass",
+    why:"Now the target model runs once over the current text plus all K proposed tokens at the same time. Thanks to the way attention works, a single forward pass produces the target's own predicted next token at every one of those positions in parallel — as if it had been asked 'what would you have written here?' at each step, simultaneously. This is the moment the cheap-verification insight pays off: one expensive pass yields K+1 target predictions instead of one. No extra target passes are spent per proposed token. The target now has everything it needs to judge each of the draft's guesses against what it would have produced itself.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">target runs <b>once</b> over [context + K guesses] &nbsp;→&nbsp; gets its own prediction at <b>all K+1 positions</b> in parallel</div>`, code:`verify: one target forward pass scores all K proposed positions at once` },
+
+  { title:"6. The acceptance rule — keep the run, stop at the first miss",
+    why:"With the target's predictions in hand, you walk the K guesses left to right and accept each one as long as it agrees with what the target wanted at that position. The instant a guess disagrees, you stop: that mismatched token is rejected and everything after it is thrown away, because those later guesses were built on a token the target won't keep. So a round accepts a leading run of correct guesses — maybe all K, maybe zero — and discards the rest. The more the draft's guesses line up with the target, the longer the accepted run and the more tokens you commit from a single target pass.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">accept guesses <b>left→right while they match</b> &nbsp;·&nbsp; first mismatch = <b>reject it + discard the rest</b> of the run</div>`, code:`accept: take longest prefix of guesses that match target; drop from 1st miss` },
+
+  { title:"7. The correction token — never waste the pass",
+    why:"Even when a guess is rejected, that same target forward pass already computed the target's own token for the rejected position — so instead of discarding the round entirely, you take the target's token there as a free correction. This guarantees forward progress: every round writes at least one genuine target token (the correction) even in the worst case where the draft got everything wrong. And in the best case, where all K guesses are accepted, the pass also produced the target's prediction for the position just past them, giving you a bonus token. So each round commits somewhere between one and K+1 tokens, always including at least one token the target itself chose.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">rejected spot → use the <b>target's own token</b> as a correction (free from the same pass) &nbsp;·&nbsp; ≥1 real token every round</div>`, code:`correct: at the mismatch use target's token; all-accepted gives a bonus token` },
+
+  { title:"8. Why it's lossless — output is exactly the target's",
+    why:"The crucial property is that speculative decoding does not change what the model produces — the final text is identical to what the target would have generated on its own, just faster. That's because the target has veto power at every position: a draft token only survives if the target agrees with it, and any disagreement is overwritten by the target's own choice. For sampling (not just greedy) there's a slightly cleverer probabilistic accept/reject test that provably keeps the exact same output distribution as sampling from the target directly. The draft never gets to inject its own opinions; it only proposes candidates the target is free to confirm or reject, so quality is preserved perfectly.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">target confirms or overrides every token &nbsp;→&nbsp; <b>identical output</b> to plain decoding &nbsp;·&nbsp; provably lossless</div>`, code:`lossless: accept test preserves target's exact distribution -> same output` },
+
+  { title:"9. The speedup — it rides on draft accuracy",
+    why:"How much faster you go depends almost entirely on how often the draft guesses right, called the acceptance rate. If the draft is usually correct, most rounds accept the whole run of K tokens, so you commit many tokens per target pass and the speedup approaches K+1×. If the draft is often wrong, rounds accept only a token or two and you barely beat vanilla decoding. In practice a good draft on predictable text yields roughly 2–3× fewer target passes for the same output, which is why it's a favorite for production serving. The demo's slider makes this concrete: raise draft accuracy and watch tokens-per-pass — the speedup — climb.",
+    concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center">speedup ≈ <b>tokens accepted per target pass</b> &nbsp;·&nbsp; higher draft accuracy → longer runs → <b>2–3×</b> typical</div>`, code:`speedup: ~ avg accepted tokens per pass; better draft = closer to K+1x` },
+
+  { title:"10. When it helps, when it hurts",
+    why:"Speculative decoding shines on predictable, low-entropy text — code, structured formats, or continuations where the next tokens are easy to guess — because the draft's acceptance rate is high and runs are long. It also helps most when the target is large and memory-bound, so verifying in parallel is a big relative win. It helps less, or can even hurt, when the draft is a poor match for the target (few guesses accepted, so you pay for the draft passes and gain little), when text is highly creative or random, or when K is set too large so most proposed tokens are wasted. The art is choosing a fast-but-decent draft and a K that matches how predictable your workload is.",
+    concept:`<div class="text-center w-full"><div class="text-5xl mb-2">⚡</div><p class="font-bold text-slate-700">Draft guesses ahead, target verifies in one pass and keeps the run of correct guesses plus a correction — same output, often 2–3× faster. Best on predictable text with a well-matched draft.</p></div>`, code:`use it: predictable text + big memory-bound target + well-matched draft & K` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curStep = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curStep=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curStep-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curStep+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curStep>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curStep+1); },2800); };
+show(0);
+
+// ===== BUILD STEPS (with copy buttons) =====
+const BUILD=[
+  { title:"Set up a draft and a target model",
+    desc:"You need two models over the same vocabulary: a big accurate target (whose output you must keep) and a small fast draft (to guess ahead). A common cheap draft is a much smaller model from the same family. Load both; only the target's decisions count toward the final text.",
+    code:`from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
+tok    = AutoTokenizer.from_pretrained("big/target-model")
+target = AutoModelForCausalLM.from_pretrained("big/target-model")   # the real output
+draft  = AutoModelForCausalLM.from_pretrained("small/draft-model")  # fast guesser
+# Same tokenizer/vocab so their tokens line up 1:1.
+K = 4   # how many tokens the draft proposes each round` },
+
+  { title:"Propose K tokens with the draft",
+    desc:"Each round, let the small draft decode K tokens ahead on its own — greedy or sampled. These are cheap because the draft is tiny. They're pure speculation: the target hasn't seen them yet. K is your main knob (try 3–8).",
+    code:`@torch.no_grad()
+def propose(context_ids, k=K):
+    ids = context_ids
+    guesses = []
+    for _ in range(k):                     # draft decodes k tokens sequentially
+        logits = draft(ids).logits[:, -1]  # (cheap: draft is small)
+        nxt = logits.argmax(-1, keepdim=True)
+        ids = torch.cat([ids, nxt], dim=-1)
+        guesses.append(nxt.item())
+    return guesses                          # k candidate token ids` },
+
+  { title:"Verify all K in ONE target pass",
+    desc:"Feed the context plus all K guesses to the target a single time. One forward pass returns the target's own predicted token at every position in parallel — that's the whole efficiency trick. No per-token target passes.",
+    code:`@torch.no_grad()
+def verify(context_ids, guesses):
+    ids = torch.cat([context_ids,
+                     torch.tensor([guesses])], dim=-1)
+    logits = target(ids).logits          # ONE pass, all positions at once
+    # target's own token at each proposed position (greedy case):
+    start = context_ids.shape[-1] - 1
+    target_tokens = logits[:, start:-1].argmax(-1)[0].tolist()
+    return target_tokens                 # what the target wanted at each step` },
+
+  { title:"Apply the acceptance test (greedy = match)",
+    desc:"Walk the guesses left to right and accept while each equals the target's token. Stop at the first mismatch. Then append the target's own token at the mismatch (the correction) so you always make progress — and a bonus token if all K matched.",
+    code:`def accept(guesses, target_tokens):
+    kept = []
+    for g, t in zip(guesses, target_tokens):
+        if g == t:
+            kept.append(g)               # match -> accept, keep going
+        else:
+            kept.append(t)               # first mismatch -> target's correction
+            return kept, "corrected"     # discard the rest of the run
+    # all K accepted: target's next prediction is a free bonus token
+    return kept + [target_tokens[len(guesses)]], "all-accepted"` },
+
+  { title:"The full loop",
+    desc:"Put it together: propose, verify, accept, append, repeat until you hit the length or an end token. Count target passes — one per round — versus tokens written to see the speedup. The output is exactly what plain greedy decoding of the target would give.",
+    code:`ids = tok("The recipe for a fast LLM is", return_tensors="pt").input_ids
+passes = 0
+while ids.shape[-1] < 128:
+    guesses  = propose(ids, K)
+    tgt_toks = verify(ids, guesses); passes += 1     # one target pass/round
+    kept, _  = accept(guesses, tgt_toks)
+    ids = torch.cat([ids, torch.tensor([kept])], dim=-1)
+print(tok.decode(ids[0]))
+print("tokens:", ids.shape[-1], "target passes:", passes,
+      "-> speedup ~", round(ids.shape[-1]/passes, 2), "x")` },
+
+  { title:"Make it lossless for sampling",
+    desc:"Greedy accept is exact for greedy decoding. For temperature/sampling, swap in the probabilistic accept rule from the speculative-sampling paper: accept a draft token with prob min(1, p_target/p_draft), and on rejection sample from the adjusted residual. This provably reproduces the target's sampling distribution.",
+    code:`import torch
+def spec_sample_accept(p_target, p_draft, draft_tok):
+    # accept with prob min(1, p_target[tok] / p_draft[tok])
+    r = torch.rand(())
+    if r < min(1.0, (p_target[draft_tok] / p_draft[draft_tok]).item()):
+        return draft_tok, True                 # accepted
+    # rejected: sample from normalized (p_target - p_draft)+  residual
+    resid = torch.clamp(p_target - p_draft, min=0)
+    resid = resid / resid.sum()
+    return torch.multinomial(resid, 1).item(), False` },
+
+  { title:"Or just turn it on in a real serving stack",
+    desc:"You rarely hand-roll this in production. transformers has assisted generation (pass an assistant/draft model); vLLM and TensorRT-LLM expose speculative decoding (draft model, n-gram, or Medusa heads) with a flag. Same output, fewer passes, no custom loop.",
+    code:`# transformers: assisted (speculative) generation
+out = target.generate(**inputs, assistant_model=draft, max_new_tokens=128)
+
+# vLLM: enable speculative decoding at serve time
+#   vllm serve big/target-model \\
+#     --speculative-model small/draft-model \\
+#     --num-speculative-tokens 4
+# Medusa / n-gram drafters need no separate model at all.` },
+];
+const buildEl=document.getElementById("buildSteps");
+BUILD.forEach((s,i)=>{
+  const li=document.createElement("li");
+  li.className="bg-white rounded-2xl border border-slate-200 p-6";
+  const codeId="code"+i;
+  li.innerHTML=`<div class="flex items-center gap-3 mb-2"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">${i+1}</div><h3 class="font-bold text-lg">${s.title}</h3></div>
+    <p class="text-sm text-slate-600 mb-3">${s.desc}</p>
+    <div class="relative">
+      <button data-copy="${codeId}" class="copy-btn absolute right-2 top-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-md">Copy</button>
+      <pre id="${codeId}"></pre>
+    </div>`;
+  buildEl.appendChild(li);
+  li.querySelector("#"+codeId).textContent=s.code;
+});
+document.querySelectorAll(".copy-btn").forEach(btn=>{
+  btn.onclick=()=>{
+    const code=document.getElementById(btn.dataset.copy).textContent;
+    navigator.clipboard.writeText(code).then(()=>{ const o=btn.textContent; btn.textContent="✓ Copied"; setTimeout(()=>btn.textContent=o,1200); });
+  };
+});
+</script>
+<footer class="text-center text-xs text-slate-400 py-6 border-t border-slate-200 mt-4">
+  Tomorrow: <b>Day 22 — KV-Cache internals</b>: the memory trick that stops the model from re-reading the whole prompt every single token.
+</footer>
+</body>
+</html>

@@ -27,6 +27,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 18 — Prompt Injection & Jailbreaks](https://dev48v.infy.uk/ai/days/day18-prompt-injection.html) — `day18-prompt-injection.html`
 - [AIFromZero · Day 19 — Mixture of Experts](https://dev48v.infy.uk/ai/days/day19-mixture-of-experts.html) — `day19-mixture-of-experts.html`
 - [AIFromZero · Day 20 — Quantization](https://dev48v.infy.uk/ai/days/day20-quantization.html) — `day20-quantization.html`
+- [AIFromZero · Day 21 — Speculative Decoding](https://dev48v.infy.uk/ai/days/day21-speculative-decoding.html) — `day21-speculative-decoding.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
