@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 24 — LoRA Fine-Tuning</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .bar { transition: width .35s ease-out, background .2s; height:26px; border-radius:6px; }
+  .stat { font-variant-numeric:tabular-nums; }
+  canvas { touch-action:none; }
+  .cell { font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 24</div>
+      <h1 class="text-xl font-bold">🔧 LoRA Fine-Tuning — Freeze the Giant, Train Two Tiny Matrices</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto">
+      <div class="text-center mb-5">
+        <h2 class="text-2xl font-bold mb-1">Adapt a frozen weight matrix by learning a skinny detour — <code>W + BA</code>.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Full fine-tuning updates every weight in a giant matrix <strong>W</strong> and stores a whole new copy. LoRA freezes <strong>W</strong> (🔒 never touched) and learns a small correction <strong>ΔW = B·A</strong>, where <strong>A</strong> is <em>r×d</em> and <strong>B</strong> is <em>d×r</em>. Drop the rank <em>r</em> and the number of trainable weights collapses from <em>d²</em> to <em>2·r·d</em> — often under 1% of the model. Everything below is real: a real frozen matrix, real <strong>B·A</strong> math, and real gradient descent on <strong>A</strong> and <strong>B</strong> to make <code>W + BA</code> match a target.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- PARAM BUDGET -->
+        <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-1">1 · The parameter budget</div>
+          <p class="text-sm text-slate-500 mb-3">Base matrix <strong>W</strong> is <span id="dimLbl">8×8 = 64</span> weights, all <strong>🔒 frozen</strong>. LoRA trains only <strong>A</strong> (<span id="aShape">r×8</span>) and <strong>B</strong> (<span id="bShape">8×r</span>) = <strong>2·r·d</strong> weights. Slide the rank.</p>
+          <div class="flex items-center gap-3 mb-3">
+            <span class="text-sm font-bold text-slate-600 w-14">Rank r</span>
+            <input id="rankR" type="range" min="1" max="8" step="1" value="2" class="flex-1 accent-indigo-600">
+            <span id="rankV" class="stat text-indigo-600 font-bold w-8 text-right">2</span>
+          </div>
+          <div class="flex items-center gap-3 mb-4">
+            <span class="text-sm font-bold text-slate-600 w-14">Alpha α</span>
+            <input id="alphaR" type="range" min="1" max="16" step="1" value="8" class="flex-1 accent-indigo-600">
+            <span id="alphaV" class="stat text-indigo-600 font-bold w-8 text-right">8</span>
+          </div>
+          <div class="grid grid-cols-2 gap-3 mb-3">
+            <div class="bg-slate-50 rounded-xl p-3 text-center"><div class="text-xs text-slate-400 uppercase font-bold">Full fine-tune</div><div class="text-2xl font-bold text-slate-700 stat">64</div><div class="text-xs text-slate-400">weights (all of W)</div></div>
+            <div class="bg-indigo-50 rounded-xl p-3 text-center"><div class="text-xs text-indigo-400 uppercase font-bold">LoRA trainable</div><div id="trainN" class="text-2xl font-bold text-indigo-600 stat">32</div><div id="trainPct" class="text-xs text-indigo-400">50.0% of full</div></div>
+          </div>
+          <div class="bg-slate-100 rounded-md overflow-hidden mb-1"><div id="pctBar" class="bar" style="width:50%;background:#4f46e5"></div></div>
+          <p class="text-xs text-slate-400 mt-2">Trainable = <strong>2 · r · d</strong> (A has r·d, B has d·r). Scaling <code>α/r</code> multiplies the detour so you can raise the update strength without touching the base. As <em>r</em> falls the bar shrinks — that's the whole point: adapt the model by moving a fraction of a percent of its weights.</p>
+        </div>
+
+        <!-- THE MATRICES -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-1">2 · W + (α/r)·B·A, live</div>
+          <p class="text-sm text-slate-500 mb-3">The frozen base <strong>W</strong>, the learned detour <strong>(α/r)·BA</strong>, and their sum — the effective weights the model actually uses at inference. Train below and watch the middle matrix fill in.</p>
+          <div class="grid grid-cols-3 gap-2 items-center text-center">
+            <div><div class="text-xs font-bold text-slate-500 mb-1">W 🔒 frozen</div><canvas id="wCanvas" width="120" height="120" class="w-full border border-slate-200 rounded bg-slate-50"></canvas></div>
+            <div><div class="text-xs font-bold text-indigo-600 mb-1">(α/r)·BA (learned)</div><canvas id="dCanvas" width="120" height="120" class="w-full border border-indigo-200 rounded bg-indigo-50"></canvas></div>
+            <div><div class="text-xs font-bold text-slate-700 mb-1">W + BA (used)</div><canvas id="eCanvas" width="120" height="120" class="w-full border border-slate-200 rounded bg-slate-50"></canvas></div>
+          </div>
+          <p class="text-xs text-slate-400 mt-3 text-center">Each square is one weight; blue = positive, red = negative, brighter = larger. Only the middle matrix is ever trained — and it's forced to be low-rank because it's built from just <em>A</em> and <em>B</em>.</p>
+        </div>
+      </div>
+
+      <!-- TRAIN -->
+      <div class="bg-white rounded-2xl border border-indigo-200 p-5 mt-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-2">3 · Train ONLY A and B (W stays frozen)</div>
+        <p class="text-sm text-slate-500 mb-3">We want the adapted matrix <code>W + (α/r)·BA</code> to equal a fixed <strong>target</strong>. Only A and B get gradients; W never moves. Pick the target's true rank — LoRA fits a low-rank change easily, but struggles when the needed change is higher-rank than <em>r</em>.</p>
+        <div class="flex flex-wrap items-center gap-3 mb-4">
+          <button id="trainBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-semibold text-sm">▶ Train adapter (A, B)</button>
+          <button id="resetBtn" class="bg-slate-200 hover:bg-slate-300 px-4 py-2 rounded-lg font-semibold text-sm">↺ Reset A, B</button>
+          <span class="text-sm font-bold text-slate-600 ml-1">Target needs rank</span>
+          <select id="targetRank" class="border border-slate-300 rounded-lg px-2 py-1.5 text-sm font-semibold accent-indigo-600">
+            <option value="1">1 (easy)</option>
+            <option value="2" selected>2</option>
+            <option value="4">4</option>
+            <option value="8">8 (full-rank, hard for small r)</option>
+          </select>
+          <span class="text-sm font-bold text-slate-500 ml-2">Step <span id="epoch" class="stat text-indigo-600">0</span></span>
+        </div>
+        <div class="grid sm:grid-cols-4 gap-3 mb-4">
+          <div class="bg-slate-50 rounded-xl p-3 text-center"><div class="text-xs text-slate-400 uppercase font-bold">Fit loss (MSE)</div><div id="lossV" class="text-2xl font-bold text-indigo-600 stat">—</div></div>
+          <div class="bg-slate-50 rounded-xl p-3 text-center"><div class="text-xs text-slate-400 uppercase font-bold">Trainable %</div><div id="pctV" class="text-2xl font-bold text-indigo-600 stat">50%</div></div>
+          <div class="bg-slate-50 rounded-xl p-3 text-center"><div class="text-xs text-slate-400 uppercase font-bold">Adapter rank r</div><div id="rV" class="text-2xl font-bold text-indigo-600 stat">2</div></div>
+          <div class="bg-slate-50 rounded-xl p-3 text-center"><div class="text-xs text-slate-400 uppercase font-bold">Base updated?</div><div class="text-2xl font-bold text-emerald-600 stat">never 🔒</div></div>
+        </div>
+        <canvas id="lossCanvas" width="900" height="120" class="w-full border border-slate-200 rounded-lg bg-slate-50"></canvas>
+        <p class="text-xs text-slate-400 mt-2">The curve is the real mean-squared error between <code>W + (α/r)·BA</code> and the target, one point per gradient step. When the target's true rank is ≤ your adapter rank <em>r</em>, the loss drives to nearly zero — a skinny detour is enough. Set the target to <strong>full-rank (8)</strong> with a small <em>r</em> and the loss <em>bottoms out well above zero</em>: the adapter physically can't express a change richer than rank <em>r</em>. That single fact is why LoRA works so well for most fine-tunes and occasionally needs a bigger <em>r</em>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How LoRA works</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / MATH FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Fine-tune a giant model with LoRA yourself</h2>
+    <p class="text-slate-500 mb-8">You don't touch the base weights at all. You attach tiny adapter matrices to a few layers, train only those, and either keep them as a swappable file or merge them back in. Here's the whole recipe, ending in the one config that does it in Hugging Face <code>peft</code>.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Load the base model &amp; freeze it</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Load your pretrained model normally, then freeze every parameter. Nothing in the giant base will receive a gradient — it's read-only. This is what lets a 7B+ model be "fine-tuned" on a single consumer GPU.</p>
+        <div class="relative"><pre>from transformers import AutoModelForCausalLM
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3-8B")
+for p in model.parameters():
+    p.requires_grad = False          # base is frozen 🔒</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Understand the shapes: A, B, and the sum</h3></div>
+        <p class="text-sm text-slate-600 mb-3">For a weight matrix of shape <code>d×k</code>, LoRA adds <code>B·A</code> where <code>A</code> is <code>r×k</code> and <code>B</code> is <code>d×r</code>. A starts random, B starts at zero — so at step 0 the adapter is a no-op and the model behaves exactly like the base. Trainable count is <code>r·k + d·r</code>, i.e. <code>2·r·d</code> when square.</p>
+        <div class="relative"><pre>d, k, r = 4096, 4096, 8
+A = randn(r, k) * 0.01     # r×k, small random
+B = zeros(d, r)            # d×r, starts at ZERO → ΔW = 0 at start
+# effective weight = W + (alpha / r) * (B @ A)
+# trainable = r*k + d*r  =  2*r*d  (≈ 65k vs 16.7M full)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Pick which layers get an adapter</h3></div>
+        <p class="text-sm text-slate-600 mb-3">You rarely adapt every layer. The classic choice is the attention projection matrices (<code>q_proj</code>, <code>v_proj</code>); adding <code>k_proj</code>, <code>o_proj</code>, and the MLP layers gives more capacity at more cost. Fewer target modules = fewer trainable weights = faster and lighter.</p>
+        <div class="relative"><pre>target_modules = ["q_proj", "v_proj"]   # start small
+# more capacity, more params:
+# ["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"]</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Train only the adapters</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Run an ordinary training loop. Because only A and B require gradients, the optimizer state is tiny and memory drops dramatically. The forward pass computes <code>Wx + (α/r)·B(Ax)</code>; the backward pass only flows into A and B.</p>
+        <div class="relative"><pre>opt = torch.optim.AdamW(
+    [p for p in model.parameters() if p.requires_grad], lr=2e-4)
+for x, y in loader:
+    loss = model(x, labels=y).loss
+    loss.backward(); opt.step(); opt.zero_grad()   # only A,B move</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Save a tiny adapter — or merge it back</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The trained adapter is often a few megabytes, not gigabytes — you can keep many per base model and hot-swap them per task. Or, for zero inference latency, fold <code>(α/r)·BA</code> into W once and ship a normal-looking model with no extra ops at runtime.</p>
+        <div class="relative"><pre>model.save_pretrained("./adapter")       # few MB, swappable
+# --- or bake it in for zero-latency serving ---
+merged = model.merge_and_unload()        # W <- W + (alpha/r)*B@A
+merged.save_pretrained("./merged-model")  # plain model, no LoRA ops</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">The whole thing in <code>peft</code>: <code>LoraConfig</code></h3></div>
+        <p class="text-sm text-slate-600 mb-3">In practice you never hand-write A and B. Hugging Face <code>peft</code> wraps your model, injects the adapters into the target modules, and freezes everything else. This one config is the entire mechanism from tabs 1–3, productionised.</p>
+        <div class="relative"><pre>from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(
+    r=8,                       # adapter rank (the slider)
+    lora_alpha=16,             # scaling: effective = W + (alpha/r)*B@A
+    target_modules=["q_proj", "v_proj"],
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+)
+model = get_peft_model(model, config)
+model.print_trainable_parameters()
+# -> trainable params: 4.2M || all params: 8.03B || trainable%: 0.05</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 24 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw why full fine-tuning is wasteful, that the <em>update</em> to a weight matrix is usually low-rank, and how <code>W + (α/r)·BA</code> lets you adapt a giant model by training a fraction of a percent of its weights — the idea behind every LoRA and QLoRA fine-tune, swappable adapters, and single-GPU customisation. <strong>👉 Tomorrow — Day 25: Flash Attention — computing exact attention without ever materialising the giant N×N score matrix.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===================== LoRA matrix math (real) =====================
+const D = 8;                 // square weight matrix dimension (8x8 = 64)
+const FULL = D * D;          // full fine-tune parameter count = 64
+let rank = 2, alpha = 8;
+
+// deterministic PRNG so the demo is reproducible
+function mkRnd(seed){ let s = seed>>>0; return () => { s = (s*1103515245 + 12345) & 0x7fffffff; return s/0x7fffffff; }; }
+
+// frozen base W (fixed values, never trained)
+let W = [];
+(function initW(){
+  const r = mkRnd(7);
+  for(let i=0;i<D;i++){ W[i]=[]; for(let j=0;j<D;j++) W[i][j] = (r()-0.5)*1.2; }
+})();
+
+// low-rank TARGET update: ΔW* = P·Q built from `targetRank` factors, so a rank-r adapter
+// can only match it fully when r >= targetRank. This is genuine, not decorative.
+let TARGET = [];   // = W + ΔW*  (the effective matrix we want to reach)
+function buildTarget(tr){
+  const rnd = mkRnd(101);
+  const P = [], Q = [];
+  for(let i=0;i<D;i++){ P[i]=[]; for(let t=0;t<tr;t++) P[i][t]=(rnd()-0.5)*1.0; }
+  for(let t=0;t<tr;t++){ Q[t]=[]; for(let j=0;j<D;j++) Q[t][j]=(rnd()-0.5)*1.0; }
+  TARGET = [];
+  for(let i=0;i<D;i++){ TARGET[i]=[]; for(let j=0;j<D;j++){
+    let dw=0; for(let t=0;t<tr;t++) dw += P[i][t]*Q[t][j];
+    TARGET[i][j] = W[i][j] + dw;   // target = frozen base + a rank-tr change
+  }}
+}
+
+// adapter matrices: A is r×D, B is D×r. Production LoRA inits B=0 (ΔW=0 at start, see
+// BUILD step 2); here we seed B with a tiny random value to break symmetry so the
+// gradient descent is *visible* on-screen in a couple hundred steps.
+let A = [], B = [];
+function initAB(){
+  const rnd = mkRnd(23);
+  A = []; B = [];
+  for(let t=0;t<rank;t++){ A[t]=[]; for(let j=0;j<D;j++) A[t][j]=(rnd()-0.5)*0.4; }
+  for(let i=0;i<D;i++){ B[i]=[]; for(let t=0;t<rank;t++) B[i][t]=(rnd()-0.5)*0.05; }
+}
+
+// ΔW = (alpha/rank) * (B @ A)  ->  D×D
+function deltaW(){
+  const scale = alpha/rank, d = [];
+  for(let i=0;i<D;i++){ d[i]=[]; for(let j=0;j<D;j++){
+    let s=0; for(let t=0;t<rank;t++) s += B[i][t]*A[t][j];
+    d[i][j]= scale*s;
+  }}
+  return d;
+}
+function effective(dW){ const e=[]; for(let i=0;i<D;i++){ e[i]=[]; for(let j=0;j<D;j++) e[i][j]=W[i][j]+dW[i][j]; } return e; }
+
+// ---- one gradient step on A,B only (MSE between W+ΔW and TARGET) ----
+// loss = (1/N) Σ (E_ij - T_ij)^2, with E = W + s·B·A, s=alpha/rank.
+// dLoss/dE_ij = (2/N)(E_ij - T_ij).  Chain through s·B·A:
+//   dLoss/dB_it = s * Σ_j (dLoss/dE_ij) * A_tj
+//   dLoss/dA_tj = s * Σ_i (dLoss/dE_ij) * B_it
+function trainStep(){
+  const s = alpha/rank, N = FULL, lr = 0.5;
+  const dW = deltaW(), E = effective(dW);
+  const G = [];                    // dLoss/dE
+  let loss = 0;
+  for(let i=0;i<D;i++){ G[i]=[]; for(let j=0;j<D;j++){
+    const diff = E[i][j]-TARGET[i][j];
+    loss += diff*diff;
+    G[i][j] = (2/N)*diff;
+  }}
+  loss /= N;
+  // gradients
+  const gA = [], gB = [];
+  for(let t=0;t<rank;t++){ gA[t]=new Array(D).fill(0); }
+  for(let i=0;i<D;i++){ gB[i]=new Array(rank).fill(0); }
+  for(let t=0;t<rank;t++) for(let j=0;j<D;j++){ let acc=0; for(let i=0;i<D;i++) acc += G[i][j]*B[i][t]; gA[t][j]=s*acc; }
+  for(let i=0;i<D;i++) for(let t=0;t<rank;t++){ let acc=0; for(let j=0;j<D;j++) acc += G[i][j]*A[t][j]; gB[i][t]=s*acc; }
+  // update ONLY A and B ; W never changes
+  for(let t=0;t<rank;t++) for(let j=0;j<D;j++) A[t][j] -= lr*gA[t][j];
+  for(let i=0;i<D;i++) for(let t=0;t<rank;t++) B[i][t] -= lr*gB[i][t];
+  return loss;
+}
+
+// ---- rendering ----
+function cellColor(v, scale){
+  const x = Math.max(-1, Math.min(1, v/scale));
+  if(x>=0) return `rgba(79,70,229,${0.12+0.88*x})`;   // indigo positive
+  return `rgba(225,29,72,${0.12+0.88*(-x)})`;          // rose negative
+}
+function drawMatrix(canvas, M, scale){
+  const ctx = canvas.getContext("2d"), w = canvas.width, h = canvas.height;
+  ctx.clearRect(0,0,w,h);
+  const cw = w/D, ch = h/D;
+  for(let i=0;i<D;i++) for(let j=0;j<D;j++){
+    ctx.fillStyle = cellColor(M[i][j], scale);
+    ctx.fillRect(j*cw+0.5, i*ch+0.5, cw-1, ch-1);
+  }
+}
+function drawMatrices(){
+  const dW = deltaW(), E = effective(dW);
+  drawMatrix(document.getElementById("wCanvas"), W, 1.5);
+  drawMatrix(document.getElementById("dCanvas"), dW, 1.5);
+  drawMatrix(document.getElementById("eCanvas"), E, 2.2);
+}
+
+// ---- param-budget UI ----
+const rankR=document.getElementById("rankR"), rankV=document.getElementById("rankV");
+const alphaR=document.getElementById("alphaR"), alphaV=document.getElementById("alphaV");
+function updateBudget(){
+  const trainable = 2*rank*D;                 // = 2*r*d
+  const pct = trainable/FULL*100;
+  document.getElementById("trainN").textContent = trainable;
+  document.getElementById("trainPct").textContent = pct.toFixed(1)+"% of full";
+  document.getElementById("pctBar").style.width = Math.min(100,pct)+"%";
+  document.getElementById("aShape").textContent = rank+"×"+D;
+  document.getElementById("bShape").textContent = D+"×"+rank;
+  document.getElementById("pctV").textContent = pct.toFixed(0)+"%";
+  document.getElementById("rV").textContent = rank;
+}
+
+let lossHist=[], epoch=0, animTimer=null;
+function resetAdapter(){
+  if(animTimer){ clearInterval(animTimer); animTimer=null; }
+  initAB(); lossHist=[]; epoch=0;
+  document.getElementById("epoch").textContent = 0;
+  document.getElementById("lossV").textContent = "—";
+  updateBudget(); drawMatrices(); drawLoss();
+}
+rankR.oninput = () => { rank = +rankR.value; rankV.textContent = rank; resetAdapter(); };
+alphaR.oninput = () => { alpha = +alphaR.value; alphaV.textContent = alpha; resetAdapter(); };
+document.getElementById("targetRank").onchange = (e)=>{ buildTarget(+e.target.value); resetAdapter(); };
+
+const LC=document.getElementById("lossCanvas"), lctx=LC.getContext("2d");
+function drawLoss(){
+  lctx.clearRect(0,0,LC.width,LC.height);
+  if(lossHist.length<2){
+    lctx.fillStyle="#94a3b8"; lctx.font="12px sans-serif";
+    lctx.fillText("Fit loss per step appears here — press Train adapter.",12,20);
+    return;
+  }
+  const maxL=Math.max(...lossHist,1e-4), n=lossHist.length;
+  lctx.strokeStyle="#4f46e5"; lctx.lineWidth=2; lctx.beginPath();
+  lossHist.forEach((l,i)=>{
+    const x=i/(n-1)*(LC.width-20)+10;
+    const y=LC.height-10 - (l/maxL)*(LC.height-24);
+    i? lctx.lineTo(x,y) : lctx.moveTo(x,y);
+  });
+  lctx.stroke();
+  lctx.fillStyle="#64748b"; lctx.font="11px sans-serif";
+  lctx.fillText("loss "+lossHist[lossHist.length-1].toFixed(4),12,16);
+  lctx.fillText("step "+n, LC.width-70, 16);
+}
+function runTraining(){
+  if(animTimer){ clearInterval(animTimer); animTimer=null; }
+  resetAdapter();
+  const STEPS_N = 200;
+  animTimer = setInterval(()=>{
+    const loss = trainStep(); epoch++; lossHist.push(loss);
+    if(epoch%2===0 || epoch>=STEPS_N){
+      document.getElementById("epoch").textContent = epoch;
+      document.getElementById("lossV").textContent = loss.toFixed(4);
+      drawMatrices(); drawLoss();
+    }
+    if(epoch>=STEPS_N){ clearInterval(animTimer); animTimer=null; }
+  }, 20);
+}
+document.getElementById("trainBtn").onclick = runTraining;
+document.getElementById("resetBtn").onclick = resetAdapter;
+
+buildTarget(2);       // default target rank = 2
+resetAdapter();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Full fine-tuning is expensive", why:"Fine-tuning normally means updating every weight in the model — billions of them — and then storing a whole new copy of the model per task. The optimizer (Adam) also keeps two extra numbers per weight, so memory balloons to several times the model size. That takes clusters of high-end GPUs and produces a giant checkpoint you must host for each variant. For most real adaptations that's wildly out of proportion to how much the model actually needs to change.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">full fine-tune 7B model:<br>update ALL 7,000,000,000 weights<br>+ Adam state (≈2× more) + a full new copy<br>= many GPUs, one huge checkpoint per task</div>`, code:`# full fine-tuning cost
+params      = 7_000_000_000
+optimizer   = 2 * params      # Adam m + v
+checkpoint  = params          # a whole new model, per task
+# → tens of GB of GPU RAM + a giant file each time` },
+ { title:"2. The key insight: the UPDATE is low-rank", why:"You don't need a new model — you need the difference between the fine-tuned model and the base, ΔW. The LoRA paper's central observation is that this difference has a low 'intrinsic rank': the useful change lives in a tiny subspace, not the full d×d space. A big matrix of numbers can often be reconstructed almost perfectly from the product of two skinny matrices. So instead of learning ΔW directly, we learn those two skinny factors.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">W_finetuned = W_base + ΔW<br>observation: ΔW is LOW-RANK<br>ΔW (d×d) ≈ B (d×r) · A (r×d), r ≪ d<br>learn the small factors, not the big ΔW</div>`, code:`# don't learn a whole new W. learn the change:
+#   W_new = W + ΔW
+# and ΔW turns out to be low-rank:
+#   ΔW ≈ B @ A     with A: r×d,  B: d×r,  r ≪ d` },
+ { title:"3. W + B·A — freeze W, add a detour", why:"LoRA keeps the pretrained weight W exactly as-is (frozen) and adds a parallel path B·A on top, so the effective weight is W + B·A. In the forward pass an input x goes through both: Wx (the original behaviour) plus B(Ax) (the learned correction). Because W never changes, the model starts identical to the pretrained one and only picks up the adjustments you train into A and B. It's an adapter bolted onto a fixed backbone.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">y = W·x + B·(A·x)<br>&nbsp;&nbsp;&nbsp;&nbsp;└frozen┘&nbsp;&nbsp;&nbsp;└ learned detour ┘<br>effective weight = W + B·A<br>W is never modified</div>`, code:`def lora_forward(x):
+    return W @ x + B @ (A @ x)   # W frozen, only A,B learn
+# effective weight matrix = W + B @ A` },
+ { title:"4. A, B and the parameter savings", why:"For a d×d weight matrix, A is r×d and B is d×r, so together they hold 2·r·d numbers. Compare that to d² for the full matrix: at d=4096 and r=8 that's ~65k trainable weights versus ~16.8M — a 256× reduction on that layer. A is initialised small-random and B is initialised to zero, which makes B·A exactly zero at the start, so training begins from the pristine base model and only departs as you learn. The LOOK tab's slider shows 2·r·d shrinking as r drops.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">full: d·d weights<br>LoRA: r·d + d·r = 2·r·d weights<br>d=4096, r=8 → 65k vs 16.8M (256× fewer)<br>init: A ~ small random, B = 0 ⇒ ΔW=0 at start</div>`, code:`d, r = 4096, 8
+full  = d * d          # 16,777,216
+lora  = 2 * r * d      #     65,536   (0.39%)
+A = randn(r, d)*0.01   # small random
+B = zeros(d, r)        # zero → adapter is a no-op at step 0` },
+ { title:"5. Rank r and the alpha scaling", why:"Two knobs control LoRA. Rank r sets the capacity of the detour: a bigger r can express a richer change but costs more trainable weights. Alpha (α) is a scaling factor — the update is applied as (α/r)·B·A — that lets you tune how strongly the adapter influences the model independently of r, so changing r doesn't force you to re-tune the learning rate. A common recipe is α = 2r. Small r with sensible α is enough for most fine-tunes; harder, more distinct tasks may want a larger r.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">effective ΔW = (α / r) · B·A<br>r  = capacity of the detour (4, 8, 16, 32…)<br>α  = how strongly it's applied<br>rule of thumb: α ≈ 2r</div>`, code:`r, alpha = 8, 16
+scale = alpha / r                 # = 2.0
+def forward(x):
+    return W @ x + scale * (B @ (A @ x))
+# raise alpha to push the adapter harder without changing r` },
+ { title:"6. Freeze the base, train only the adapters", why:"During training, gradients flow only into A and B; W (and everything else) has requires_grad = False. That means the optimizer only tracks state for the tiny adapter, so Adam's memory overhead collapses along with the parameter count. The forward pass still uses the full frozen model, so quality of the backbone is untouched — you're just nudging its behaviour with the learned detour. Backprop through B·A is ordinary matrix calculus, exactly like the LOOK tab does it.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">requires_grad:  W → False 🔒   A,B → True<br>gradients flow only into A and B<br>optimizer state shrinks with the params<br>backbone behaviour untouched</div>`, code:`for p in base_model.parameters():
+    p.requires_grad = False        # freeze everything
+A.requires_grad = B.requires_grad = True
+loss.backward()                    # grads only reach A, B
+opt.step()                         # W never moves` },
+ { title:"7. Huge memory savings — one GPU", why:"Because you're not storing gradients or optimizer state for the frozen weights, peak memory is dominated by the (still-large) forward activations rather than a tripled copy of the model. Combined with the tiny adapter, this is what lets people fine-tune 7B–70B models on a single consumer or workstation GPU instead of a cluster. The training is also faster to iterate on, and the resulting checkpoint you actually keep is just the adapter — often a few megabytes.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">no optimizer state for frozen W<br>trainable params ↓ 100–1000×<br>⇒ fine-tune 7B–70B on ONE GPU<br>saved checkpoint = tiny adapter (few MB)</div>`, code:`# what you save at the end:
+#   full fine-tune : ~13 GB  (whole new model)
+#   LoRA adapter   : ~10 MB  (just A and B)
+# and training fits where full tuning never could` },
+ { title:"8. Swappable adapters — many tasks, one base", why:"Since each adapter is a small standalone file that references the same frozen base, you can train dozens of them — one per task, tone, customer, or language — and load whichever you need at request time. The giant base model is stored once and shared; you hot-swap a few megabytes to switch behaviours. This is how a single hosted model can serve many specialised variants cheaply, and how communities share thousands of style/character adapters for the same base.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">one frozen base model (stored once)<br>&nbsp;├─ adapter_legal.safetensors&nbsp;&nbsp;(few MB)<br>&nbsp;├─ adapter_french.safetensors<br>&nbsp;└─ adapter_support.safetensors<br>load/swap per request → many tasks, one base</div>`, code:`base = load_base("llama-3-8b")     # shared, loaded once
+model = base.load_adapter("legal")     # swap in per request
+model = base.load_adapter("support")   # different behaviour, same base
+# thousands of adapters, one backbone` },
+ { title:"9. Merge-back at inference — no extra latency", why:"An adapter adds a second matrix multiply per layer, a small runtime cost. If you've settled on one adapter and want maximum speed, you can compute W + (α/r)·B·A once and overwrite W with the result. The served model is then indistinguishable in shape from a normal model — no LoRA branch, no extra ops, zero added latency. You trade the swappability of separate adapters for the raw speed of a single merged model.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">training/serving with adapter: W·x + (α/r)·B·(A·x)<br>merge once:  W ← W + (α/r)·B·A<br>served model = plain matrix, no extra ops<br>zero added latency (but no longer swappable)</div>`, code:`# fold the adapter into the weights, once:
+W_merged = W + (alpha / r) * (B @ A)
+# ship W_merged as an ordinary model:
+#   same shape, no LoRA branch, no latency cost` },
+ { title:"10. QLoRA — LoRA on a quantized base", why:"QLoRA pushes the memory win further: it loads the frozen base in 4-bit precision (see Day 20, Quantization) and trains the LoRA adapters in higher precision on top. The huge base costs a quarter of the memory, while the small trainable adapter stays accurate — so you can fine-tune a 65B model on a single 48GB GPU. It's the standard recipe for consumer-hardware fine-tuning today, and it composes cleanly because the base is frozen anyway.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">QLoRA = 4-bit frozen base + LoRA adapters<br>base in 4-bit → ¼ the memory<br>adapters in 16-bit → stay accurate<br>⇒ fine-tune 65B on a single 48GB GPU</div>`, code:`model = load_4bit("llama-65b")     # quantized, frozen (Day 20)
+model = get_peft_model(model, LoraConfig(r=8, ...))
+# base: 4-bit & frozen  |  adapters: bf16 & trainable
+# fits where even LoRA-in-fp16 wouldn't` },
+ { title:"11. Limits — when a small r isn't enough", why:"LoRA assumes the change you need is low-rank. That holds for most adaptations — a new tone, domain vocabulary, or format — but if you're teaching genuinely new, complex behaviour far from the base's training, a tiny r can't express it and the loss plateaus above zero (try the full-rank target in the LOOK tab). The fixes are to raise r, adapt more modules, or fall back to full fine-tuning. LoRA is a superb default, not a universal replacement — know its ceiling.", concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">assumption: the needed change is low-rank<br>true for tone / domain / format<br>very different task → rank-r detour can't fit<br>fix: raise r · adapt more modules · full FT</div>`, code:`# symptoms & fixes
+#   loss plateaus high  → r too small, raise it (8→32→64)
+#   still stuck         → add target_modules or full fine-tune
+#   task ≈ pretraining  → small r is plenty (the common case)` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curS=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curS-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curS+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curS>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curS+1); },3600); };
+show(0);
+
+function copy(btn){ const pre=btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o=btn.textContent; btn.textContent="✓ Copied!"; setTimeout(()=>btn.textContent=o,1500); }
+</script>
+</body>
+</html>
