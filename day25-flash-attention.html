@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 25 — Flash Attention</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .bar { transition: width .35s ease-out, background .2s; height:26px; border-radius:6px; }
+  .stat { font-variant-numeric:tabular-nums; }
+  canvas { touch-action:none; }
+  .cell { font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 25</div>
+      <h1 class="text-xl font-bold">⚡ Flash Attention — Exact Attention Without the N×N Blow-Up</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto">
+      <div class="text-center mb-5">
+        <h2 class="text-2xl font-bold mb-1">Compute the <em>exact</em> same attention — but never store the giant score matrix.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Standard attention builds the full <strong>N×N</strong> matrix of scores <code>QKᵀ</code> in memory, softmaxes it, then multiplies by <strong>V</strong>. That matrix grows <strong>quadratically</strong> — double the context, quadruple the memory and the slow reads/writes to GPU main memory (HBM). <strong>Flash Attention</strong> streams over <strong>tiles</strong> of K and V, keeping a running max and running sum (<em>online softmax</em>) and an accumulating output, so the full matrix is <strong>never</strong> materialized. Same math, same result to the last bit — dramatically less memory and traffic. Everything below is real: real online-softmax arithmetic and a real numeric check that both methods give the identical answer.</p>
+      </div>
+
+      <!-- MEMORY: N x N vs tiles -->
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- STANDARD -->
+        <div class="bg-white rounded-2xl border border-rose-200 p-5">
+          <div class="text-xs uppercase font-bold text-rose-600 mb-1">1 · Standard attention — materialize N×N</div>
+          <p class="text-sm text-slate-500 mb-3">For sequence length <strong>N</strong>, every query scores against every key: an <strong>N×N</strong> grid is written to memory, softmaxed, then read back. Slide <strong>N</strong> and watch the grid — and the memory — balloon.</p>
+          <div class="flex items-center gap-3 mb-3">
+            <span class="text-sm font-bold text-slate-600 w-16">Seq len N</span>
+            <input id="seqN" type="range" min="8" max="64" step="8" value="24" class="flex-1 accent-indigo-600">
+            <span id="seqNV" class="stat text-indigo-600 font-bold w-10 text-right">24</span>
+          </div>
+          <div class="flex justify-center mb-3">
+            <canvas id="nnCanvas" width="260" height="260" class="border border-slate-200 rounded bg-slate-50"></canvas>
+          </div>
+          <button id="matBtn" class="w-full bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg font-semibold text-sm mb-3">▶ Materialize all N² scores</button>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-rose-50 rounded-xl p-3 text-center"><div class="text-xs text-rose-400 uppercase font-bold">Scores stored</div><div id="stdCells" class="text-2xl font-bold text-rose-600 stat">576</div><div class="text-xs text-rose-400">= N² elements</div></div>
+            <div class="bg-rose-50 rounded-xl p-3 text-center"><div class="text-xs text-rose-400 uppercase font-bold">HBM traffic</div><div id="stdHbm" class="text-2xl font-bold text-rose-600 stat">1,152</div><div class="text-xs text-rose-400">≈ 2·N² (write+read)</div></div>
+          </div>
+          <div class="bg-slate-100 rounded-md overflow-hidden mt-3 mb-1"><div id="stdBar" class="bar" style="width:14%;background:#e11d48"></div></div>
+          <p class="text-xs text-slate-400 mt-2">Memory grows as <strong>N²</strong>. This is the whole problem: at real context lengths the score matrix dwarfs the model itself.</p>
+        </div>
+
+        <!-- FLASH -->
+        <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-1">2 · Flash attention — stream one tile</div>
+          <p class="text-sm text-slate-500 mb-3">Process a query block, then <strong>stream</strong> over K/V blocks. Only one small <strong>tile</strong> lives in fast on-chip memory at a time; a running max <strong>m</strong> and sum <strong>l</strong> carry the softmax forward. Slide the block size and watch the tile sweep.</p>
+          <div class="flex items-center gap-3 mb-3">
+            <span class="text-sm font-bold text-slate-600 w-16">Block B</span>
+            <input id="blockB" type="range" min="4" max="16" step="4" value="8" class="flex-1 accent-indigo-600">
+            <span id="blockBV" class="stat text-indigo-600 font-bold w-10 text-right">8</span>
+          </div>
+          <div class="flex justify-center mb-3">
+            <canvas id="tileCanvas" width="260" height="260" class="border border-indigo-200 rounded bg-indigo-50"></canvas>
+          </div>
+          <button id="streamBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm mb-3">▶ Stream tiles across K/V</button>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-indigo-50 rounded-xl p-3 text-center"><div class="text-xs text-indigo-400 uppercase font-bold">Scores stored</div><div id="flCells" class="text-2xl font-bold text-indigo-600 stat">64</div><div class="text-xs text-indigo-400">= B² (constant in N)</div></div>
+            <div class="bg-indigo-50 rounded-xl p-3 text-center"><div class="text-xs text-indigo-400 uppercase font-bold">HBM traffic</div><div id="flHbm" class="text-2xl font-bold text-indigo-600 stat">288</div><div class="text-xs text-indigo-400">≈ read Q,K,V + write O</div></div>
+          </div>
+          <div class="bg-slate-100 rounded-md overflow-hidden mt-3 mb-1"><div id="flBar" class="bar" style="width:2%;background:#4f46e5"></div></div>
+          <p class="text-xs text-slate-400 mt-2">The score tile is <strong>B×B</strong> — flat as N grows. Peak working memory is <span id="ratio" class="font-bold text-indigo-600">9× smaller</span> than the full matrix here, and the gap widens with every extra token.</p>
+        </div>
+      </div>
+
+      <!-- REAL-WORLD CALLOUT -->
+      <div class="bg-slate-900 text-slate-200 rounded-2xl p-5 mt-5 text-center text-sm">
+        At a realistic <strong>N = 8,192</strong> tokens, the standard score matrix is <strong>67,108,864</strong> numbers ≈ <strong>128 MB</strong> per head, per layer — written to and read from slow HBM every forward pass. Flash Attention keeps a fixed <strong>B×B</strong> tile on-chip and <strong>never writes that matrix at all</strong>. That is the entire speed and memory win.
+      </div>
+
+      <!-- SAME OUTPUT -->
+      <div class="bg-white rounded-2xl border border-indigo-200 p-5 mt-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-2">3 · Proof: both methods give the IDENTICAL output</div>
+        <p class="text-sm text-slate-500 mb-3">A real, tiny attention (<strong>N=4</strong> queries, head dim <strong>d=3</strong>) computed two ways: the naive full-matrix softmax, and the tiled online-softmax (block size 2). Flash is <strong>exact</strong>, not an approximation — the difference is floating-point dust.</p>
+        <div class="flex flex-wrap items-center gap-3 mb-4">
+          <button id="proveBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-semibold text-sm">▶ Compute both ways</button>
+          <span class="text-sm font-bold text-slate-500">Max abs difference: <span id="diffV" class="stat text-emerald-600">—</span></span>
+        </div>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div class="bg-slate-50 rounded-xl p-4">
+            <div class="text-xs uppercase font-bold text-rose-500 mb-2">Naive — full N×N softmax</div>
+            <pre id="naiveOut" class="text-xs">press "Compute both ways"</pre>
+          </div>
+          <div class="bg-slate-50 rounded-xl p-4">
+            <div class="text-xs uppercase font-bold text-indigo-500 mb-2">Flash — tiled online softmax</div>
+            <pre id="flashOut" class="text-xs">press "Compute both ways"</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- ONLINE SOFTMAX WALKTHROUGH -->
+      <div class="bg-white rounded-2xl border border-indigo-200 p-5 mt-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-2">4 · The online softmax, block by block</div>
+        <p class="text-sm text-slate-500 mb-3">One query, <strong>6 keys</strong>, streamed in <strong>blocks of 2</strong>. Each block we update the running max <strong>m</strong>, rescale the old totals by <code>exp(m<sub>old</sub>−m<sub>new</sub>)</code> so nothing overflows, add the new block, and carry forward a running sum <strong>l</strong> and output <strong>O</strong>. Step through and watch it land exactly on the true softmax.</p>
+        <div class="flex flex-wrap items-center gap-3 mb-4">
+          <button id="osStep" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Next block</button>
+          <button id="osReset" class="bg-slate-200 hover:bg-slate-300 px-4 py-2 rounded-lg font-semibold text-sm">↺ Reset</button>
+          <span class="text-sm font-bold text-slate-500 ml-1">Block <span id="osBlk" class="stat text-indigo-600">0</span> / 3</span>
+        </div>
+        <div class="grid sm:grid-cols-3 gap-3 mb-4">
+          <div class="bg-slate-50 rounded-xl p-3 text-center"><div class="text-xs text-slate-400 uppercase font-bold">running max m</div><div id="osM" class="text-2xl font-bold text-indigo-600 stat">−∞</div></div>
+          <div class="bg-slate-50 rounded-xl p-3 text-center"><div class="text-xs text-slate-400 uppercase font-bold">running sum l</div><div id="osL" class="text-2xl font-bold text-indigo-600 stat">0</div></div>
+          <div class="bg-slate-50 rounded-xl p-3 text-center"><div class="text-xs text-slate-400 uppercase font-bold">output O = acc / l</div><div id="osO" class="text-2xl font-bold text-indigo-600 stat">—</div></div>
+        </div>
+        <pre id="osLog" class="text-xs">Press "Next block" to stream the first 2 keys…</pre>
+        <p class="text-xs text-slate-400 mt-2">After the last block, <code>O = acc / l</code> equals the plain softmax over all 6 keys — computed without ever holding all 6 scores at once. That rescaling trick is the heart of Flash Attention.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How Flash Attention works</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / MATH FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Use Flash Attention yourself</h2>
+    <p class="text-slate-500 mb-8">You almost never hand-write the kernel — but understanding the tiling loop makes the one-line API obvious. Here's the conceptual algorithm, then the two ways you actually turn it on in practice: PyTorch's built-in <code>scaled_dot_product_attention</code>, and the dedicated <code>flash-attn</code> package.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">The baseline you're replacing</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Standard attention allocates the full <code>N×N</code> score tensor, softmaxes it, then multiplies by V. It's simple and correct — and it's the exact thing that blows up your memory at long context. This is the code Flash Attention gives the same answer as.</p>
+        <div class="relative"><pre>import torch, torch.nn.functional as F
+def naive_attention(Q, K, V):        # Q,K,V: [batch, heads, N, d]
+    d = Q.size(-1)
+    scores = (Q @ K.transpose(-2, -1)) / d**0.5   # [.., N, N]  <-- materialized!
+    weights = F.softmax(scores, dim=-1)           # [.., N, N]  <-- again in HBM
+    return weights @ V                            # [.., N, d]</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">The tiling loop, in pseudocode</h3></div>
+        <p class="text-sm text-slate-600 mb-3">This is what the kernel does under the hood: for every query block, stream over key/value blocks keeping a running max <code>m</code>, running sum <code>l</code>, and accumulator <code>O</code>. The <code>N×N</code> matrix never exists — only one <code>B×B</code> tile at a time.</p>
+        <div class="relative"><pre># for each query block Qi (size Bq):
+for i in range(0, N, Bq):
+    m = -inf; l = 0; O = zeros(Bq, d)          # running stats (on-chip)
+    for j in range(0, N, Bk):                  # stream K/V blocks
+        S  = Qi @ Kj.T / sqrt(d)               # B×B tile only
+        m_new = max(m, rowmax(S))
+        P  = exp(S - m_new)                     # numerically stable
+        corr = exp(m - m_new)                   # rescale the past
+        l  = corr*l + rowsum(P)
+        O  = corr*O + P @ Vj
+        m  = m_new
+    Oi = O / l                                  # normalize once, at the end</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">The easy way: PyTorch SDPA</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Since PyTorch 2.0, <code>F.scaled_dot_product_attention</code> automatically dispatches to a fused Flash-Attention kernel when your shapes/dtype/hardware allow. One call replaces steps 1–2 — no matrix materialized, no math to maintain. This is what you should reach for first.</p>
+        <div class="relative"><pre>import torch.nn.functional as F
+# drop-in, fused, memory-efficient — uses Flash Attention when eligible
+out = F.scaled_dot_product_attention(Q, K, V, is_causal=True)
+
+# force/inspect the backend:
+from torch.nn.attention import sdpa_kernel, SDPBackend
+with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+    out = F.scaled_dot_product_attention(Q, K, V, is_causal=True)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">The dedicated package: <code>flash-attn</code></h3></div>
+        <p class="text-sm text-slate-600 mb-3">For maximum control (variable-length sequences, packed batches, the newest FA-2/FA-3 kernels) install the official package from Tri Dao's lab. Note the memory layout: it expects <code>[batch, seqlen, heads, dim]</code>, not the SDPA <code>[batch, heads, seqlen, dim]</code>.</p>
+        <div class="relative"><pre>pip install flash-attn --no-build-isolation
+</pre><pre>from flash_attn import flash_attn_func
+# q,k,v: [batch, seqlen, n_heads, head_dim]
+out = flash_attn_func(q, k, v, causal=True)   # exact, IO-aware, fast</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Turn it on inside Hugging Face</h3></div>
+        <p class="text-sm text-slate-600 mb-3">You rarely call the kernel directly — you flip a flag when loading a model. Transformers wires Flash Attention into every attention layer for you, which is where most people actually get the win at training and inference time.</p>
+        <div class="relative"><pre>from transformers import AutoModelForCausalLM
+import torch
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-3-8B",
+    torch_dtype=torch.bfloat16,          # FA needs fp16/bf16
+    attn_implementation="flash_attention_2",
+)   # every attention layer now runs the tiled kernel</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Verify it's exact (do this once)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Because Flash is <em>exact</em>, its output should match the naive path to within floating-point tolerance. A quick allclose is a great sanity check — and a reminder that you're trading zero accuracy for a huge memory/speed win.</p>
+        <div class="relative"><pre>ref  = naive_attention(Q, K, V)
+fast = F.scaled_dot_product_attention(Q, K, V)
+assert torch.allclose(ref, fast, atol=1e-2)   # same answer, fp tolerance
+print("max abs diff:", (ref - fast).abs().max().item())</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 25 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw why the <code>N×N</code> score matrix is the bottleneck, how tiling plus an online softmax computes the <em>exact</em> same attention while keeping only a small tile on-chip, and why fewer HBM reads/writes — not fewer FLOPs — are what make it fast. It's the reason today's models handle long context at all. <strong>👉 Tomorrow — Day 26: RLHF — turning a raw next-token predictor into a helpful assistant with human feedback.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// deterministic PRNG so the demo is reproducible
+function mkRnd(seed){ let s = seed>>>0; return () => { s = (s*1103515245 + 12345) & 0x7fffffff; return s/0x7fffffff; }; }
+
+// ===================== LOOK · memory comparison =====================
+let N = 24, B = 8;
+const NMAX = 64;
+const seqN = document.getElementById("seqN"), seqNV = document.getElementById("seqNV");
+const blockB = document.getElementById("blockB"), blockBV = document.getElementById("blockBV");
+
+// score field for the N x N grid (deterministic pattern so it looks like real attention)
+function scoreAt(i,j){ return Math.exp(-Math.abs(i-j)/6) * (0.4 + 0.6*Math.abs(Math.sin(i*0.7)*Math.cos(j*0.5))); }
+function cellColor(v){ return `rgba(225,29,72,${0.10+0.85*Math.max(0,Math.min(1,v))})`; }        // rose
+function tileColor(v){ return `rgba(79,70,229,${0.10+0.85*Math.max(0,Math.min(1,v))})`; }        // indigo
+
+// ---- standard N x N grid (with progressive materialize) ----
+const nnC = document.getElementById("nnCanvas"), nnx = nnC.getContext("2d");
+let matFilled = 0, matTimer = null;
+function drawNN(fillCount){
+  const W = nnC.width, H = nnC.height, cw = W/N, ch = H/N;
+  nnx.clearRect(0,0,W,H);
+  let drawn = 0;
+  outer:
+  for(let i=0;i<N;i++) for(let j=0;j<N;j++){
+    if(fillCount!==undefined && drawn>=fillCount){ break outer; }
+    nnx.fillStyle = cellColor(scoreAt(i,j));
+    nnx.fillRect(j*cw+0.4, i*ch+0.4, Math.max(1,cw-0.8), Math.max(1,ch-0.8));
+    drawn++;
+  }
+}
+function materialize(){
+  if(matTimer){ clearInterval(matTimer); }
+  matFilled = 0; const total = N*N, per = Math.max(4, Math.floor(total/60));
+  matTimer = setInterval(()=>{
+    matFilled = Math.min(total, matFilled+per);
+    drawNN(matFilled);
+    document.getElementById("stdCells").textContent = matFilled.toLocaleString();
+    if(matFilled>=total){ clearInterval(matTimer); matTimer=null; }
+  }, 16);
+}
+
+// ---- flash tile canvas (one B x B tile sweeping the N x N region) ----
+const tlC = document.getElementById("tileCanvas"), tlx = tlC.getContext("2d");
+let streamTimer = null;
+function drawTile(qBlock, kBlock){
+  const W = tlC.width, H = tlC.height, cw = W/N, ch = H/N;
+  tlx.clearRect(0,0,W,H);
+  // faint outline grid of blocks
+  tlx.strokeStyle = "#c7d2fe"; tlx.lineWidth = 1;
+  for(let bi=0; bi<N; bi+=B){ for(let bj=0; bj<N; bj+=B){
+    tlx.strokeRect(bj*cw, bi*ch, Math.min(B,N-bj)*cw, Math.min(B,N-bi)*ch);
+  }}
+  // the single active tile, filled
+  const i0 = qBlock*B, j0 = kBlock*B;
+  const bh = Math.min(B, N-i0), bw = Math.min(B, N-j0);
+  for(let i=i0;i<i0+bh;i++) for(let j=j0;j<j0+bw;j++){
+    tlx.fillStyle = tileColor(scoreAt(i,j));
+    tlx.fillRect(j*cw+0.4, i*ch+0.4, Math.max(1,cw-0.8), Math.max(1,ch-0.8));
+  }
+  // strong border on active tile
+  tlx.strokeStyle = "#4f46e5"; tlx.lineWidth = 2.5;
+  tlx.strokeRect(j0*cw, i0*ch, bw*cw, bh*ch);
+}
+function stream(){
+  if(streamTimer){ clearInterval(streamTimer); }
+  const nb = Math.ceil(N/B);
+  let qi = 0, kj = 0;
+  drawTile(qi, kj);
+  streamTimer = setInterval(()=>{
+    kj++;
+    if(kj>=nb){ kj=0; qi++; }
+    if(qi>=nb){ clearInterval(streamTimer); streamTimer=null; drawTile(0,0); return; }
+    drawTile(qi, kj);
+  }, 90);
+}
+
+function updateMem(){
+  const stdCells = N*N;
+  const stdHbm = 2*N*N;                       // write scores + read them back
+  const flCells = B*B;                        // one tile on-chip
+  const D = 3;                                // illustrative head dim for traffic
+  const flHbm = 4*N*D;                        // read Q,K,V once + write O once (~O(N))
+  document.getElementById("stdCells").textContent = stdCells.toLocaleString();
+  document.getElementById("stdHbm").textContent  = stdHbm.toLocaleString();
+  document.getElementById("flCells").textContent = flCells.toLocaleString();
+  document.getElementById("flHbm").textContent   = flHbm.toLocaleString();
+  document.getElementById("stdBar").style.width = (stdCells/(NMAX*NMAX)*100).toFixed(1)+"%";
+  document.getElementById("flBar").style.width  = Math.max(0.5, flCells/(NMAX*NMAX)*100).toFixed(1)+"%";
+  const ratio = stdCells/flCells;
+  document.getElementById("ratio").textContent = ratio.toFixed(0)+"× smaller";
+}
+seqN.oninput = () => { N = +seqN.value; seqNV.textContent = N; drawNN(); drawTile(0,0); updateMem(); };
+blockB.oninput = () => { B = +blockB.value; blockBV.textContent = B; drawTile(0,0); updateMem(); };
+document.getElementById("matBtn").onclick = materialize;
+document.getElementById("streamBtn").onclick = stream;
+drawNN(); drawTile(0,0); updateMem();
+
+// ===================== LOOK · same-output proof (real math) =====================
+function buildQKV(n, d, seed){
+  const r = mkRnd(seed), Q=[],K=[],V=[];
+  for(let i=0;i<n;i++){ Q[i]=[];K[i]=[];V[i]=[]; for(let j=0;j<d;j++){ Q[i][j]=(r()-0.5)*2; K[i][j]=(r()-0.5)*2; V[i][j]=(r()-0.5)*2; } }
+  return {Q,K,V};
+}
+function naiveAttn(Q,K,V){
+  const n=Q.length, d=V[0].length, scale=1/Math.sqrt(d), O=[];
+  for(let i=0;i<n;i++){
+    const s=[]; for(let j=0;j<n;j++){ let dot=0; for(let k=0;k<d;k++) dot+=Q[i][k]*K[j][k]; s.push(dot*scale); }
+    const m=Math.max(...s); let den=0; const p=s.map(x=>{const e=Math.exp(x-m);den+=e;return e;});
+    const o=new Array(d).fill(0);
+    for(let j=0;j<n;j++){ const w=p[j]/den; for(let k=0;k<d;k++) o[k]+=w*V[j][k]; }
+    O.push(o);
+  }
+  return O;
+}
+function flashAttn(Q,K,V,Bk){
+  const n=Q.length, d=V[0].length, scale=1/Math.sqrt(d), O=[];
+  for(let i=0;i<n;i++){
+    let m=-Infinity,l=0; const acc=new Array(d).fill(0);
+    for(let j0=0;j0<n;j0+=Bk){ const j1=Math.min(n,j0+Bk);
+      const s=[]; let bm=-Infinity;
+      for(let j=j0;j<j1;j++){ let dot=0; for(let k=0;k<d;k++) dot+=Q[i][k]*K[j][k]; const sc=dot*scale; s.push(sc); if(sc>bm) bm=sc; }
+      const mn=Math.max(m,bm), corr=Math.exp(m-mn);
+      l*=corr; for(let k=0;k<d;k++) acc[k]*=corr;
+      for(let idx=0;idx<s.length;idx++){ const p=Math.exp(s[idx]-mn); l+=p; const j=j0+idx; for(let k=0;k<d;k++) acc[k]+=p*V[j][k]; }
+      m=mn;
+    }
+    O.push(acc.map(x=>x/l));
+  }
+  return O;
+}
+function fmt(M){ return M.map(r=>"[ "+r.map(x=>x.toFixed(4).padStart(8)).join("  ")+" ]").join("\n"); }
+document.getElementById("proveBtn").onclick = ()=>{
+  const {Q,K,V} = buildQKV(4,3,42);
+  const A = naiveAttn(Q,K,V), F = flashAttn(Q,K,V,2);
+  let diff=0; for(let i=0;i<A.length;i++) for(let k=0;k<A[0].length;k++) diff=Math.max(diff, Math.abs(A[i][k]-F[i][k]));
+  document.getElementById("naiveOut").textContent = fmt(A);
+  document.getElementById("flashOut").textContent = fmt(F);
+  document.getElementById("diffV").textContent = diff.toExponential(2)+"  (≈ 0 → exact)";
+};
+
+// ===================== LOOK · online softmax walkthrough =====================
+const OS_SCORES = [2.0, 0.5, 3.5, 1.0, 2.5, 0.0];    // 6 key scores
+const OS_VALS   = [10,  20,  30,  40,  50,  60 ];     // 6 scalar values
+let osBlk=0, osM=-Infinity, osL=0, osAcc=0;
+function trueSoftmaxOut(){
+  const m=Math.max(...OS_SCORES); let den=0,num=0;
+  OS_SCORES.forEach((s,i)=>{ const e=Math.exp(s-m); den+=e; num+=e*OS_VALS[i]; });
+  return num/den;
+}
+function osReset(){
+  osBlk=0; osM=-Infinity; osL=0; osAcc=0;
+  document.getElementById("osBlk").textContent="0";
+  document.getElementById("osM").textContent="−∞";
+  document.getElementById("osL").textContent="0";
+  document.getElementById("osO").textContent="—";
+  document.getElementById("osLog").textContent='Press "Next block" to stream the first 2 keys…';
+}
+function osStep(){
+  if(osBlk>=3) return;
+  const j0=osBlk*2, s=[OS_SCORES[j0],OS_SCORES[j0+1]], v=[OS_VALS[j0],OS_VALS[j0+1]];
+  const bm=Math.max(...s), mn=Math.max(osM,bm), corr=Math.exp(osM-mn);
+  const oldM=osM, oldL=osL;
+  osL = osL*corr; osAcc = osAcc*corr;
+  let addL=0, addAcc=0;
+  const ps = s.map((x,ix)=>{ const p=Math.exp(x-mn); addL+=p; addAcc+=p*v[ix]; return p; });
+  osL += addL; osAcc += addAcc; osM = mn; osBlk++;
+  const out = osAcc/osL;
+  document.getElementById("osBlk").textContent = osBlk;
+  document.getElementById("osM").textContent = mn.toFixed(3);
+  document.getElementById("osL").textContent = osL.toFixed(4);
+  document.getElementById("osO").textContent = out.toFixed(4);
+  let log = "";
+  log += `Block ${osBlk}: scores = [${s.join(", ")}],  values = [${v.join(", ")}]\n`;
+  log += `  block max = ${bm.toFixed(3)}   →  m: ${oldM===-Infinity?"−∞":oldM.toFixed(3)} → ${mn.toFixed(3)}\n`;
+  log += `  rescale old totals by exp(m_old − m_new) = ${corr.toExponential(3)}\n`;
+  log += `  l = ${oldL.toFixed(4)}·corr + ${addL.toFixed(4)} = ${osL.toFixed(4)}\n`;
+  log += `  O = acc / l = ${out.toFixed(4)}`;
+  if(osBlk>=3){ log += `\n\n✓ done. streamed O = ${out.toFixed(6)}  vs  true full softmax = ${trueSoftmaxOut().toFixed(6)}  →  identical`; }
+  document.getElementById("osLog").textContent = log;
+}
+document.getElementById("osStep").onclick = osStep;
+document.getElementById("osReset").onclick = osReset;
+osReset();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Attention, in one line", why:"Self-attention lets every token look at every other token. For query, key and value matrices Q, K, V, the output is softmax(QKᵀ/√d)·V: each query scores its similarity to all keys, those scores are turned into weights by softmax, and the weights blend the values. The √d is a scaling factor that keeps the scores from getting too large. This is exact and simple — the trouble is purely in how it's computed on a GPU.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">O = softmax( Q·Kᵀ / √d ) · V<br><br>Q,K,V : N×d&nbsp;&nbsp;&nbsp;(N tokens, dim d)<br>Q·Kᵀ&nbsp;&nbsp;: N×N&nbsp;&nbsp;&nbsp;← the scores<br>O&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: N×d&nbsp;&nbsp;&nbsp;← same shape as input</div>`, code:`# the whole operation
+scores  = (Q @ K.T) / sqrt(d)   # [N, N]
+weights = softmax(scores)       # [N, N]
+O       = weights @ V           # [N, d]` },
+ { title:"2. The N×N problem", why:"The score matrix QKᵀ has one entry for every pair of tokens, so its size is N×N — quadratic in sequence length. Double the context and you quadruple the memory just for the scores, and again for the softmax weights. At N=8k that's ~67 million numbers per head, per layer, dwarfing the model's own weights. This quadratic term is the reason long context was historically so expensive, and it's exactly what Flash Attention removes from memory.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">N = 1k → 1,000,000 scores<br>N = 2k → 4,000,000&nbsp;&nbsp;(4×)<br>N = 4k → 16,000,000&nbsp;(16×)<br>N = 8k → 67,000,000&nbsp;(67×)<br><br>memory ∝ N²  — the bottleneck</div>`, code:`# memory just for the scores
+for N in [1024, 2048, 4096, 8192]:
+    elems = N * N              # quadratic!
+    print(N, elems, elems*2, "bytes (fp16)")
+# 8192 -> 67M elems -> 128 MB per head per layer` },
+ { title:"3. GPU memory: SRAM vs HBM", why:"A GPU has two very different memories. On-chip SRAM is tiny (tens of KB per streaming multiprocessor) but blazingly fast; HBM is the big gigabytes of 'GPU RAM' but ~10× slower to read and write. Attention does relatively few math operations per byte it moves, so it spends most of its time waiting on HBM — it is memory-bound, not compute-bound. That means the way to speed it up is to move less data, not to do fewer multiplies.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">┌─ SRAM ─┐  fast, tiny (~KB), on-chip<br>│  ~19 TB/s │  ← you want to live here<br>└────────┘<br>┌───── HBM ─────┐  slow, big (GBs)<br>│&nbsp;&nbsp;~2 TB/s, 40-80GB │  ← the N×N goes here<br>└───────────────┘<br>attention = memory-bound</div>`, code:`# roughly, per GPU generation:
+# SRAM : ~20 MB total, ~19 TB/s   (fast, tiny)
+# HBM  : 40-80 GB,     ~2  TB/s   (big, ~10x slower)
+# attention moves lots of bytes per FLOP
+#   -> bounded by HBM traffic, not by math` },
+ { title:"4. Tile Q, K and V into blocks", why:"Instead of one huge N×N operation, Flash Attention splits Q, K and V into small blocks that fit in fast SRAM. It loops over query blocks on the outside and, for each, streams over key/value blocks on the inside. At any moment only a Bq×d query tile, a Bk×d key/value tile, and a Bq×Bk score tile are on-chip. The full matrix is never assembled — it's consumed block by block and thrown away.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">for each Q block (rows):<br>&nbsp;&nbsp;for each K/V block (cols):<br>&nbsp;&nbsp;&nbsp;&nbsp;load small tiles → SRAM<br>&nbsp;&nbsp;&nbsp;&nbsp;compute B×B scores<br>&nbsp;&nbsp;&nbsp;&nbsp;update running result<br>only one tile lives on-chip at a time</div>`, code:`for i in range(0, N, Bq):        # query blocks
+    Qi = Q[i:i+Bq]               # small tile -> SRAM
+    for j in range(0, N, Bk):    # key/value blocks
+        Kj, Vj = K[j:j+Bk], V[j:j+Bk]
+        S = Qi @ Kj.T / sqrt(d)  # only Bq×Bk, never N×N` },
+ { title:"5. Online (streaming) softmax", why:"Softmax normally needs the whole row at once: subtract the max (for numerical safety), exponentiate, then divide by the total. But if the scores arrive block by block, you can't see the whole row. The online softmax keeps a running max m and a running sum l, and updates them as each block arrives — mathematically equal to the batch version. This is the trick that lets attention be computed in a single streaming pass without ever holding a full row of scores.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">batch softmax needs the WHOLE row:<br>&nbsp;&nbsp;p_j = e^(s_j − max) / Σ e^(s_k − max)<br><br>online: carry (m, l) across blocks<br>&nbsp;&nbsp;m = running max&nbsp;&nbsp;&nbsp;l = running Σ e^(s−m)<br>same answer, one streaming pass</div>`, code:`m, l = -inf, 0.0            # running max, running sum
+for block_scores in stream:
+    m_new = max(m, block_scores.max())
+    l = l*exp(m - m_new) + sum(exp(block_scores - m_new))
+    m = m_new
+# l is now the exact softmax denominator` },
+ { title:"6. The rescaling trick", why:"When a new block reveals a bigger max, every earlier exponential was computed against a smaller max and is now too large. The fix is a single correction factor, exp(m_old − m_new), that rescales the running sum l AND the running output accumulator O in one multiply. Because both are corrected identically, the final ratio O/l is exact. This cheap rescale — applied once per block — is what makes streaming attention numerically identical to the all-at-once version.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">new block has a bigger max?<br>correction = exp(m_old − m_new)<br><br>l&nbsp;&nbsp;← l · correction + Σ e^(s − m_new)<br>O&nbsp;&nbsp;← O · correction + Σ e^(s − m_new)·v<br>rescale past + add present → exact</div>`, code:`m_new = max(m, S.max())
+corr  = exp(m - m_new)          # fix earlier terms
+P     = exp(S - m_new)
+l = corr*l + P.sum()
+O = corr*O + P @ Vj             # accumulate output too
+m = m_new
+# final: O_i = O / l   (normalize once at the end)` },
+ { title:"7. Backward pass: recompute, don't store", why:"Training needs the attention weights again during backprop. Storing the N×N matrix from the forward pass would bring the memory problem right back. Flash Attention instead saves only the small per-row statistics (the final m and l) and recomputes each score tile on the fly in the backward pass. Recomputation costs a few extra FLOPs, but since attention is memory-bound and those FLOPs are cheap, it's a winning trade — memory stays linear and training still speeds up.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">forward: save only (m, l) per row&nbsp;&nbsp;← O(N)<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;NOT the N×N matrix<br>backward: recompute S tiles as needed<br>extra FLOPs, but they're ~free (memory-bound)<br>⇒ training memory stays O(N)</div>`, code:`# forward saves tiny stats, not the matrix
+save_for_backward(Q, K, V, O, m, l)   # m,l are O(N)
+# backward recomputes each tile:
+for tiles:
+    S = Qi @ Kj.T / sqrt(d)   # recomputed, cheap
+    P = exp(S - m) / l        # rebuild weights on the fly
+    # ... accumulate gradients` },
+ { title:"8. It's EXACT, not an approximation", why:"This is the crucial point: Flash Attention is not sparse attention, low-rank attention, or any lossy approximation. It computes the identical mathematical function as standard attention — the same softmax over the same scores — just in a different, IO-aware order. The output matches the naive path to floating-point precision (the LOOK tab shows a difference of ~1e-16). You get the memory and speed benefits with zero cost to model quality, which is why it became a default rather than an option.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">NOT sparse. NOT low-rank. NOT lossy.<br><br>flash_output == naive_output<br>max abs diff ≈ 1e-16 (fp dust)<br><br>same function, smarter order of operations</div>`, code:`ref  = naive_attention(Q, K, V)          # full N×N
+fast = flash_attention(Q, K, V)          # tiled
+assert allclose(ref, fast, atol=1e-2)    # ✓ identical
+# quality unchanged — pure systems win` },
+ { title:"9. The speedup is fewer HBM trips", why:"Flash Attention does not reduce the number of multiplies — it may even add a few from recomputation. The win is that it slashes reads and writes to slow HBM: the N×N scores and weights are never written out or read back. Since attention was memory-bound, cutting that traffic directly cuts wall-clock time, giving large real-world speedups on GPUs. It's a textbook case of an IO-aware algorithm: same computation, arranged to move far less data.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">standard HBM traffic ∝ N²<br>&nbsp;&nbsp;(write scores, read them, write weights…)<br>flash HBM traffic ∝ N·d<br>&nbsp;&nbsp;(read Q,K,V once, write O once)<br><br>less data moved → faster, though FLOPs ≈ same</div>`, code:`# what actually changes:
+#   FLOPs      : ~same (a bit more w/ recompute)
+#   HBM bytes  : O(N²)  ->  O(N)
+#   wall clock : big speedup (was memory-bound)
+# fewer round-trips to slow memory = the whole point` },
+ { title:"10. Impact: longer context, faster models", why:"By making attention memory linear instead of quadratic, Flash Attention removed the practical ceiling on context length — it's a big reason models jumped from a couple thousand tokens to tens or hundreds of thousands. Training runs get faster and cheaper for the same hardware, and inference over long prompts becomes feasible. Because it's exact and drop-in, it was adopted almost everywhere: it now underlies most modern transformer training and serving stacks.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">memory: O(N²) → O(N)<br>⇒ context: 2k → 32k → 128k → 1M+<br>⇒ training: faster & cheaper<br>⇒ inference: long prompts feasible<br>adopted as a default across the field</div>`, code:`# enabling it is usually one flag:
+model = AutoModelForCausalLM.from_pretrained(
+    name, attn_implementation="flash_attention_2")
+# or one call:
+F.scaled_dot_product_attention(Q, K, V, is_causal=True)` },
+ { title:"11. FlashAttention-2 and -3", why:"The idea kept improving. FlashAttention-2 reworked the loop order and work partitioning to keep GPU cores busier, roughly doubling throughput over the original. FlashAttention-3 targets newer hardware (NVIDIA Hopper), overlapping computation with data movement and using low-precision (FP8) paths for further gains. All versions preserve the same exactness guarantee — they're engineering refinements of the same tiling-plus-online-softmax core, not new math.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">FA-1: tiling + online softmax (the idea)<br>FA-2: better parallelism → ~2× faster<br>FA-3: Hopper GPUs, async + FP8 paths<br><br>all still EXACT — same core, tuned kernels</div>`, code:`# same import, faster kernels under the hood
+from flash_attn import flash_attn_func   # FA-2 / FA-3
+out = flash_attn_func(q, k, v, causal=True)
+# newer GPUs + newer versions = more speed,
+# identical output guarantee` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curS=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curS-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curS+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curS>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curS+1); },3600); };
+show(0);
+
+function copy(btn){ const pre=btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o=btn.textContent; btn.textContent="✓ Copied!"; setTimeout(()=>btn.textContent=o,1500); }
+</script>
+</body>
+</html>
