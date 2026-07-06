@@ -32,6 +32,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 23 — Knowledge Distillation](https://dev48v.infy.uk/ai/days/day23-distillation.html) — `day23-distillation.html`
 - [AIFromZero · Day 24 — LoRA Fine-Tuning](https://dev48v.infy.uk/ai/days/day24-lora.html) — `day24-lora.html`
 - [AIFromZero · Day 25 — Flash Attention](https://dev48v.infy.uk/ai/days/day25-flash-attention.html) — `day25-flash-attention.html`
+- [AIFromZero · Day 26 — Grounding & Citations](https://dev48v.infy.uk/ai/days/day26-grounding.html) — `day26-grounding.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
