@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 27 — Reasoning Models &amp; Test-Time Compute</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:8px; border-radius:6px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:50%; background:#4f46e5; cursor:pointer; box-shadow:0 1px 4px rgba(79,70,229,.5); }
+  input[type=range]::-moz-range-thumb{ width:22px; height:22px; border:none; border-radius:50%; background:#4f46e5; cursor:pointer; }
+  .stepline { animation: fadeIn .35s ease-out; }
+  .kbtn.on { background:#4f46e5; color:#fff; }
+  .votebar { transition: width .35s ease-out; height:22px; border-radius:6px; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 27</div>
+      <h1 class="text-xl font-bold">🧠 Reasoning Models &amp; Test-Time Compute — Think Longer, Answer Better</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto">
+      <div class="text-center mb-5">
+        <h2 class="text-2xl font-bold mb-1">Same model, same question. Let it <em>think longer</em> and the wrong answer becomes right.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">A normal model answers in one shot — it blurts the first plausible thing. A <strong>reasoning model</strong> (o1-style, DeepSeek-R1-style) is trained to spend <strong>inference compute</strong> first: it writes a long private chain-of-thought, checks its own work, <strong>catches its mistakes and backtracks</strong>, then commits. Drag the <strong>thinking budget</strong> below and watch a classic trap problem flip from wrong to right — and watch the <strong>accuracy-vs-compute</strong> curve climb, then flatten. Then flip on <strong>majority vote</strong>: sample several chains and let them vote. Every number here is computed live in your browser.</p>
+      </div>
+
+      <!-- PROBLEM -->
+      <div class="bg-white rounded-2xl border border-indigo-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-2">The problem — easy to get wrong fast</div>
+        <div class="bg-slate-900 text-slate-100 rounded-xl p-4">
+          <span class="text-xs uppercase font-bold text-indigo-300">Question</span>
+          <div id="qText" class="text-lg font-semibold mt-1">—</div>
+        </div>
+        <p class="text-xs text-slate-400 mt-3">Most people (and fast models) blurt the intuitive answer in a second. It's wrong. The right answer needs a couple of deliberate steps — exactly what "thinking" buys.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- BUDGET + CURVE -->
+        <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-2">1 · Thinking budget (test-time compute)</div>
+          <p class="text-sm text-slate-500 mb-3">More budget = more reasoning tokens the model may spend <em>before</em> answering. It costs time and money — that's the trade.</p>
+          <input id="budget" type="range" min="0" max="7" step="1" value="0" class="w-full mb-3" />
+          <div class="grid grid-cols-3 gap-2 text-center mb-4">
+            <div class="bg-slate-50 border border-slate-200 rounded-lg p-2">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Think budget</div>
+              <div><span id="tokOut" class="stat text-lg font-bold text-indigo-600">—</span> <span class="text-xs text-slate-400">tok</span></div>
+            </div>
+            <div class="bg-slate-50 border border-slate-200 rounded-lg p-2">
+              <div class="text-[10px] uppercase font-bold text-slate-400">~Latency</div>
+              <div><span id="latOut" class="stat text-lg font-bold text-slate-700">—</span></div>
+            </div>
+            <div class="bg-slate-50 border border-slate-200 rounded-lg p-2">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Accuracy</div>
+              <div><span id="accOut" class="stat text-lg font-bold text-emerald-600">—</span></div>
+            </div>
+          </div>
+          <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Accuracy vs. compute (scaling curve)</div>
+          <svg id="chart" viewBox="0 0 320 170" class="w-full"></svg>
+          <p class="text-xs text-slate-400 mt-2">The curve <strong>rises fast, then plateaus</strong>: the first tokens of thinking buy huge accuracy gains; past a point, extra tokens barely help — you're paying more for almost nothing.</p>
+        </div>
+
+        <!-- THINKING TRACE + ANSWER -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-2">2 · The hidden "thinking", and the answer it lands on</div>
+          <p class="text-sm text-slate-500 mb-3">This chain-of-thought is normally hidden. Watch it grow as you raise the budget — including a <span class="text-rose-600 font-bold">wrong turn it catches</span> and <span class="text-emerald-600 font-bold">corrects</span>.</p>
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-3 min-h-[190px]">
+            <div class="text-[10px] uppercase font-bold text-slate-400 mb-2">💭 thinking trace</div>
+            <div id="trace" class="space-y-2"></div>
+          </div>
+          <div id="answerBox" class="rounded-xl p-4 border text-center">
+            <div class="text-[10px] uppercase font-bold tracking-wider mb-1" id="answerLabel">Final answer</div>
+            <div id="answerVal" class="text-3xl font-bold stat">—</div>
+            <div id="answerNote" class="text-xs mt-1">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MAJORITY VOTE / BEST-OF-N -->
+      <div class="bg-white rounded-2xl border border-indigo-200 p-5 mt-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-2">3 · Another compute lever — best-of-N &amp; majority vote</div>
+        <p class="text-sm text-slate-500 mb-3">Instead of (or on top of) thinking longer, spend compute <em>sideways</em>: sample <strong>N independent chains</strong> at a fixed budget and take the answer they <strong>vote</strong> for most. A single greedy sample can land on the trap; the crowd of chains cancels the flukes out. Pick N and watch the tally decide.</p>
+        <div class="flex flex-wrap items-center gap-2 mb-4">
+          <span class="text-sm font-bold text-slate-500 mr-1">Samples N:</span>
+          <button data-n="1" class="kbtn on px-4 py-1.5 rounded-lg font-semibold text-sm bg-slate-100">1</button>
+          <button data-n="3" class="kbtn px-4 py-1.5 rounded-lg font-semibold text-sm bg-slate-100">3</button>
+          <button data-n="5" class="kbtn px-4 py-1.5 rounded-lg font-semibold text-sm bg-slate-100">5</button>
+          <button data-n="7" class="kbtn px-4 py-1.5 rounded-lg font-semibold text-sm bg-slate-100">7</button>
+          <span class="text-sm font-bold text-slate-500 ml-auto">Vote winner: <span id="voteWin" class="stat text-slate-400">—</span></span>
+        </div>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <div class="text-[10px] uppercase font-bold text-slate-400 mb-2">Sampled chains (each ends on an answer)</div>
+            <div id="sampleChips" class="flex flex-wrap gap-2"></div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase font-bold text-slate-400 mb-2">Live vote tally</div>
+            <div id="voteBars" class="space-y-2"></div>
+          </div>
+        </div>
+        <div id="voteVerdict" class="rounded-lg p-3 mt-4 text-sm border">—</div>
+        <p class="text-xs text-slate-400 mt-2">The winner is a real <span class="font-mono">argmax</span> over counts computed here — not a lookup. N=1 is just the greedy single answer; odd N avoids ties.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How reasoning models &amp; test-time compute work</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / PROMPT FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Spend test-time compute on purpose</h2>
+    <p class="text-slate-500 mb-8">A reasoning model isn't "smarter for free" — it's a <strong>dial</strong>. The skill is knowing when to turn it up, when to leave it down, and how to squeeze more accuracy out of the same weights with best-of-N and verification. Here's the practical loop, end to end.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Pick the right model for the job</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Reasoning models cost more and answer slower. Route by task: a fast model for lookups, formatting, chit-chat; a reasoning model only for genuinely multi-step problems (math, planning, hard code, proofs). Don't pay the thinking tax on "what's the capital of France."</p>
+        <div class="relative"><pre>def route(task):
+    if task.kind in ("chat", "format", "lookup", "extract"):
+        return "fast-model"          # cheap, low latency
+    if task.kind in ("math", "plan", "hard-code", "multi-step"):
+        return "reasoning-model"     # worth the compute
+    return "fast-model"</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Turn the dial with a reasoning-effort param</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Reasoning models expose a knob — <code>reasoning_effort</code> (low/medium/high) or an explicit thinking-token budget. Higher = longer internal chain-of-thought = more accuracy on hard items, at more cost. Start low, raise it only if the task needs it.</p>
+        <div class="relative"><pre>resp = client.responses.create(
+    model="reasoning-model",
+    reasoning_effort="high",      # low | medium | high
+    input=hard_problem,
+)
+# equivalently, some APIs take an explicit token budget:
+#   thinking={"budget_tokens": 4000}</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Don't over-prompt it to "think step by step"</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A reasoning model already reasons internally — hand-written "let's think step by step" scaffolding and few-shot chains often <em>hurt</em>. Give it a clean, complete problem statement and the constraints; let it do the thinking. Prompt for the <strong>output format</strong>, not the thought process.</p>
+        <div class="relative"><pre># fast model (pre-reasoning era): coax the CoT out by hand
+prompt = "Let's think step by step...\n" + few_shot + question
+
+# reasoning model: just state the task cleanly
+prompt = question + "\nReturn only the final number."</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Squeeze more out with best-of-N + majority vote</h3></div>
+        <p class="text-sm text-slate-600 mb-3">When one chain isn't reliable enough, sample several and let them vote (self-consistency). This is the exact tally from the LOOK tab — a real <code>argmax</code> over sampled answers. Great accuracy lift for tasks with a checkable final answer; you pay N× the compute.</p>
+        <div class="relative"><pre>from collections import Counter
+def best_of_n(problem, n=5, temperature=0.7):
+    answers = [sample(problem, temperature).final for _ in range(n)]
+    counts  = Counter(answers)          # {"$0.05": 3, "$0.10": 1, ...}
+    return counts.most_common(1)[0][0]  # majority-vote winner</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Verify the answer — reasoning ≠ correct</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A long chain can still be confidently wrong. Where the answer is checkable, check it: run the code, evaluate the equation, unit-test the plan. Verifiable rewards are exactly what these models were trained on — reuse the same signal at inference to pick or reject an answer (best-of-N by <em>verifier score</em>, not just votes).</p>
+        <div class="relative"><pre>cands = [sample(problem) for _ in range(n)]
+scored = [(verify(c.answer, problem), c) for c in cands]   # 1.0 if it checks out
+best = max(scored, key=lambda x: x[0])[1]
+if verify(best.answer, problem) < 1.0:
+    escalate()      # none verified -> raise effort or ask a human</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Budget it: watch the accuracy-vs-cost curve</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Compute isn't free and the curve plateaus. Measure accuracy at a few effort levels on your own eval set, find the knee of the curve, and set the default there. Escalate to higher effort only for the items that fail — not for everything.</p>
+        <div class="relative"><pre>for effort in ["low", "medium", "high"]:
+    acc, cost, p95 = eval_suite(effort)
+    print(f"{effort:6}  acc={acc:.2f}  $={cost:.3f}  p95={p95}ms")
+# ship the effort at the KNEE: past it you pay a lot for ~nothing
+default_effort = "medium"      # escalate only failing items to "high"</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">7</div><h3 class="font-bold text-lg">Distill the reasoning into a smaller, faster model</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Once a big reasoning model solves your tasks, harvest its <em>correct</em> chains-of-thought and fine-tune a small model on them (Day 23 · distillation). The student learns to reason in fewer tokens — most of the accuracy, a fraction of the cost and latency.</p>
+        <div class="relative"><pre># collect verified reasoning traces from the big model
+traces = [t for t in big_model_runs if verify(t.answer)]
+# supervised fine-tune a small model to imitate the reasoning
+small = finetune("small-base", data=[(t.problem, t.chain, t.answer) for t in traces])
+# now: cheaper, faster, keeps most of the reasoning skill</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 27 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw a reasoning model spend inference compute to catch its own mistake and flip a wrong answer right, watched accuracy climb and then plateau against the thinking budget, and used best-of-N majority voting as a second compute lever. You learned train-time vs test-time compute, long chain-of-thought with self-verification, RL on verifiable rewards, the test-time scaling law, the cost/latency trade, when to reach for a reasoning model, and how to distill its reasoning into a cheaper one. <strong>👉 Tomorrow — Day 28: Function Calling &amp; Tool Use — letting a reasoning model act, not just think. (RLHF and Mixture-of-Experts are already covered — Days 17 &amp; 19.)</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===================== LOOK · test-time compute demo =====================
+// A classic trap problem. As the thinking budget rises, more of a scripted
+// chain-of-thought is revealed; the single-shot answer flips wrong->right once
+// the model reaches the "solve" step. Accuracy vs. compute is a real saturating
+// function; the vote winner is a real argmax over sampled answers.
+const PROBLEM = {
+  q: "A bat and a ball cost $1.10 together. The bat costs $1.00 more than the ball. How much does the ball cost?",
+  right: "$0.05",
+  trap:  "$0.10"
+};
+
+// eight thinking budgets, in tokens
+const STOPS     = [24, 48, 96, 160, 256, 384, 560, 800];
+// how many chain-of-thought steps each budget unlocks
+const STEPS_AT  = [1,  2,  3,   4,   5,   6,   6,   6 ];
+
+// accuracy as a saturating function of compute: rises fast, then plateaus
+function accuracy(tokens){
+  const base = 0.12, ceil = 0.92, k = 0.006;
+  return base + (ceil - base) * (1 - Math.exp(-k * tokens));
+}
+
+// the hidden chain-of-thought, revealed progressively
+const TRACE = [
+  { kind:"guess",     tag:"guess",     label:"Fast intuition — no real thinking",
+    text:"The bat costs a dollar more and the total is $1.10, so the ball is just the leftover 10 cents.",
+    answer:"$0.10", correct:false },
+  { kind:"check",     tag:"self-check",label:"Self-check — plug it back in",
+    text:"Wait — if the ball is $0.10, the bat is $1.10 (a dollar more). That totals $1.20, not $1.10. My first answer contradicts the problem.",
+    answer:"$0.10", correct:false },
+  { kind:"backtrack", tag:"backtrack", label:"Backtrack — set it up with algebra",
+    text:"Drop the guess. Let the ball = b. Then bat = b + 1.00, and b + (b + 1.00) = 1.10.",
+    answer:"…", correct:false },
+  { kind:"solve",     tag:"solve",     label:"Solve the equation",
+    text:"2b + 1.00 = 1.10  →  2b = 0.10  →  b = 0.05.",
+    answer:"$0.05", correct:true },
+  { kind:"verify",    tag:"verify",    label:"Verify the new answer",
+    text:"Ball $0.05, bat $1.05. Difference is exactly $1.00 ✓ and they total $1.10 ✓. It holds.",
+    answer:"$0.05", correct:true },
+  { kind:"final",     tag:"commit",    label:"Commit to the answer",
+    text:"The ball costs $0.05.",
+    answer:"$0.05", correct:true }
+];
+
+const STYLE = {
+  guess:     { box:"bg-amber-50 border-amber-200",   tag:"bg-amber-100 text-amber-700" },
+  check:     { box:"bg-rose-50 border-rose-200",     tag:"bg-rose-100 text-rose-700" },
+  backtrack: { box:"bg-indigo-50 border-indigo-200", tag:"bg-indigo-100 text-indigo-700" },
+  solve:     { box:"bg-emerald-50 border-emerald-200", tag:"bg-emerald-100 text-emerald-700" },
+  verify:    { box:"bg-emerald-50 border-emerald-200", tag:"bg-emerald-100 text-emerald-700" },
+  final:     { box:"bg-slate-100 border-slate-300",  tag:"bg-slate-200 text-slate-700" }
+};
+
+const budgetEl = document.getElementById("budget");
+const traceEl  = document.getElementById("trace");
+const chartEl  = document.getElementById("chart");
+
+function drawChart(idx){
+  const W = 320, H = 170, padL = 34, padB = 24, padT = 10, padR = 8;
+  const x = i => padL + (W - padL - padR) * (i / (STOPS.length - 1));
+  const y = a => padT + (H - padT - padB) * (1 - a);
+  let pts = STOPS.map((t,i) => `${x(i).toFixed(1)},${y(accuracy(t)).toFixed(1)}`).join(" ");
+  let area = `${padL},${y(0).toFixed(1)} ` + pts + ` ${x(STOPS.length-1).toFixed(1)},${y(0).toFixed(1)}`;
+  let g = "";
+  // gridlines + y labels at 0/50/100%
+  [0,0.5,1].forEach(a => {
+    g += `<line x1="${padL}" y1="${y(a)}" x2="${W-padR}" y2="${y(a)}" stroke="#e2e8f0" stroke-width="1"/>`;
+    g += `<text x="${padL-4}" y="${y(a)+3}" text-anchor="end" font-size="8" fill="#94a3b8">${Math.round(a*100)}%</text>`;
+  });
+  g += `<polygon points="${area}" fill="#eef2ff"/>`;
+  g += `<polyline points="${pts}" fill="none" stroke="#4f46e5" stroke-width="2.5"/>`;
+  STOPS.forEach((t,i) => {
+    g += `<circle cx="${x(i)}" cy="${y(accuracy(t))}" r="${i===idx?5:2.5}" fill="${i===idx?'#4f46e5':'#c7d2fe'}"${i===idx?' stroke="#fff" stroke-width="2"':''}/>`;
+  });
+  // marker guide line for current budget
+  g += `<line x1="${x(idx)}" y1="${padT}" x2="${x(idx)}" y2="${H-padB}" stroke="#4f46e5" stroke-width="1" stroke-dasharray="3 3" opacity="0.4"/>`;
+  g += `<text x="${(padL+W-padR)/2}" y="${H-6}" text-anchor="middle" font-size="8" fill="#94a3b8">thinking budget (tokens) →</text>`;
+  chartEl.innerHTML = g;
+}
+
+function render(){
+  const idx = +budgetEl.value;
+  const tokens = STOPS[idx];
+  const steps  = STEPS_AT[idx];
+  const acc = accuracy(tokens);
+  const revealed = TRACE.slice(0, steps);
+  const last = revealed[revealed.length - 1];
+
+  document.getElementById("tokOut").textContent = tokens;
+  document.getElementById("accOut").textContent = Math.round(acc*100) + "%";
+  // latency proxy: scales with tokens
+  const lat = (tokens/800*4 + 0.3);
+  document.getElementById("latOut").textContent = lat.toFixed(1) + "s";
+
+  // trace
+  traceEl.innerHTML = "";
+  revealed.forEach(s => {
+    const st = STYLE[s.kind];
+    const caught = s.kind === "check";
+    traceEl.insertAdjacentHTML("beforeend",
+      `<div class="stepline border rounded-lg px-3 py-2 ${st.box}">
+         <div class="flex items-center gap-2 mb-0.5">
+           <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${st.tag}">${s.tag}</span>
+           <span class="text-xs font-semibold text-slate-600">${s.label}</span>
+           ${caught?'<span class="text-[10px] font-bold text-rose-600 ml-auto">⚠ caught a wrong turn</span>':''}
+         </div>
+         <div class="text-sm text-slate-700">${s.text}</div>
+       </div>`);
+  });
+  if(steps === 1){
+    traceEl.insertAdjacentHTML("beforeend",
+      `<div class="text-xs text-slate-400 italic">…almost no thinking budget — it just blurted the first thing. Drag the slider right. →</div>`);
+  }
+
+  // final answer box
+  const box = document.getElementById("answerBox");
+  const val = document.getElementById("answerVal");
+  const note= document.getElementById("answerNote");
+  val.textContent = last.answer;
+  if(last.answer === "…"){
+    box.className = "rounded-xl p-4 border text-center bg-slate-50 border-slate-200";
+    val.className = "text-3xl font-bold stat text-slate-400";
+    note.textContent = "still working it out…";
+    note.className = "text-xs mt-1 text-slate-400";
+    document.getElementById("answerLabel").textContent = "Working…";
+  } else if(last.correct){
+    box.className = "rounded-xl p-4 border text-center bg-emerald-50 border-emerald-300";
+    val.className = "text-3xl font-bold stat text-emerald-600";
+    note.textContent = "✓ correct — the extra thinking paid off";
+    note.className = "text-xs mt-1 text-emerald-700 font-semibold";
+    document.getElementById("answerLabel").textContent = "Final answer";
+  } else {
+    box.className = "rounded-xl p-4 border text-center bg-rose-50 border-rose-300";
+    val.className = "text-3xl font-bold stat text-rose-600";
+    note.textContent = "✗ wrong — the classic trap answer";
+    note.className = "text-xs mt-1 text-rose-700 font-semibold";
+    document.getElementById("answerLabel").textContent = "Answer so far";
+  }
+
+  drawChart(idx);
+}
+budgetEl.oninput = render;
+
+// ---------- majority vote / best-of-N ----------
+// deterministic pool of sampled chain answers; take the first N
+const SAMPLES = ["$0.10","$0.05","$0.05","$0.15","$0.05","$0.10","$0.05"];
+function tally(n){
+  const counts = {};
+  SAMPLES.slice(0, n).forEach(a => counts[a] = (counts[a]||0) + 1);
+  let win = null, max = -1;
+  for(const k in counts){ if(counts[k] > max){ max = counts[k]; win = k; } }
+  return { counts, win, correct: win === PROBLEM.right };
+}
+const chipsEl   = document.getElementById("sampleChips");
+const barsEl    = document.getElementById("voteBars");
+const verdictEl = document.getElementById("voteVerdict");
+function renderVote(n){
+  const t = tally(n);
+  chipsEl.innerHTML = "";
+  SAMPLES.slice(0, n).forEach((a,i) => {
+    const ok = a === PROBLEM.right;
+    chipsEl.insertAdjacentHTML("beforeend",
+      `<span class="text-xs font-mono font-bold px-2 py-1 rounded border ${ok?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-rose-50 border-rose-200 text-rose-700'}">#${i+1} ${a}</span>`);
+  });
+  barsEl.innerHTML = "";
+  const keys = Object.keys(t.counts).sort((a,b)=>t.counts[b]-t.counts[a]);
+  keys.forEach(k => {
+    const c = t.counts[k];
+    const pct = Math.round(c/n*100);
+    const isWin = k === t.win;
+    const ok = k === PROBLEM.right;
+    barsEl.insertAdjacentHTML("beforeend",
+      `<div class="flex items-center gap-2">
+         <span class="text-xs font-mono font-bold w-12 shrink-0 ${ok?'text-emerald-600':'text-slate-500'}">${k}</span>
+         <div class="flex-1 bg-slate-100 rounded-md overflow-hidden">
+           <div class="votebar ${ok?'bg-emerald-500':'bg-rose-400'}" style="width:${Math.max(pct,8)}%"></div>
+         </div>
+         <span class="text-xs font-bold w-8 text-right ${isWin?'text-indigo-600':'text-slate-400'}">${c}${isWin?' ★':''}</span>
+       </div>`);
+  });
+  document.getElementById("voteWin").textContent = t.win + (t.correct ? " ✓" : " ✗");
+  document.getElementById("voteWin").className = "stat font-bold " + (t.correct ? "text-emerald-600" : "text-rose-600");
+  if(n === 1){
+    verdictEl.className = "rounded-lg p-3 mt-4 text-sm border bg-rose-50 border-rose-200 text-rose-700";
+    verdictEl.innerHTML = `<strong>N = 1 (greedy single sample):</strong> the one chain landed on the trap answer <span class="font-mono">$0.10</span> — <strong>wrong</strong>. One roll of the dice isn't enough.`;
+  } else if(t.correct){
+    verdictEl.className = "rounded-lg p-3 mt-4 text-sm border bg-emerald-50 border-emerald-200 text-emerald-700";
+    verdictEl.innerHTML = `<strong>N = ${n}, majority vote → <span class="font-mono">${t.win}</span> — correct.</strong> The flukes that fell for the trap were outvoted. Same weights, more compute spent sideways — wrong flipped to right.`;
+  } else {
+    verdictEl.className = "rounded-lg p-3 mt-4 text-sm border bg-slate-50 border-slate-200 text-slate-600";
+    verdictEl.innerHTML = `Winner: <span class="font-mono">${t.win}</span>.`;
+  }
+}
+document.querySelectorAll(".kbtn").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll(".kbtn").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    renderVote(+b.dataset.n);
+  };
+});
+
+document.getElementById("qText").textContent = PROBLEM.q;
+render();
+renderVote(1);
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Train-time vs test-time compute", why:"There are two moments you can spend compute. Train-time compute is burned once, up front, to bake skill into the weights (pretraining, fine-tuning). Test-time (inference) compute is spent every time you answer a question. For years we only scaled train-time — bigger models, more data. The reasoning-model insight is that you can also scale test-time: let a fixed model think for longer on a hard question and it gets meaningfully more right. Same weights, more thinking, better answer.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">TRAIN-TIME&nbsp;&nbsp;→ spent once, baked into weights<br>&nbsp;&nbsp;&nbsp;&nbsp;(pretrain · fine-tune · RL)<br><br>TEST-TIME&nbsp;&nbsp;→ spent per question, every call<br>&nbsp;&nbsp;&nbsp;&nbsp;(the "thinking" before the answer)<br><br>new lever: scale the SECOND one</div>`, code:`# same fixed weights, two different budgets
+answer = model(question)                       # ~0 thinking, fast, cheap
+answer = model(question, reasoning_effort="high")  # long think, slow, better
+# test-time compute = tokens spent BEFORE the final answer` },
+ { title:"2. What a reasoning model is (o1 / R1)", why:"A reasoning model is an LLM specifically trained to produce a long internal chain-of-thought before its final answer, and to use that space to plan, check, and self-correct. OpenAI's o1 and DeepSeek's R1 are the well-known examples; most frontier labs now ship a 'thinking' mode. Under the hood it's still next-token prediction — but the model has learned that emitting a working-out trace first leads to better final tokens. You usually see only a short summary of the thinking, not the raw trace.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">ordinary LLM:&nbsp; question → answer<br><br>reasoning model:<br>&nbsp;question → &lt;think&gt; long private CoT &lt;/think&gt; → answer<br><br>o1 (OpenAI) · R1 (DeepSeek) · "thinking" modes<br>still just next-token prediction — trained to think first</div>`, code:`# conceptually, the model emits two segments:
+#   <thinking>  ...plan, try, check, backtrack...  </thinking>
+#   <answer>    ...the final, committed response...  </answer>
+# you're billed for the hidden thinking tokens too` },
+ { title:"3. Long chain-of-thought: self-verify & backtrack", why:"The point of a long chain-of-thought isn't length for its own sake — it's the ability to try an approach, test it, notice it's wrong, and back out. In the LOOK demo the model guesses $0.10, plugs it back in, sees the total comes to $1.20 not $1.10, abandons the guess, sets up algebra, solves, and verifies. That self-check-and-backtrack loop is what a one-shot answer can't do: it has no room to catch its own mistake before committing.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">guess $0.10<br>&nbsp;&nbsp;└ check: bat+ball = $1.20 ≠ $1.10&nbsp; ✗<br>backtrack → set up b + (b+1) = 1.10<br>&nbsp;&nbsp;└ solve: b = 0.05<br>&nbsp;&nbsp;└ verify: diff $1.00 ✓ total $1.10 ✓<br>commit → $0.05</div>`, code:`# the reasoning trace is a search with error-correction
+guess = 0.10
+if bat(guess) + guess != 1.10:      # self-verification
+    # backtrack: the guess was wrong
+    b = solve("b + (b + 1.00) == 1.10")   # -> 0.05
+    assert abs((b+1) - b - 1.00) < 1e-9   # re-verify before committing` },
+ { title:"4. RL on reasoning traces / verifiable rewards", why:"How does a model learn to reason well instead of just rambling? Reinforcement learning on outcomes with verifiable rewards. For problems where the answer can be checked automatically — math results, unit tests passing, a proof that type-checks — you let the model generate many chains, reward the ones that reach a correct, verified answer, and reinforce the reasoning that got there. No human has to grade each step; the correctness check is the reward signal. This is what turns a raw LLM into a model that reasons on purpose.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">sample many chains for a problem<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▼<br>verifiable reward:&nbsp; answer correct? tests pass?<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▼<br>reinforce the chains that verified</div>`, code:`for problem in tasks_with_checkable_answers:
+    chains = model.sample(problem, n=64)
+    rewards = [1.0 if verify(c.answer, problem) else 0.0 for c in chains]
+    rl_update(model, chains, rewards)   # reinforce chains that got it right
+# reward = an automatic correctness check, not a human grade` },
+ { title:"5. The test-time compute scaling law", why:"Empirically, accuracy on hard reasoning tasks rises smoothly as you spend more inference compute — roughly log-linear for a while — then plateaus. That's the curve in the LOOK tab: the first tokens of thinking buy big gains, later tokens buy less and less. It mirrors the old train-time scaling laws, but the axis is thinking-per-question, not model size. Practically it means: for a hard problem you can often 'buy' accuracy at inference instead of training a bigger model — up to the plateau.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">accuracy<br>&nbsp;100% ┤&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;___________ plateau<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;┤&nbsp;&nbsp;&nbsp;&nbsp;__/<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;┤&nbsp;&nbsp;_/&nbsp;&nbsp;&nbsp;&nbsp;← steep early gains<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;┤_/<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─────────────── thinking tokens →<br>diminishing returns after the knee</div>`, code:`# accuracy(compute) rises, then saturates (LOOK-tab curve)
+def accuracy(tokens, base=0.12, ceil=0.92, k=0.006):
+    return base + (ceil - base) * (1 - math.exp(-k * tokens))
+# early tokens: huge marginal gain; late tokens: almost none` },
+ { title:"6. Best-of-N, majority vote & search", why:"Thinking longer on one chain is 'depth'. You can also spend compute on 'breadth': sample N independent chains and combine them. Majority vote (self-consistency) takes the answer most chains agree on; best-of-N picks the highest-scoring chain by a verifier or reward model; tree/search methods explore and prune many partial reasoning paths. All are test-time compute levers — they trade N× the cost for accuracy, and shine when the final answer is checkable or when independent chains cancel out each other's random errors.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">DEPTH:&nbsp; one chain, think longer<br>BREADTH: N chains, then combine<br><br>· majority vote → most common answer<br>· best-of-N&nbsp;&nbsp;&nbsp;→ highest verifier score<br>· tree search&nbsp;→ expand & prune paths<br><br>$0.05 · $0.05 · $0.10 · $0.05 → vote → $0.05</div>`, code:`from collections import Counter
+chains = [sample(problem, temperature=0.7) for _ in range(n)]
+# self-consistency: majority vote over final answers
+vote = Counter(c.answer for c in chains).most_common(1)[0][0]
+# best-of-N: pick by a verifier/reward score instead of votes
+best = max(chains, key=lambda c: reward_model(c))` },
+ { title:"7. The cost & latency trade-off", why:"Thinking is not free. Every reasoning token is billed and adds latency, and best-of-N multiplies both by N. A reasoning model on an easy task is pure waste — slower and pricier for no accuracy gain, since you're already on the plateau. The engineering job is to spend compute only where the curve is still steep: hard, multi-step, checkable problems. For everything else, a fast model at low effort wins on both speed and cost.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">more thinking → &nbsp;↑ accuracy (until plateau)<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ &nbsp;↑ latency (linear)<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ &nbsp;↑ $ cost&nbsp;&nbsp; (linear, ×N for best-of-N)<br><br>easy task + high effort = wasted money<br>spend where the curve is still steep</div>`, code:`cost_tokens = prompt + thinking_tokens + answer   # you pay for thinking
+latency     ~= thinking_tokens / tokens_per_sec
+# best-of-N multiplies BOTH by N
+total_cost  = n * cost_tokens
+# only worth it where accuracy is still climbing` },
+ { title:"8. When to use a reasoning model vs a fast one", why:"Reach for a reasoning model when the task is genuinely multi-step and correctness matters: competition math, hard debugging, planning, logic, anything where a wrong intermediate step derails the answer. Reach for a fast model when latency or cost dominates and the task is shallow: chat, summarisation, extraction, formatting, simple lookups. A good system routes — cheap model by default, escalate to the reasoning model (or higher effort) only for the hard slice, or only for items that failed a first cheap attempt.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">REASONING model&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;FAST model<br>math / proofs&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;chat / Q&amp;A<br>hard debugging&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;summarise / extract<br>multi-step plans&nbsp;&nbsp;&nbsp;format / classify<br>correctness-critical&nbsp;latency-critical<br><br>route by task · escalate only the hard slice</div>`, code:`def solve(task):
+    if not task.hard:
+        return fast_model(task)             # default: cheap + quick
+    ans = reasoning_model(task, effort="medium")
+    if not verify(ans, task):
+        ans = reasoning_model(task, effort="high")  # escalate only if needed
+    return ans` },
+ { title:"9. Distilling reasoning into a smaller model", why:"Running a big reasoning model everywhere is expensive. Distillation (Day 23) offers a shortcut: take the big model's correct, verified chains-of-thought and fine-tune a much smaller model to imitate that reasoning. The student inherits a lot of the teacher's step-by-step skill at a fraction of the cost and latency — DeepSeek showed small models distilled from R1 punching far above their size on reasoning benchmarks. It's how test-time reasoning becomes affordable at scale.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center font-mono">BIG reasoning model<br>&nbsp;&nbsp;└ generate verified chains-of-thought<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│ (teacher)<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▼<br>SMALL model fine-tuned on those traces (student)<br>→ most of the reasoning, a fraction of the cost</div>`, code:`# harvest only the chains that verified as correct
+data = [(t.problem, t.chain, t.answer)
+        for t in big_model_runs if verify(t.answer)]
+student = finetune("small-base", data)   # imitate the teacher's reasoning
+# cheaper + faster; keeps much of the reasoning skill (Day 23)` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curS=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curS-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curS+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curS>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curS+1); },3600); };
+show(0);
+
+function copy(btn){ const pre=btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o=btn.textContent; btn.textContent="✓ Copied!"; setTimeout(()=>btn.textContent=o,1500); }
+</script>
+</body>
+</html>
