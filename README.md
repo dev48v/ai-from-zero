@@ -34,6 +34,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 25 — Flash Attention](https://dev48v.infy.uk/ai/days/day25-flash-attention.html) — `day25-flash-attention.html`
 - [AIFromZero · Day 26 — Grounding & Citations](https://dev48v.infy.uk/ai/days/day26-grounding.html) — `day26-grounding.html`
 - [AIFromZero · Day 27 — Reasoning Models](https://dev48v.infy.uk/ai/days/day27-reasoning-models.html) — `day27-reasoning-models.html`
+- [AIFromZero · Day 28 — Function Calling & Tool Use](https://dev48v.infy.uk/ai/days/day28-function-calling.html) — `day28-function-calling.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 28 — Function Calling &amp; Tool Use</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:8px; border-radius:6px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:50%; background:#4f46e5; cursor:pointer; box-shadow:0 1px 4px rgba(79,70,229,.5); }
+  input[type=range]::-moz-range-thumb{ width:22px; height:22px; border:none; border-radius:50%; background:#4f46e5; cursor:pointer; }
+  .stepline { animation: fadeIn .35s ease-out; }
+  .kbtn.on { background:#4f46e5; color:#fff; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .jsonbox { white-space:pre; overflow-x:auto; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 28</div>
+      <h1 class="text-xl font-bold">🛠️ Function Calling &amp; Tool Use — Let the Model Act, Not Just Talk</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-5">
+        <h2 class="text-2xl font-bold mb-1">The model can't multiply or check the weather. So it <em>asks for a tool</em> — and your code runs it.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Give a model a menu of <strong>tools</strong> (each a JSON schema) and it stops guessing: instead of prose, it returns a <strong>structured tool call</strong> <span class="mono">{name, arguments}</span>. Your code runs the real function, feeds the result back, and the model continues — <strong>call → run → feed back → call</strong> — until it writes the final answer. Step through the loop below. The calculator is a <strong>real, live arithmetic evaluator</strong> (no <span class="mono">eval()</span>); the weather tool is mocked. Flip between <strong>sequential</strong> and <strong>parallel</strong> tool calls and watch the <span class="mono">messages[]</span> array grow.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- LEFT: tools + question + controls -->
+        <div class="space-y-5">
+          <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Tools available to the model — JSON schemas</div>
+            <p class="text-sm text-slate-500 mb-3">The model never sees your code, only these. The <strong>description</strong> and typed <strong>parameters</strong> are the only basis it has to decide when and how to call each one.</p>
+            <pre id="toolDefs" class="text-[11px]"></pre>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">The user's question — needs two different tools</div>
+            <div class="bg-slate-900 text-slate-100 rounded-xl p-4">
+              <span class="text-xs uppercase font-bold text-indigo-300">User</span>
+              <div id="qText" class="text-lg font-semibold mt-1">—</div>
+            </div>
+            <p class="text-xs text-slate-400 mt-3">Arithmetic (which the model does unreliably) <em>and</em> live weather (which isn't in its weights). No single reply can answer both — it needs tools.</p>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Run the tool-use loop</div>
+            <div class="flex flex-wrap items-center gap-2 mb-3">
+              <span class="text-sm font-bold text-slate-500 mr-1">Mode:</span>
+              <button id="mSeq" class="kbtn on px-4 py-1.5 rounded-lg font-semibold text-sm bg-slate-100">Sequential</button>
+              <button id="mPar" class="kbtn px-4 py-1.5 rounded-lg font-semibold text-sm bg-slate-100">Parallel</button>
+            </div>
+            <p class="text-xs text-slate-400 mb-3" id="modeNote">—</p>
+            <div class="flex flex-wrap gap-2 mb-4">
+              <button id="stepBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Step</button>
+              <button id="runBtn"  class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">⏩ Run all</button>
+              <button id="resetBtn" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">↻ Reset</button>
+            </div>
+            <div class="grid grid-cols-3 gap-2 text-center mb-4">
+              <div class="bg-slate-50 border border-slate-200 rounded-lg p-2">
+                <div class="text-[10px] uppercase font-bold text-slate-400">Messages</div>
+                <div><span id="msgCount" class="stat text-lg font-bold text-indigo-600">0</span></div>
+              </div>
+              <div class="bg-slate-50 border border-slate-200 rounded-lg p-2">
+                <div class="text-[10px] uppercase font-bold text-slate-400">Tool calls</div>
+                <div><span id="callCount" class="stat text-lg font-bold text-slate-700">0</span></div>
+              </div>
+              <div class="bg-slate-50 border border-slate-200 rounded-lg p-2">
+                <div class="text-[10px] uppercase font-bold text-slate-400">Round-trips</div>
+                <div><span id="rtCount" class="stat text-lg font-bold text-slate-700">0</span></div>
+              </div>
+            </div>
+            <div id="narration" class="rounded-lg p-3 text-sm border bg-indigo-50 border-indigo-200 text-indigo-800">Press <strong>▶ Step</strong> to run the loop one message at a time.</div>
+          </div>
+        </div>
+
+        <!-- RIGHT: the messages array -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-xs uppercase font-bold text-indigo-600"><span class="mono">messages[]</span> — the array the model re-reads each turn</div>
+            <span id="loopStatus" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-600">idle</span>
+          </div>
+          <p class="text-sm text-slate-500 mb-3">Every turn appends to this array. Notice the roles: <span class="mono text-indigo-600">assistant</span> messages carry <span class="mono">tool_calls</span>; <span class="mono text-emerald-600">tool</span> messages carry each result, keyed by <span class="mono">id</span>.</p>
+          <div id="transcript" class="space-y-3 min-h-[420px]"></div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mt-4 text-center max-w-3xl mx-auto">Sequential runs one tool call per round-trip; parallel emits both independent calls at once — same answer, fewer round-trips. <span class="mono">search</span> is on the menu but the model never calls it: it only reaches for the tools this question actually needs.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How function calling &amp; tool use work</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / SCHEMA FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Wire up a tool-calling loop</h2>
+    <p class="text-slate-500 mb-8">Function calling is a small, mechanical loop you own end to end: describe your tools, let the model request one, run it, feed the result back, repeat until it stops asking. Here's the whole thing, plus the guards that keep it safe.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Define your tools as JSON schemas</h3></div>
+        <p class="text-sm text-slate-600 mb-3">One schema per tool: a clear <code>name</code>, a <code>description</code> the model can actually act on, and typed <code>parameters</code> with the required ones listed. Keep the set small and unambiguous — overlapping or vague tools make the model pick wrong. Map each name to the real function in a lookup table.</p>
+        <div class="relative"><pre>TOOLS = [
+  {"name": "calculator",
+   "description": "Evaluate an arithmetic expression and return the number.",
+   "parameters": {"type": "object",
+     "properties": {"expr": {"type": "string", "description": "e.g. 23*47"}},
+     "required": ["expr"]}},
+  {"name": "get_weather",
+   "description": "Get the current weather for a city.",
+   "parameters": {"type": "object",
+     "properties": {"city": {"type": "string"}},
+     "required": ["city"]}},
+]
+TOOLKIT = {"calculator": calculator, "get_weather": get_weather}</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Send the tools with every model call</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Pass the schemas alongside the messages. The model can now either answer in plain text or return a tool call — you don't tell it which; it decides from the descriptions and the user's need.</p>
+        <div class="relative"><pre>messages = [{"role": "user", "content": user_question}]
+resp = client.chat(model="...", messages=messages, tools=TOOLS)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Detect a tool call in the response</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Check whether <code>tool_calls</code> came back (the finish reason will say so). No calls → the model gave a final answer and you're done. Calls present → it wants you to run something before it can continue.</p>
+        <div class="relative"><pre>if not resp.tool_calls:
+    print(resp.content)      # final answer -> stop here
+else:
+    ...                      # there is work to do -> run the tools</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Validate, run, and feed each result back</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Append the assistant's <code>tool_calls</code> turn first so history stays paired. Then for each call: validate the arguments against the schema, execute the matching function, and append the return value as a <code>tool</code>-role message keyed by <code>tool_call_id</code>. On failure, feed the error back instead of crashing.</p>
+        <div class="relative"><pre>messages.append(resp.assistant_message)              # the tool_calls turn
+for call in resp.tool_calls:
+    try:
+        args   = validate(call.arguments, schema_for(call.name))
+        result = TOOLKIT[call.name](**args)          # YOU run it
+    except Exception as e:
+        result = f"ERROR: {e}"                        # errors are feedback
+    messages.append({"role": "tool", "tool_call_id": call.id,
+                     "content": str(result)})</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Loop until it stops — with a hard guard</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Call the model again with the grown history and repeat: call → run → feed back → call. The natural stop is when the model returns a normal message with no tool calls. Always cap the iterations too, so a misbehaving model can't loop forever.</p>
+        <div class="relative"><pre>for _ in range(MAX_STEPS):                 # hard stop = guardrail
+    resp = client.chat(model="...", messages=messages, tools=TOOLS)
+    if not resp.tool_calls:
+        return resp.content                # natural stop: final answer
+    run_and_append(resp, messages)         # step 4
+raise RuntimeError("tool loop did not converge")</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Guard risky tools &amp; validate every argument</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A tool call is untrusted input — the model can be steered by prompt injection (Day 18). Allow-list arguments, sandbox execution (the calculator here parses arithmetic, it never <code>eval()</code>s code), keep tools read-only where possible, and gate irreversible actions behind human approval.</p>
+        <div class="relative"><pre>def calculator(expr):
+    if not re.fullmatch(r"[0-9+\-*/(). ]+", expr):   # allow-list only
+        raise ValueError("rejected: arithmetic only")
+    return safe_eval(expr)          # a parser, NOT Python eval()
+
+if TOOL_META[call.name].risky and not human_approved(call):
+    result = "BLOCKED: this action needs human approval"</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 28 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You watched a model answer with a structured tool call instead of prose, ran a real calculator and a mocked weather tool, fed the results back, and saw the <span class="mono">messages[]</span> array grow through the call→run→feed-back loop — sequential and parallel. You learned why models need tools, the JSON tool schema, tool_call vs tool result roles, arg validation and error-as-feedback, the security rules, and that this exact loop is the engine inside every agent. <strong>👉 Tomorrow — Day 29: Guardrails &amp; Safety — the rules and filters that keep a tool-using model from doing harm.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+// ===================== LOOK · tool-use loop demo =====================
+// The "model" here is scripted, but the TOOLS run for real: the calculator is
+// a genuine (eval-free) arithmetic evaluator; weather is mocked. The demo shows
+// the model emitting a structured tool call, your code running it, the result
+// fed back, and the message array growing until a final natural-language answer.
+
+// ---- tool schemas (what the model is shown) ----
+const TOOLS = [
+  { name:"calculator",
+    description:"Evaluate an arithmetic expression and return the number.",
+    parameters:{ type:"object",
+      properties:{ expr:{ type:"string", description:"e.g. \"23*47\"" } },
+      required:["expr"] } },
+  { name:"get_weather",
+    description:"Get the current weather for a city.",
+    parameters:{ type:"object",
+      properties:{ city:{ type:"string" } },
+      required:["city"] } },
+  { name:"search",
+    description:"Web search; returns a short text snippet.",
+    parameters:{ type:"object",
+      properties:{ query:{ type:"string" } },
+      required:["query"] } }
+];
+
+// ---- REAL calculator: strict allow-list + shunting-yard, no eval() ----
+function safeCalc(expr){
+  if(!/^[0-9+\-*/().\s]+$/.test(expr)) throw new Error("rejected: arithmetic only");
+  const toks = expr.match(/\d+\.?\d*|[+\-*/()]/g) || [];
+  const out = [], ops = [];
+  const prec = { "+":1, "-":1, "*":2, "/":2 };
+  const apply = () => { const o = ops.pop(); const b = out.pop(), a = out.pop();
+    out.push(o==="+"?a+b : o==="-"?a-b : o==="*"?a*b : a/b); };
+  for(const t of toks){
+    if(/^\d/.test(t)) out.push(parseFloat(t));
+    else if(t === "(") ops.push(t);
+    else if(t === ")"){ while(ops.length && ops[ops.length-1] !== "(") apply(); ops.pop(); }
+    else { while(ops.length && prec[ops[ops.length-1]] >= prec[t]) apply(); ops.push(t); }
+  }
+  while(ops.length) apply();
+  return out[0];
+}
+
+// ---- mocked tools ----
+const WEATHER = {
+  paris:  { city:"Paris",  condition:"Light rain", temp_c:14, raining:true,  emoji:"🌧️" },
+  london: { city:"London", condition:"Overcast",   temp_c:12, raining:false, emoji:"☁️" },
+  tokyo:  { city:"Tokyo",  condition:"Clear",       temp_c:24, raining:false, emoji:"☀️" }
+};
+function mockWeather(city){
+  const k = (city||"").toLowerCase().trim();
+  return WEATHER[k] || { city, condition:"Clear", temp_c:22, raining:false, emoji:"☀️" };
+}
+
+// ---- compute the real tool results once ----
+const Q    = "What's 23 × 47, and is it raining in Paris right now?";
+const CALC = safeCalc("23*47");        // real -> 1081
+const WX   = mockWeather("Paris");     // mocked -> light rain, 14C
+const FINAL = "23 × 47 = " + CALC + ". And yes — it's currently raining in Paris (" +
+              WX.condition.toLowerCase() + ", about " + WX.temp_c + "°C), so grab an umbrella.";
+
+// ---- the two scripted plans (events reveal one at a time) ----
+const SEQ = [
+  { n:"The user asks one message with two needs: arithmetic (23×47) and live weather in Paris. A frozen model can't do either reliably on its own.",
+    msgs:[ { role:"user", text:Q } ] },
+  { n:"The model doesn't guess. Given the schemas, it returns a STRUCTURED tool call — a name plus JSON arguments — instead of prose.",
+    msgs:[ { role:"assistant_call", calls:[ { id:"c1", name:"calculator", arguments:{ expr:"23*47" } } ] } ] },
+  { n:"Your code runs the tool for real — a safe arithmetic evaluator, no eval() — and appends the result as a 'tool' message, keyed by the call id.",
+    msgs:[ { role:"tool", id:"c1", name:"calculator", result:CALC, live:true } ] },
+  { n:"Re-invoked with the calc result now in context, the model still needs weather → it emits the next tool call.",
+    msgs:[ { role:"assistant_call", calls:[ { id:"c2", name:"get_weather", arguments:{ city:"Paris" } } ] } ] },
+  { n:"The weather tool runs (mocked here) and its JSON result is fed back into the array.",
+    msgs:[ { role:"tool", id:"c2", name:"get_weather", result:WX, live:false } ] },
+  { n:"Both results are now in messages[]. The model stops calling tools and writes the final natural-language answer, synthesising both. Loop complete.",
+    msgs:[ { role:"assistant_final", text:FINAL } ] }
+];
+
+const PAR = [
+  { n:"The user asks one message with two needs: arithmetic (23×47) and live weather in Paris.",
+    msgs:[ { role:"user", text:Q } ] },
+  { n:"The two needs are independent, so the model emits BOTH tool calls in a single assistant message — parallel tool calls.",
+    msgs:[ { role:"assistant_call", calls:[
+      { id:"c1", name:"calculator", arguments:{ expr:"23*47" } },
+      { id:"c2", name:"get_weather", arguments:{ city:"Paris" } } ] } ] },
+  { n:"Your code runs both tools at once and feeds both results back in one round-trip instead of two.",
+    msgs:[ { role:"tool", id:"c1", name:"calculator", result:CALC, live:true },
+           { role:"tool", id:"c2", name:"get_weather", result:WX, live:false } ] },
+  { n:"With both results present, the model writes the final answer. Same result as sequential — one round-trip fewer.",
+    msgs:[ { role:"assistant_final", text:FINAL } ] }
+];
+
+// ---- render the tool schemas panel ----
+document.getElementById("toolDefs").textContent = JSON.stringify(TOOLS, null, 2);
+document.getElementById("qText").textContent = Q;
+
+// ---- message card rendering ----
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function json(o){ return esc(JSON.stringify(o, null, 2)); }
+
+function card(m){
+  if(m.role === "user"){
+    return `<div class="stepline border rounded-xl px-4 py-3 bg-white border-slate-300">
+      <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">user</span>
+      <div class="text-sm text-slate-700 mt-1">${esc(m.text)}</div></div>`;
+  }
+  if(m.role === "assistant_call"){
+    const multi = m.calls.length > 1;
+    const body = m.calls.map(c =>
+      `<div class="jsonbox mono text-[11px] bg-white border border-indigo-200 rounded-lg p-2 mt-2 text-slate-700">${json({ name:c.name, arguments:c.arguments })}</div>`
+    ).join("");
+    return `<div class="stepline border rounded-xl px-4 py-3 bg-indigo-50 border-indigo-300">
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">assistant · ${multi?"tool_calls ×"+m.calls.length:"tool_call"}</span>
+        <span class="text-[10px] text-indigo-500 font-semibold">${multi?"parallel — both at once":"structured JSON, not prose"}</span>
+      </div>${body}</div>`;
+  }
+  if(m.role === "tool"){
+    const val = (typeof m.result === "object") ? json(m.result) : esc(m.result);
+    return `<div class="stepline border rounded-xl px-4 py-3 bg-emerald-50 border-emerald-300">
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">tool · result</span>
+        <span class="mono text-[11px] text-emerald-700 font-bold">${esc(m.name)}</span>
+        <span class="text-[10px] text-slate-400">id ${esc(m.id)}</span>
+        <span class="text-[10px] ml-auto font-semibold ${m.live?"text-emerald-600":"text-slate-400"}">${m.live?"⚙ computed live":"mocked"}</span>
+      </div>
+      <div class="jsonbox mono text-[11px] bg-white border border-emerald-200 rounded-lg p-2 mt-2 text-slate-700">${val}</div></div>`;
+  }
+  // assistant_final
+  return `<div class="stepline border rounded-xl px-4 py-3 bg-slate-900 border-slate-700">
+    <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-700 text-slate-100">assistant · final</span>
+    <div class="text-sm text-slate-100 mt-1">${esc(m.text)}</div></div>`;
+}
+
+// ---- loop state + render ----
+let mode = "seq";
+let idx  = 0;               // number of events revealed
+let timer = null;
+function EV(){ return mode === "seq" ? SEQ : PAR; }
+
+const transcriptEl = document.getElementById("transcript");
+const narrationEl  = document.getElementById("narration");
+const stepBtn = document.getElementById("stepBtn");
+const runBtn  = document.getElementById("runBtn");
+
+function renderLoop(){
+  const ev = EV();
+  transcriptEl.innerHTML = "";
+  let msgs = 0, calls = 0, rts = 0;
+  for(let i=0;i<idx;i++){
+    ev[i].msgs.forEach(m => {
+      transcriptEl.insertAdjacentHTML("beforeend", card(m));
+      msgs++;
+      if(m.role === "assistant_call"){ calls += m.calls.length; rts++; }
+    });
+  }
+  document.getElementById("msgCount").textContent  = msgs;
+  document.getElementById("callCount").textContent = calls;
+  document.getElementById("rtCount").textContent   = rts;
+
+  const done = idx >= ev.length;
+  const started = idx > 0;
+  const lastMsgs = started ? ev[idx-1].msgs : null;
+  const finished = lastMsgs && lastMsgs[lastMsgs.length-1].role === "assistant_final";
+
+  narrationEl.innerHTML = started ? ev[idx-1].n
+    : "Press <strong>▶ Step</strong> to run the loop one message at a time.";
+  narrationEl.className = finished
+    ? "rounded-lg p-3 text-sm border bg-emerald-50 border-emerald-200 text-emerald-800"
+    : "rounded-lg p-3 text-sm border bg-indigo-50 border-indigo-200 text-indigo-800";
+
+  const st = document.getElementById("loopStatus");
+  if(finished){ st.textContent = "complete ✓"; st.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-700"; }
+  else if(started){ st.textContent = "running…"; st.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-700"; }
+  else { st.textContent = "idle"; st.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-600"; }
+
+  stepBtn.disabled = done; runBtn.disabled = done;
+  stepBtn.classList.toggle("opacity-40", done);
+  runBtn.classList.toggle("opacity-40", done);
+}
+
+function stepLoop(){ if(idx < EV().length){ idx++; renderLoop(); } }
+function resetLoop(){ if(timer){ clearInterval(timer); timer = null; } idx = 1; renderLoop(); }
+function runAll(){
+  if(timer){ clearInterval(timer); timer = null; }
+  timer = setInterval(() => {
+    if(idx >= EV().length){ clearInterval(timer); timer = null; return; }
+    stepLoop();
+  }, 900);
+}
+function setMode(m){
+  mode = m;
+  document.getElementById("mSeq").classList.toggle("on", m === "seq");
+  document.getElementById("mPar").classList.toggle("on", m === "par");
+  document.getElementById("modeNote").textContent = m === "seq"
+    ? "Sequential — one tool call per round-trip. Two calls here ⇒ two round-trips."
+    : "Parallel — independent calls emitted together in one round-trip.";
+  resetLoop();
+}
+
+stepBtn.onclick  = stepLoop;
+runBtn.onclick   = runAll;
+document.getElementById("resetBtn").onclick = resetLoop;
+document.getElementById("mSeq").onclick = () => setMode("seq");
+document.getElementById("mPar").onclick = () => setMode("par");
+
+setMode("seq");
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Why an LLM needs tools", why:"An LLM is a frozen text predictor. It was trained up to a cutoff, so it has no idea what today's weather is, your account balance, or the current price of anything — that data lives outside its weights. It also can't <em>do</em> anything: send an email, write to a database, book a flight. And it does arithmetic by pattern-matching tokens, so big multiplications come out subtly wrong. Tools fix all three at once — they give the model live data, real actions, and exact computation by letting it call your code.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">LLM alone:<br>· no live data (weather, prices, your DB)&nbsp;&nbsp;✗<br>· can't take actions (email, book, write)&nbsp;✗<br>· shaky arithmetic (23×47 = …?)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✗<br><br>TOOLS = eyes + hands + a calculator</div>`, code:`# ask a raw model to multiply -> often wrong, and it has no live feed
+llm("What is 23*47, and is it raining in Paris?")
+# -> a plausible guess. No calculator, no weather. Give it TOOLS.` },
+ { title:"2. The tool schema", why:"You hand the model a menu of tools, each described as a JSON schema: a name, a human-readable description, and typed parameters (with which are required). The model never sees your code — only this schema. So the description and the parameter docs are load-bearing: they're the entire basis on which the model decides <em>whether</em> to call a tool and <em>how</em> to fill its arguments. Vague or overlapping descriptions lead straight to wrong or missing calls.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">calculator(expr: string)&nbsp;&nbsp;"evaluate arithmetic"<br>get_weather(city: string)&nbsp;"current weather"<br>search(query: string)&nbsp;&nbsp;&nbsp;&nbsp;"web search → snippet"<br><br>name + description + typed params (+ required)<br>the model sees the SCHEMA, never your code</div>`, code:`{ "name": "get_weather",
+  "description": "Get the current weather for a city.",
+  "parameters": {
+    "type": "object",
+    "properties": { "city": { "type": "string" } },
+    "required": ["city"] } }` },
+ { title:"3. The model emits a call, not prose", why:"Given the tools, the model can choose — on any turn — to return a <em>structured tool call</em>, a JSON object with a name and arguments, instead of a normal text reply. Under the hood it's still next-token prediction, but decoding is constrained to emit valid JSON matching your schema. The API flags it: the response comes back with a finish reason of 'tool_calls' and no user-facing text. That flag is your signal to run something — not to print anything.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">user: "what's 23*47 …?"<br><br>model does NOT reply in prose. it returns:<br>{ "name": "calculator",<br>&nbsp;&nbsp;"arguments": { "expr": "23*47" } }<br><br>finish_reason = "tool_calls"&nbsp;&nbsp;← run it, don't print it</div>`, code:`resp = llm(messages, tools=TOOLS)
+if resp.finish_reason == "tool_calls":
+    call = resp.tool_calls[0]      # {name, arguments} — structured JSON
+    # NOT prose -> our job is to execute it, not show it` },
+ { title:"4. Run it and feed the result back — the loop", why:"The model can't run its own tools; it only <em>asks</em>. Your code is the runtime: parse the call, look up the matching function, execute it, and append the return value to the conversation as a new message. Then you call the model <em>again</em> with the updated history. It reads the result and either asks for another tool or writes the final answer. call → run → feed back → call again — that back-and-forth is the entire mechanism.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">user → model → tool_call<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▼<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;YOUR CODE runs the tool<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│ feed result<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▼<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;model again → …<br><br>repeat until it returns a normal answer</div>`, code:`while True:
+    resp = llm(messages, tools=TOOLS)
+    if not resp.tool_calls:
+        return resp.content                       # final answer -> stop
+    for call in resp.tool_calls:
+        result = TOOLKIT[call.name](**call.arguments)   # YOU run it
+        messages.append(tool_msg(call.id, result))      # feed back` },
+ { title:"5. Message roles: tool_calls & tool results", why:"The conversation is an array of messages the model re-reads every turn. Tool use adds two role patterns: an <em>assistant</em> message that carries tool_calls (the request), and a <em>tool</em> (a.k.a. function) message that carries each result, tagged with the matching tool_call_id. Order and ids matter — the model pairs each result to the call it made. The array only ever grows: user → assistant(calls) → tool(results) → assistant(calls) → tool(results) → assistant(final).", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">messages[] grows:<br>0 user&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"23*47 and rain in Paris?"<br>1 assistant&nbsp;tool_calls:[calculator]<br>2 tool&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(id c1) → 1081<br>3 assistant&nbsp;tool_calls:[get_weather]<br>4 tool&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(id c2) → {rain, 14°C}<br>5 assistant&nbsp;"1081, and yes it's raining."</div>`, code:`messages = [{"role": "user", "content": q}]
+# the assistant asks:
+messages.append({"role": "assistant", "tool_calls": [call]})
+# you answer with a tool-role message, keyed by the call id:
+messages.append({"role": "tool", "tool_call_id": call.id,
+                 "content": str(result)})` },
+ { title:"6. Parallel vs sequential tool calls", why:"If two calls are independent — 23×47 and Paris weather don't depend on each other — the model can emit <em>both</em> in one assistant message. You run them together and feed both results back in a single round-trip: faster and cheaper. But when one call needs another's output first (search for a city, <em>then</em> get its weather), the calls must be sequential — one round-trip each. The LOOK tab's toggle resolves the exact same question both ways: one round-trip versus two.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">PARALLEL (independent):<br>&nbsp;assistant → [calculator, get_weather]&nbsp;&nbsp;1 round-trip<br><br>SEQUENTIAL (dependent):<br>&nbsp;assistant → search("capital of X")<br>&nbsp;&nbsp;&nbsp;tool → "Paris"<br>&nbsp;assistant → get_weather("Paris")&nbsp;&nbsp;2 round-trips</div>`, code:`# independent calls -> run them concurrently
+results = await gather(*[run(c) for c in resp.tool_calls])
+# dependent calls -> the model naturally serialises them:
+# it can't call get_weather until search returns the city name` },
+ { title:"7. Validate args & handle errors", why:"The arguments are <em>generated by the model</em> — treat them as untrusted input, not a trusted function call. Check them against the schema (required present, right types, sane ranges) before you run anything. Wrap execution in try/except, and when it fails, don't crash the loop — return the error text as the tool result. The model reads the error and usually corrects itself next turn: fixes the expression, picks a valid city. Errors are just more feedback.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">model-supplied args = UNTRUSTED<br>1. validate vs schema (types, required, range)<br>2. run inside try / except<br>3. on failure → return the ERROR as the result<br>4. model reads it and retries / corrects</div>`, code:`try:
+    args   = validate(call.arguments, schema)   # raises on bad input
+    result = TOOLKIT[call.name](**args)
+except Exception as e:
+    result = f"ERROR: {e}"          # feed the error back, don't crash
+messages.append(tool_msg(call.id, result))` },
+ { title:"8. Security: never blindly execute", why:"A tool call is a request from an untrusted source. The model can be steered by prompt injection (Day 18) hidden in a web page, PDF or email it ingested, so 'the model asked for it' is <em>not</em> authorisation. Apply least privilege: give each tool the narrowest capability it needs, sandbox anything that touches the system, and require human approval for risky or irreversible actions (payments, deletes, sends). The calculator in this demo rejects anything that isn't digits and operators — it never eval()s arbitrary code.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">a tool call is UNTRUSTED (injection can steer it)<br>· least privilege — narrow scope per tool<br>· sandbox — no raw eval / shell / file access<br>· allow-list inputs (calc: digits & + - * / only)<br>· human approval for pay / delete / send<br><br>"the model asked" ≠ permission</div>`, code:`def calculator(expr):
+    if not re.fullmatch(r"[0-9+\-*/(). ]+", expr):
+        raise ValueError("rejected: arithmetic only")   # no code eval
+    return safe_eval(expr)          # a parser, not Python eval()
+# risky tools gate on a human:
+if tool.risky and not human_approved(call): abort()` },
+ { title:"9. This loop IS the core of an agent", why:"Strip an 'AI agent' down and this is what's inside: the model in a loop, calling tools and reading their results until the goal is met. Add more tools (files, a browser, a code runner), a bit of planning, and memory across turns (Day 11) and you have an agent — but the engine is exactly the call→run→feed-back loop on this page. Everything agentic is built on function calling. Get this primitive right and the rest is orchestration.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">AGENT = this loop, kept running<br>&nbsp;while goal not met:<br>&nbsp;&nbsp;&nbsp;model picks a tool → you run it → feed result<br><br>+ more tools + planning + memory (Day 11)<br>tool use is the primitive under every agent</div>`, code:`def agent(goal, tools, max_steps=10):
+    messages = [{"role": "user", "content": goal}]
+    for _ in range(max_steps):          # stop condition = guardrail
+        r = llm(messages, tools=tools)
+        if not r.tool_calls:
+            return r.content            # goal met -> done
+        run_tools_and_append(r, messages)` },
+ { title:"10. It's structured output underneath", why:"Function calling is a special case of structured / constrained generation. The model decodes tokens as usual, but the sampler is restricted to produce JSON that validates against your parameter schema — so you get a machine-parseable {name, arguments} instead of free text you'd have to regex out. The same machinery powers 'JSON mode' and typed responses. That's why reliable tool use and reliable structured output go hand in hand: both are the model emitting a schema, not prose.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">free text: "sure, 23 times 47 is ~1080ish"&nbsp;&nbsp;✗ unparseable<br><br>structured: {"name":"calculator",<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"arguments":{"expr":"23*47"}}&nbsp;&nbsp;✓ validates<br><br>same trick as JSON-mode / typed output:<br>constrain decoding to match a schema</div>`, code:`# a tool call == constrained JSON that fits the schema
+schema = TOOLS[0]["parameters"]     # {type:object, properties:{expr:…}}
+call   = llm(messages, tools=TOOLS).tool_calls[0]
+assert validates(call.arguments, schema)   # guaranteed parseable` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curS=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curS-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curS+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curS>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curS+1); },3600); };
+show(0);
+
+function copy(btn){ const pre=btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o=btn.textContent; btn.textContent="✓ Copied!"; setTimeout(()=>btn.textContent=o,1500); }
+</script>
+</body>
+</html>
