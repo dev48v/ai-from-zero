@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 30 — Agentic Memory</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:8px; border-radius:6px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:50%; background:#4f46e5; cursor:pointer; box-shadow:0 1px 4px rgba(79,70,229,.5); }
+  input[type=range]::-moz-range-thumb{ width:22px; height:22px; border:none; border-radius:50%; background:#4f46e5; cursor:pointer; }
+  .stepline { animation: fadeIn .35s ease-out; }
+  .kbtn.on { background:#4f46e5; color:#fff; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .jsonbox { white-space:pre; overflow-x:auto; }
+  .flowarrow { color:#94a3b8; text-align:center; font-size:18px; line-height:1; }
+  .fillbar { transition:width .45s ease; }
+  .retpulse { animation: retPulse 1.1s ease-in-out infinite; }
+  @keyframes retPulse { 0%,100% { box-shadow:0 0 0 0 rgba(79,70,229,.45);} 50% { box-shadow:0 0 0 6px rgba(79,70,229,0);} }
+  .zonelbl { letter-spacing:.12em; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 30</div>
+      <h1 class="text-xl font-bold">🧩 Agentic Memory — How an Agent Remembers Across Steps &amp; Sessions</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-5">
+        <h2 class="text-2xl font-bold mb-1">The tool-using agent from Day 28-29 forgets everything the moment its context fills up — or the session resets. <em>Memory</em> is what fixes that.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">An agent has two tiers of memory. <strong>Working memory</strong> is the context window — fast but tiny and volatile; when it fills, older turns get <strong>summarised/compacted</strong> to make room, and when the session ends it's gone. <strong>Long-term memory</strong> is a small <strong>vector store</strong> the agent <strong>writes</strong> salient facts to and later <strong>retrieves</strong> by similarity — it survives across sessions. Send the agent messages ("my name is …", "I prefer …"), watch it decide what's worth remembering, watch working memory fill and compact, then hit <strong>🔄 New session</strong> to wipe the context and ask <em>"what's my name?"</em> — the answer comes back from long-term. Every write, embed, cosine-retrieval and compaction below is <strong>real code</strong> running in your browser.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- LEFT: talk to the agent + trace + stats -->
+        <div class="space-y-5">
+          <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Talk to the agent (click a message, or type one)</div>
+            <div class="flex flex-wrap gap-2 mb-3" id="presetRow"></div>
+            <div class="flex gap-2">
+              <input id="msgBox" class="flex-1 text-sm border border-slate-300 rounded-lg p-3 mono focus:outline-none focus:border-indigo-400" placeholder="Type a message and press Enter…" />
+              <button id="sendBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap">Send ▶</button>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 mt-3">
+              <button id="newSessionBtn" class="kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">🔄 New session (clear context)</button>
+              <button id="resetBtn" class="kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">↺ Reset everything</button>
+            </div>
+            <div class="mt-4">
+              <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>Working-memory capacity</span><span class="mono"><span id="capVal">45</span> tokens</span></div>
+              <input type="range" id="capSlider" min="20" max="90" value="45" class="w-full" />
+              <p class="text-[11px] text-slate-400 mt-1">Lower the cap to watch compaction (summarisation) kick in sooner.</p>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-3">What happened this turn</div>
+            <div id="turnTrace" class="space-y-2 min-h-[150px]"></div>
+          </div>
+
+          <div class="grid grid-cols-4 gap-2 text-center">
+            <div class="bg-white border border-slate-200 rounded-lg p-2">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Turns</div>
+              <div><span id="turnCount" class="stat text-lg font-bold text-indigo-600">0</span></div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-2">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Long-term facts</div>
+              <div><span id="ltCount" class="stat text-lg font-bold text-slate-700">0</span></div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-2">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Working tokens</div>
+              <div><span id="wmCount" class="stat text-lg font-bold text-slate-700">0</span></div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-2">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Compactions</div>
+              <div><span id="compCount" class="stat text-lg font-bold text-slate-700">0</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: the two memory tiers -->
+        <div class="space-y-5">
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-xs uppercase font-bold text-indigo-600">Working memory · the context window</div>
+              <span id="wmStatus" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-600">idle</span>
+            </div>
+            <div class="w-full bg-slate-100 rounded-full h-2.5 mb-1 overflow-hidden">
+              <div id="wmBar" class="fillbar h-2.5 rounded-full bg-indigo-500" style="width:0%"></div>
+            </div>
+            <div class="text-[11px] text-slate-400 mb-3 mono"><span id="wmTokens">0</span> / <span id="wmCap">45</span> tokens — volatile, cleared on a new session</div>
+            <div id="workingList" class="space-y-2 min-h-[120px]"></div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-xs uppercase font-bold text-indigo-600">Long-term memory · the vector store</div>
+              <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">persists across sessions</span>
+            </div>
+            <div class="flex flex-wrap gap-2 text-[10px] font-bold uppercase mb-3">
+              <span class="px-2 py-0.5 rounded bg-indigo-100 text-indigo-700">semantic · distilled facts</span>
+              <span class="px-2 py-0.5 rounded bg-sky-100 text-sky-700">episodic · what happened</span>
+              <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">procedural · how-to rules</span>
+            </div>
+            <div id="longtermList" class="space-y-2 min-h-[160px]"></div>
+          </div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mt-4 text-center max-w-3xl mx-auto">Working memory is <strong>RAM</strong>: fast, tiny, wiped on reset. Long-term is <strong>disk</strong>: the agent decides what's salient, embeds it, and pulls the right memory back by meaning — even in a brand-new session with an empty context. That's the whole trick behind an assistant that "remembers you".</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How agentic memory works</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Give a tool-using agent a memory</h2>
+    <p class="text-slate-500 mb-8">Memory is two stores wired around the model loop: a token-capped <strong>working buffer</strong> that holds the live context, and a <strong>long-term vector store</strong> the agent writes salient facts to and retrieves from by similarity. Here's the whole thing, layer by layer.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Define the two stores</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Working memory is a list capped by <code>token_budget</code> — it <em>is</em> the context window. Long-term memory is a vector store: each record keeps the text, its embedding, a type, and a timestamp. Working memory is fast and volatile; long-term is durable and searchable.</p>
+        <div class="relative"><pre>class Agent:
+    def __init__(self, token_budget=4000):
+        self.working = []          # recent turns — the live context window
+        self.budget  = token_budget
+        self.longterm = VectorStore()   # {text, vector, type, ts} — persists
+
+# types: "semantic" (distilled facts), "episodic" (events),
+#        "procedural" (rules / how-to notes)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Embed &amp; retrieve by similarity</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Long-term recall is just RAG (Day 15) over the agent's own history. Embed every stored fact once; at query time embed the query and return the top-k by cosine similarity. Real systems use a proper embedding model + ANN index — the shape is identical.</p>
+        <div class="relative"><pre>def retrieve(store, query, k=4):
+    q = embed(query)
+    scored = [(cosine(q, m.vector), m) for m in store]
+    scored.sort(reverse=True)             # most similar first
+    return [m for score, m in scored[:k] if score &gt; 0]</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">A write policy — decide what's worth keeping</h3></div>
+        <p class="text-sm text-slate-600 mb-3">You don't store every message — that's just a transcript. Extract the <em>salient</em> bits: stable facts (name, preferences) as <code>semantic</code>, events as <code>episodic</code>, standing instructions as <code>procedural</code>. Skip questions and chit-chat. Cheap regex works; better to let a small model distill "what should I remember from this?"</p>
+        <div class="relative"><pre>def write_policy(text):
+    facts = []
+    if m := re.search(r"my name is (\w+)", text, re.I):
+        facts.append(("semantic",  f"User's name is {m[1]}"))
+    if m := re.search(r"i (prefer|like) (.+)", text, re.I):
+        facts.append(("semantic",  f"User prefers {m[2]}"))
+    if re.search(r"\b(always|never|remember to)\b", text, re.I):
+        facts.append(("procedural", text))
+    return facts        # nothing salient? store nothing.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Assemble the prompt every turn</h3></div>
+        <p class="text-sm text-slate-600 mb-3">On each turn: write new facts to long-term, retrieve the relevant ones, and build the context as <em>system prompt + running summary + retrieved memories + recent turns</em>. Retrieval is what makes a fact from 500 turns ago show up exactly when it's needed.</p>
+        <div class="relative"><pre>def step(agent, user_msg):
+    for typ, fact in write_policy(user_msg):
+        agent.longterm.add(typ, fact)          # WRITE salient facts
+    hits = retrieve(agent.longterm, user_msg)  # READ what's relevant
+    prompt = [SYSTEM, agent.summary, *hits, *agent.working, user_msg]
+    reply = model(prompt)
+    agent.working += [user_msg, reply]
+    compact(agent)                             # keep it under budget
+    return reply</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Compact on overflow — summarise the oldest turns</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The context window is finite. When working memory exceeds its budget, fold the oldest turns into a short running summary and keep only the most recent turns verbatim. This is <strong>reflection/compaction</strong> — the same move a long chat does automatically. Distilled facts should already be safe in long-term, so compaction loses phrasing, not knowledge.</p>
+        <div class="relative"><pre>def compact(agent):
+    while count_tokens(agent.working) &gt; agent.budget:
+        old = agent.working[:-KEEP_RECENT]     # everything but last few
+        agent.summary = summarise(agent.summary, old)  # LLM or extractive
+        agent.working = agent.working[-KEEP_RECENT:]   # keep recent verbatim</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Forgetting, conflicts &amp; frameworks</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Long-term memory must decay or it rots. De-duplicate, let newer facts supersede stale ones ("name is now Bob"), and rank by relevance × recency so the current truth wins. In practice you reach for <strong>LangGraph</strong> checkpoints, <strong>MemGPT / Letta</strong> (the OS-style paging that inspired this), or <strong>mem0</strong> — and you honour privacy: memory is user data, so redact PII and support "forget me".</p>
+        <div class="relative"><pre>def remember(store, typ, fact):
+    dup = retrieve(store, fact, k=1)
+    if dup and cosine(embed(fact), dup[0].vector) &gt; 0.95:
+        store.update(dup[0], fact)     # supersede a near-duplicate
+    else:
+        store.add(typ, fact, ts=now())
+    store.evict(older_than=TTL, keep_top=CAP)   # decay / forget
+    # frameworks: LangGraph · MemGPT/Letta · mem0   (don't hand-roll)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 30 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You gave an agent a memory: a token-capped <strong>working buffer</strong> (the context window, which compacts when it overflows) and a <strong>long-term vector store</strong> it writes salient facts to and retrieves by similarity — RAG over its own history. You saw why context is finite and resets, the difference between <strong>semantic</strong>, <strong>episodic</strong> and <strong>procedural</strong> memory, why a write policy and forgetting both matter, and how frameworks like LangGraph, MemGPT/Letta and mem0 package it. <strong>👉 Tomorrow — Day 31: Prompt Caching — reuse the expensive prefill so a long system prompt is cheap on every call.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+/* MEM-ENGINE-START */
+// ===================== LOOK · agentic-memory engine =====================
+// Pure functions, no DOM. Working memory = a token-capped buffer (the context
+// window). Long-term = a tiny bag-of-words vector store the agent WRITES
+// salient facts to and RETRIEVES from by cosine similarity. On overflow the
+// working buffer is summarised/compacted; long-term survives a "new session".
+// This is the exact logic Node verifies (fact recalled after context clear,
+// working memory compacts when it overflows capacity).
+
+const KEEP = 2; // most-recent buffer entries kept verbatim during compaction
+const STOP = new Set(("a an the is are am was were be been being of to in on at for and or but if then " +
+  "my your you i me it its this that with what who whom when where which how why do does did " +
+  "can could would will please tell remind about have has had").split(" "));
+
+function tokenize(s){ return String(s).toLowerCase().match(/[a-z0-9']+/g) || []; }
+function stem(w){ return (w.length > 3 && w.endsWith("s")) ? w.slice(0, -1) : w; }
+function contentWords(s){ return tokenize(s).filter(w => !STOP.has(w)).map(stem); }
+function embed(s){                      // bag-of-words vector: word -> count
+  const v = {};
+  for(const w of contentWords(s)) v[w] = (v[w] || 0) + 1;
+  return v;
+}
+function cosine(a, b){
+  let dot = 0, na = 0, nb = 0;
+  for(const k in a){ na += a[k]*a[k]; if(b[k]) dot += a[k]*b[k]; }
+  for(const k in b){ nb += b[k]*b[k]; }
+  if(!na || !nb) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+function estTokens(s){ return tokenize(s).length; }
+function tidy(s){ return String(s).trim().replace(/\s+/g, " "); }
+function clampWords(s, n){ const w = tokenize(s); return w.length <= n ? s : w.slice(0, n).join(" ") + "…"; }
+function gist(s){ const c = contentWords(s); return c.length ? c.slice(0, 5).join(" ") : clampWords(s, 5); }
+
+// ---- is this message a question (a retrieval), not a statement to store? ----
+function isQuestion(text){
+  const s = text.trim();
+  if(/\?\s*$/.test(s)) return true;
+  return /^(what|whats|who|when|where|which|how|why|do|does|did|is|are|am|can|could|would|will|tell me|remind me)\b/i.test(s);
+}
+
+// ---- write policy: extract the salient facts + their memory TYPE ----
+function extractMemories(text){
+  const t = tidy(text), out = [];
+  let m;
+  if((m = t.match(/\bmy name is\s+([A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*)?)/i)))
+    out.push({ type:"semantic", text:"User's name is " + m[1] });
+  if((m = t.match(/\bi (?:prefer|like|love|enjoy)\s+([^.?!;\n]+)/i)))
+    out.push({ type:"semantic", text:"User prefers " + tidy(m[1]) });
+  if((m = t.match(/\b(?:always|never|make sure to|be sure to|remember to)\b[^.?!;\n]*/i)))
+    out.push({ type:"procedural", text:"Rule: " + tidy(m[0]) });
+  if(out.length === 0 && (m = t.match(/\bi (?:work|live|am|use)\b[^.?!;\n]*/i)))
+    out.push({ type:"semantic", text:"About the user: " + tidy(m[0]) });
+  if(out.length === 0)
+    out.push({ type:"episodic", text:"Event: " + tidy(t) });   // an observation
+  return out;
+}
+
+// ---- working memory: push a turn, compact when over the token budget ----
+function workingTokens(agent){ return agent.working.reduce((n, e) => n + e.tokens, 0); }
+function compact(agent){
+  if(agent.working.length <= KEEP) return false;
+  const older  = agent.working.slice(0, agent.working.length - KEEP);
+  const recent = agent.working.slice(agent.working.length - KEEP);
+  const parts = older.map(e => e.kind === "summary" ? e.text.replace(/^Summary of earlier turns:\s*/i, "") : gist(e.text));
+  let summaryText = "Summary of earlier turns: " + parts.join("; ");
+  summaryText = clampWords(summaryText, Math.max(6, Math.floor(agent.cap / 3)));
+  agent.working = [{ role:"system", kind:"summary", text:summaryText, tokens:estTokens(summaryText) }, ...recent];
+  return true;
+}
+function pushTurn(agent, role, text){
+  agent.working.push({ role, kind:"turn", text, tokens:estTokens(text) });
+  let didCompact = false, guard = 0;
+  while(workingTokens(agent) > agent.cap && guard++ < 30){
+    const before = workingTokens(agent);
+    if(!compact(agent)) break;
+    didCompact = true;
+    if(workingTokens(agent) >= before) break;   // can't shrink further — stop
+  }
+  if(didCompact) agent.compactions++;
+  return didCompact;
+}
+
+// ---- build the reply, using retrieved long-term memories ----
+function answer(agent, text, question, retrieved, written){
+  if(!question){
+    if(written.length)
+      return "Noted. Wrote " + written.length + " item" + (written.length > 1 ? "s" : "") +
+             " to long-term memory: " + written.map(w => '"' + w.text + '"').join("; ") + ".";
+    return "Got it.";
+  }
+  const nameFact = agent.longTerm.find(x => /^User's name is /i.test(x.text));
+  if(/\bname\b/i.test(text) && nameFact){
+    const nm = nameFact.text.match(/name is\s+(.+)/i);
+    if(nm) return "Your name is " + tidy(nm[1]) + ". (recalled from long-term memory)";
+  }
+  if(retrieved.length)
+    return "From memory: " + retrieved[0].item.text + ".";
+  return "I don't have anything about that in memory yet.";
+}
+
+// ---- one turn: write salient facts, retrieve relevant ones, reply ----
+function step(agent, userText){
+  userText = tidy(userText);
+  agent.turns++;
+  const question = isQuestion(userText);
+
+  // WRITE — only statements carry facts worth remembering
+  const written = [];
+  if(!question){
+    for(const mm of extractMemories(userText)){
+      if(mm.type === "semantic" && /^User's name is /.test(mm.text))
+        agent.longTerm = agent.longTerm.filter(x => !/^User's name is /.test(x.text)); // newer name supersedes stale
+      if(!agent.longTerm.some(x => x.text === mm.text)){
+        const item = { id:agent.nextId++, type:mm.type, text:mm.text, vec:embed(mm.text) };
+        agent.longTerm.push(item);
+        written.push(item);
+      }
+    }
+  }
+
+  // READ — retrieve relevant long-term memories by cosine similarity
+  const qv = embed(userText);
+  const retrieved = agent.longTerm
+    .map(item => ({ item, score:cosine(qv, item.vec) }))
+    .filter(s => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+
+  const summarizedU = pushTurn(agent, "user", userText);
+  const reply = answer(agent, userText, question, retrieved, written);
+  const summarizedA = pushTurn(agent, "assistant", reply);
+
+  return { userText, question, written, retrieved, reply,
+           summarized: summarizedU || summarizedA,
+           workingTokens: workingTokens(agent), cap:agent.cap };
+}
+
+function newSession(agent){ agent.working = []; agent.sessions++; }  // context cleared, long-term kept
+
+function createAgent(cap){
+  return { cap: cap || 45, working: [], longTerm: [], turns: 0, compactions: 0, sessions: 1, nextId: 1 };
+}
+/* MEM-ENGINE-END */
+
+// ===================== LOOK · UI wiring =====================
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+const TYPE_BADGE = {
+  semantic:  ["bg-indigo-100","text-indigo-700","border-indigo-300","bg-indigo-50"],
+  episodic:  ["bg-sky-100","text-sky-700","border-sky-300","bg-sky-50"],
+  procedural:["bg-amber-100","text-amber-800","border-amber-300","bg-amber-50"]
+};
+
+let agent = createAgent(45);
+let lastRetrievedIds = [];
+
+const PRESETS = [
+  { label:"👤 My name", msg:"My name is Ada Lovelace" },
+  { label:"💺 A preference", msg:"I prefer window seats and quiet hotels" },
+  { label:"📌 A standing rule", msg:"Always cc my manager on shipping emails" },
+  { label:"☕ An event", msg:"I shipped the release and had three coffees today" },
+  { label:"❓ What's my name?", msg:"What is my name?" },
+  { label:"❓ My preferences?", msg:"What do I prefer?" }
+];
+
+const presetRow = document.getElementById("presetRow");
+PRESETS.forEach(p => {
+  const b = document.createElement("button");
+  b.className = "kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100";
+  b.textContent = p.label;
+  b.onclick = () => { document.getElementById("msgBox").value = p.msg; send(); };
+  presetRow.appendChild(b);
+});
+
+function memRow(item, highlighted){
+  const c = TYPE_BADGE[item.type] || TYPE_BADGE.semantic;
+  const ring = highlighted ? " border-2 retpulse" : " border";
+  return `<div class="stepline${ring} ${c[2]} ${c[3]} rounded-xl px-3 py-2">
+    <div class="flex items-center gap-2">
+      <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${c[0]} ${c[1]}">${item.type}</span>
+      ${highlighted ? '<span class="text-[9px] font-bold uppercase text-indigo-600">↩ retrieved</span>' : ''}
+    </div>
+    <div class="text-xs text-slate-700 mt-1">${esc(item.text)}</div></div>`;
+}
+
+function renderMemory(){
+  // long-term store
+  const lt = document.getElementById("longtermList");
+  if(!agent.longTerm.length){
+    lt.innerHTML = `<div class="text-xs text-slate-400 italic">Empty. Tell the agent a fact ("my name is …") and watch it get written here.</div>`;
+  } else {
+    lt.innerHTML = agent.longTerm.map(it => memRow(it, lastRetrievedIds.includes(it.id))).join("");
+  }
+
+  // working memory buffer
+  const wl = document.getElementById("workingList");
+  if(!agent.working.length){
+    wl.innerHTML = `<div class="text-xs text-slate-400 italic">Context is empty (fresh session). Long-term memory above is untouched.</div>`;
+  } else {
+    wl.innerHTML = agent.working.map(e => {
+      if(e.kind === "summary")
+        return `<div class="stepline border border-slate-300 bg-slate-100 rounded-xl px-3 py-2">
+          <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-300 text-slate-700">🗜 compacted summary</span>
+          <div class="text-xs text-slate-600 mt-1">${esc(e.text)}</div></div>`;
+      const isUser = e.role === "user";
+      return `<div class="stepline border ${isUser ? "border-slate-300 bg-white" : "border-indigo-200 bg-indigo-50"} rounded-xl px-3 py-2">
+        <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${isUser ? "bg-slate-200 text-slate-600" : "bg-indigo-200 text-indigo-800"}">${isUser ? "user" : "assistant"}</span>
+        <div class="text-xs text-slate-700 mt-1">${esc(e.text)}</div></div>`;
+    }).join("");
+  }
+
+  // bar + stats
+  const tok = workingTokens(agent);
+  const pct = Math.min(100, Math.round(tok / agent.cap * 100));
+  const bar = document.getElementById("wmBar");
+  bar.style.width = pct + "%";
+  bar.className = "fillbar h-2.5 rounded-full " + (pct >= 100 ? "bg-red-500" : pct >= 75 ? "bg-amber-500" : "bg-indigo-500");
+  document.getElementById("wmTokens").textContent = tok;
+  document.getElementById("wmCap").textContent = agent.cap;
+  document.getElementById("turnCount").textContent = agent.turns;
+  document.getElementById("ltCount").textContent = agent.longTerm.length;
+  document.getElementById("wmCount").textContent = tok;
+  document.getElementById("compCount").textContent = agent.compactions;
+
+  const ws = document.getElementById("wmStatus");
+  const [txt, cls] = pct >= 100 ? ["full → compacting", "bg-red-100 text-red-700"]
+                   : pct >= 75  ? ["filling up", "bg-amber-100 text-amber-800"]
+                   : tok > 0    ? ["holding context", "bg-emerald-100 text-emerald-700"]
+                   :              ["idle", "bg-slate-200 text-slate-600"];
+  ws.textContent = txt;
+  ws.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded " + cls;
+}
+
+function renderTrace(res){
+  const el = document.getElementById("turnTrace");
+  if(!res){ el.innerHTML = `<div class="text-xs text-slate-400 italic">Send the agent a message to see the write / retrieve / compact trace.</div>`; return; }
+  let h = `<div class="stepline border border-slate-300 bg-white rounded-xl px-3 py-2">
+      <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">${res.question ? "question → retrieve" : "statement → write"}</span>
+      <div class="text-xs text-slate-700 mt-1 mono">"${esc(res.userText)}"</div></div>`;
+
+  if(res.written.length){
+    h += `<div class="stepline border border-indigo-200 bg-indigo-50 rounded-xl px-3 py-2">
+      <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-800">✎ wrote to long-term</span>
+      <div class="text-xs text-slate-700 mt-1">${res.written.map(w => "<div>• <b>" + w.type + "</b> — " + esc(w.text) + "</div>").join("")}</div></div>`;
+  } else if(!res.question){
+    h += `<div class="stepline border border-slate-200 bg-slate-50 rounded-xl px-3 py-2 text-xs text-slate-500">Nothing salient to store — the write policy kept long-term clean.</div>`;
+  }
+
+  if(res.retrieved.length){
+    h += `<div class="stepline border border-indigo-200 bg-indigo-50 rounded-xl px-3 py-2">
+      <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-800">↩ retrieved by similarity</span>
+      <div class="text-xs text-slate-700 mt-1">${res.retrieved.map(r => "<div>• " + esc(r.item.text) + " <span class='mono text-slate-400'>(" + (r.score*100|0) + "% match)</span></div>").join("")}</div></div>`;
+  } else if(res.question){
+    h += `<div class="stepline border border-slate-200 bg-slate-50 rounded-xl px-3 py-2 text-xs text-slate-500">No matching long-term memory found for this query.</div>`;
+  }
+
+  if(res.summarized){
+    h += `<div class="stepline border border-amber-300 bg-amber-50 rounded-xl px-3 py-2">
+      <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-200 text-amber-800">🗜 working memory compacted</span>
+      <div class="text-xs text-slate-600 mt-1">Context exceeded ${agent.cap} tokens — oldest turns folded into a summary.</div></div>`;
+  }
+
+  h += `<div class="stepline border border-slate-700 bg-slate-900 rounded-xl px-3 py-2">
+      <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-700 text-slate-100">assistant reply</span>
+      <div class="text-xs text-slate-100 mt-1">${esc(res.reply)}</div></div>`;
+  el.innerHTML = h;
+}
+
+function send(){
+  const box = document.getElementById("msgBox");
+  const msg = box.value.trim();
+  if(!msg) return;
+  const res = step(agent, msg);
+  lastRetrievedIds = res.retrieved.map(r => r.item.id);
+  box.value = "";
+  renderTrace(res);
+  renderMemory();
+}
+
+document.getElementById("sendBtn").onclick = send;
+document.getElementById("msgBox").addEventListener("keydown", e => { if(e.key === "Enter") send(); });
+document.getElementById("newSessionBtn").onclick = () => {
+  newSession(agent);
+  lastRetrievedIds = [];
+  document.getElementById("turnTrace").innerHTML = `<div class="stepline border border-emerald-300 bg-emerald-50 rounded-xl px-3 py-2 text-xs text-emerald-800"><b>🔄 New session.</b> Working memory (context) cleared — long-term memory persists. Now ask "What is my name?"</div>`;
+  renderMemory();
+};
+document.getElementById("resetBtn").onclick = () => {
+  agent = createAgent(parseInt(document.getElementById("capSlider").value, 10));
+  lastRetrievedIds = [];
+  renderTrace(null);
+  renderMemory();
+};
+document.getElementById("capSlider").oninput = e => {
+  const v = parseInt(e.target.value, 10);
+  agent.cap = v;
+  document.getElementById("capVal").textContent = v;
+  // re-apply the budget to the current buffer
+  let guard = 0; while(workingTokens(agent) > agent.cap && agent.working.length > KEEP && guard++ < 30){ const b = workingTokens(agent); if(!compact(agent)) break; agent.compactions++; if(workingTokens(agent) >= b) break; }
+  renderMemory();
+};
+
+renderTrace(null);
+renderMemory();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Why an agent needs memory", why:"A raw model is stateless: it only knows what's in its context window <em>right now</em>. That window is <strong>finite</strong> (a fixed token budget) and <strong>volatile</strong> (it resets between sessions, and old turns fall off the end of a long one). So without an external store, an agent forgets your name the moment the conversation gets long or you come back tomorrow. Memory is the machinery that lets it carry facts, tasks and past runs across steps and sessions — the difference between a chatbot and an assistant that actually knows you.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">raw model = stateless<br>knows only what's in context NOW<br><br>context is FINITE (token budget)<br>context is VOLATILE (resets / scrolls off)<br><br>⇒ need memory to persist across steps &amp; sessions</div>`, code:`# without memory, every call starts from zero
+reply = model([SYSTEM, user_msg])   # nothing carried over
+# with memory:
+reply = model([SYSTEM, summary, *retrieved, *recent, user_msg])` },
+ { title:"2. Two tiers: working vs long-term", why:"Agent memory mirrors a computer. <strong>Working memory</strong> is the live context window — small, fast, and thrown away when the session ends; it holds the current task and recent turns. <strong>Long-term memory</strong> is an external store — larger, durable, and searchable; it holds everything worth keeping beyond this session. The agent constantly moves information between them: promote a salient fact from working → long-term (write), and pull a relevant one back long-term → working (retrieve) when the moment calls for it.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">WORKING MEMORY  (context window)<br>small · fast · volatile · this session<br>&nbsp;&nbsp;&nbsp;▲ retrieve&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│ write ▼<br>LONG-TERM MEMORY  (vector store)<br>large · durable · searchable · forever</div>`, code:`working  = []            # recent turns — the context window
+longterm = VectorStore() # durable, searchable across sessions
+# write : working -> longterm   (keep the salient bit)
+# read  : longterm -> working   (retrieve what's relevant now)` },
+ { title:"3. The context window as RAM", why:"Working memory <em>is</em> the context window, and it behaves like RAM: capacity is measured in tokens and it's always nearly full on a busy agent. Everything the model reasons over — system prompt, tool results, the running summary, the last few turns, the new message — has to fit inside that budget. Go over and something must be dropped or compressed. This is the hard constraint that forces every other memory decision: you can't just keep appending forever, so you summarise and you offload.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">context budget = fixed # of tokens<br>[ system ][ summary ][ retrieved ][ recent turns ]<br>└──────────── must all fit ────────────┘<br><br>over budget → drop oldest OR summarise</div>`, code:`def fits(working, budget):
+    return count_tokens(working) <= budget
+# the whole prompt competes for one fixed budget:
+#   system + summary + retrieved memories + recent turns` },
+ { title:"4. Long-term = vector store + retrieval", why:"Long-term memory is just <strong>RAG (Day 15) pointed at the agent's own history</strong>. Each remembered fact is embedded into a vector and stored. When a new turn arrives, you embed it too and fetch the most similar memories by cosine similarity — so a preference you mentioned 500 turns ago resurfaces exactly when it's relevant, without keeping all 500 turns in context. Retrieval, not scrolling, is what makes long-term memory scale.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">store:&nbsp;fact → embed() → vector in DB<br><br>recall: query → embed() → cosine top-k<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"what seat?" ⇒ ["prefers window seats"]<br><br>RAG over the agent's OWN memories</div>`, code:`def retrieve(store, query, k=4):
+    q = embed(query)
+    ranked = sorted(store, key=lambda m: cosine(q, m.vec),
+                    reverse=True)
+    return ranked[:k]        # most relevant memories only` },
+ { title:"5. Write policy — what's worth remembering", why:"Storing every message is just a transcript — it bloats the store and buries the signal. A good agent applies a <strong>write policy</strong>: keep the durable, reusable stuff (your name, preferences, decisions, standing instructions) and skip the ephemeral (chit-chat, one-off questions). Cheap heuristics/regex get you far; the stronger version asks a small model \"what, if anything, should I remember from this turn?\" and stores its distilled answer. Less, but higher-value, memory retrieves better.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">"My name is Ada"&nbsp;&nbsp;&nbsp;&nbsp;→ STORE (semantic)<br>"Always cc my boss"&nbsp;→ STORE (procedural)<br>"lol thanks"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ skip<br>"what time is it?"&nbsp;&nbsp;→ skip<br><br>remember the durable, drop the ephemeral</div>`, code:`def write_policy(text):
+    facts = []
+    if m := re.search(r"my name is (\\w+)", text, re.I):
+        facts.append(("semantic", f"User's name is {m[1]}"))
+    if re.search(r"\\b(always|never|remember to)\\b", text, re.I):
+        facts.append(("procedural", text))
+    return facts   # nothing salient? store nothing.` },
+ { title:"6. Read / retrieve by relevance", why:"On every turn, before answering, the agent queries long-term for memories relevant to what's happening now and splices the top hits into the prompt. Relevance is measured by embedding similarity — optionally re-ranked by <strong>recency</strong> and <strong>importance</strong> so the current, high-value memory wins ties. Retrieve too little and the agent looks forgetful; too much and you waste the budget and dilute attention. Top-k with a similarity floor is the usual sweet spot.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">score = similarity × recency × importance<br><br>turn → retrieve top-k → inject into context<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└ few, relevant memories — not the whole DB</div>`, code:`hits = retrieve(store, user_msg, k=4)
+hits = [h for h in hits if h.score > FLOOR]     # drop weak matches
+prompt = [SYSTEM, summary, *hits, *recent, user_msg]
+reply  = model(prompt)` },
+ { title:"7. Reflection & summarization (compaction)", why:"When working memory overflows its budget, the agent doesn't just truncate — it <strong>reflects</strong>: fold the oldest turns into a compact running summary and keep only the most recent turns verbatim. This is the same automatic compaction a long chat does. Done well it's lossy on <em>phrasing</em>, not on <em>knowledge</em> — because anything truly important was already distilled into long-term by the write policy. Reflection can also run periodically to synthesise higher-level insights (\"the user is planning a trip\") from many small memories.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">buffer over budget:<br>[t1][t2][t3][t4][t5][t6]  ✗ too big<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│ summarise t1..t4<br>[summary][t5][t6]  ✓ fits<br><br>lose the wording, keep the meaning</div>`, code:`def compact(working, summary, budget):
+    while count_tokens(working) > budget:
+        old     = working[:-KEEP_RECENT]
+        summary = summarise(summary, old)   # LLM or extractive
+        working = working[-KEEP_RECENT:]
+    return working, summary` },
+ { title:"8. Episodic vs semantic vs procedural", why:"Borrowed from cognitive science, agents keep three kinds of long-term memory. <strong>Episodic</strong> = specific events that happened (\"on Tuesday the user shipped the release\"). <strong>Semantic</strong> = distilled, timeless facts (\"the user's name is Ada\", \"prefers window seats\"). <strong>Procedural</strong> = how-to rules and standing instructions (\"always cc the manager\"). They're retrieved differently: semantic facts ground answers, episodic memories reconstruct history, procedural notes shape behaviour. Tagging by type lets you retrieve, expire and prioritise each appropriately.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">EPISODIC&nbsp;&nbsp;&nbsp;what happened&nbsp;&nbsp;"shipped the release Tue"<br>SEMANTIC&nbsp;&nbsp;&nbsp;distilled fact&nbsp;&nbsp;"name is Ada"<br>PROCEDURAL&nbsp;how-to rule&nbsp;&nbsp;&nbsp;"always cc manager"<br><br>same store, different type → different use</div>`, code:`store.add("episodic",   "User shipped the release Tuesday")
+store.add("semantic",   "User's name is Ada")
+store.add("procedural", "Always cc the manager on shipping")
+# retrieval can filter by type when the task needs one kind` },
+ { title:"9. Forgetting, decay & conflicts", why:"A store that only grows becomes slow and full of stale, contradictory junk. So memory must <strong>forget</strong>. De-duplicate near-identical entries; let a newer fact <strong>supersede</strong> a conflicting older one (name changed, preference updated); decay by time-to-live or an importance score so trivia ages out while key facts persist. When two memories conflict, rank by recency × importance so the current truth surfaces first. Forgetting isn't a bug — it's how memory stays accurate and fast.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">"name is Ada"&nbsp;&nbsp;&nbsp;(old)<br>"name is now Bob" → supersede → keep Bob<br><br>dedupe · TTL / decay · recency×importance rank<br>stale + contradictory memory = wrong answers</div>`, code:`def remember(store, typ, fact):
+    dup = retrieve(store, fact, k=1)
+    if dup and cosine(embed(fact), dup[0].vec) > 0.95:
+        store.update(dup[0], fact)          # supersede stale
+    else:
+        store.add(typ, fact, ts=now())
+    store.evict(older_than=TTL, keep_top=CAP)   # decay / forget` },
+ { title:"10. Frameworks & privacy", why:"You rarely hand-roll all this. <strong>LangGraph</strong> persists agent state via checkpointers (short-term thread state + long-term stores). <strong>MemGPT / Letta</strong> pioneered treating the context window like an OS pages memory in and out of a virtual context. <strong>mem0</strong> is a drop-in memory layer with extraction, dedupe and retrieval built in. And because memory is <em>user data</em>, privacy is a first-class concern: redact PII before storing (Day 29), scope memory per-user, get consent, and support \"forget me\" — deletion and export. Memory that remembers the wrong things, or can't forget on request, is a liability.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">LangGraph&nbsp;&nbsp;→ checkpointers, state stores<br>MemGPT/Letta → OS-style context paging<br>mem0&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ drop-in memory layer<br><br>memory = user data → redact PII · consent · "forget me"</div>`, code:`# don't build from scratch — reach for a library
+from langgraph.checkpoint import MemorySaver   # short-term state
+# mem0 / Letta handle extraction, dedupe, retrieval
+# privacy: redact_pii(fact) before store; support delete_user(id)` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curS=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curS-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curS+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curS>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curS+1); },3600); };
+show(0);
+
+function copy(btn){ const pre=btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o=btn.textContent; btn.textContent="✓ Copied!"; setTimeout(()=>btn.textContent=o,1500); }
+</script>
+</body>
+</html>
