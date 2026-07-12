@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 31 — Prompt Caching</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:8px; border-radius:6px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:50%; background:#4f46e5; cursor:pointer; box-shadow:0 1px 4px rgba(79,70,229,.5); }
+  input[type=range]::-moz-range-thumb{ width:22px; height:22px; border:none; border-radius:50%; background:#4f46e5; cursor:pointer; }
+  .stepline { animation: fadeIn .35s ease-out; }
+  .kbtn.on { background:#4f46e5; color:#fff; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .jsonbox { white-space:pre; overflow-x:auto; }
+  .flowarrow { color:#94a3b8; text-align:center; font-size:18px; line-height:1; }
+  .fillbar { transition:width .45s ease; }
+  .retpulse { animation: retPulse 1.1s ease-in-out infinite; }
+  @keyframes retPulse { 0%,100% { box-shadow:0 0 0 0 rgba(79,70,229,.45);} 50% { box-shadow:0 0 0 6px rgba(79,70,229,0);} }
+  .zonelbl { letter-spacing:.12em; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 31</div>
+      <h1 class="text-xl font-bold">💾 Prompt Caching — Compute a Long Prefix Once, Reuse It Cheap on Every Call</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-5">
+        <h2 class="text-2xl font-bold mb-1">Every API call re-reads your whole prompt from scratch. When the first 90% of it never changes — a long system prompt, a document, few-shot examples — <em>prompt caching</em> computes that part once and reuses it for pennies on every later call.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">A prompt is a big <strong>stable prefix</strong> (system + doc + few-shot) followed by a small <strong>changing suffix</strong> (the user's question). The <strong>first</strong> call is a <strong>cache MISS</strong>: the model runs the expensive <em>prefill</em> over the whole prefix and stores the result. Every later call with a <strong>byte-identical</strong> prefix is a <strong>cache HIT</strong>: the prefix is reused, only the new question is processed — cached input is billed at ~10% and the prefill latency disappears. Edit even <strong>one character</strong> of the prefix and the cache breaks — you're back to a miss. Send a few requests, edit the prefix, watch the cost/latency meters and the TTL countdown. Every token count, cost and hit/miss below is <strong>real code</strong> running in your browser.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- LEFT: build the prompt + log + stats -->
+        <div class="space-y-5">
+          <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-xs uppercase font-bold text-indigo-600">The prefix · stable → cached</div>
+              <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 mono"><span id="prefixTok">0</span> tokens</span>
+            </div>
+            <label class="text-[11px] font-bold text-slate-500">System prompt (editable — change one char to break the cache)</label>
+            <textarea id="sysBox" rows="3" class="w-full text-xs border border-slate-300 rounded-lg p-2 mono mt-1 focus:outline-none focus:border-indigo-400">You are a support assistant for Acme Cloud. Answer only from the manual below. Be concise, cite the section, and never invent features.</textarea>
+            <div class="mt-2 border border-slate-200 bg-slate-50 rounded-lg px-3 py-2 flex items-center justify-between">
+              <span class="text-xs text-slate-600">📄 Product manual (frozen)</span>
+              <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 mono">~1,800 tok</span>
+            </div>
+            <div class="mt-2 border border-slate-200 bg-slate-50 rounded-lg px-3 py-2 flex items-center justify-between">
+              <span class="text-xs text-slate-600">🎯 Few-shot examples (frozen)</span>
+              <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 mono">~600 tok</span>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1">Stable content goes <strong>first</strong>. The cache key is the exact bytes of this whole prefix.</p>
+
+            <div class="text-xs uppercase font-bold text-indigo-600 mt-4 mb-1">The suffix · changes every call</div>
+            <div class="flex gap-2">
+              <input id="qBox" class="flex-1 text-sm border border-slate-300 rounded-lg p-3 mono focus:outline-none focus:border-indigo-400" placeholder="Ask a question and press Enter…" value="How do I reset my API key?" />
+              <button id="sendBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap">Send ▶</button>
+            </div>
+            <div class="flex flex-wrap gap-2 mt-3" id="qPresets"></div>
+            <div class="flex flex-wrap items-center gap-2 mt-3">
+              <button id="expireBtn" class="kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">⏩ Expire the cache (skip past TTL)</button>
+              <button id="resetBtn" class="kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">↺ Reset everything</button>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-3">Request log</div>
+            <div id="callTrace" class="space-y-2 min-h-[120px]"></div>
+          </div>
+
+          <div class="grid grid-cols-4 gap-2 text-center">
+            <div class="bg-white border border-slate-200 rounded-lg p-2">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Requests</div>
+              <div><span id="callCount" class="stat text-lg font-bold text-indigo-600">0</span></div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-2">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Cache hits</div>
+              <div><span id="hitCount" class="stat text-lg font-bold text-slate-700">0</span></div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-2">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Saved so far</div>
+              <div><span id="savedVal" class="stat text-lg font-bold text-emerald-600">$0</span></div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-2">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Avg latency</div>
+              <div><span id="avgLat" class="stat text-lg font-bold text-slate-700">0 ms</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: meters + cache state -->
+        <div class="space-y-5">
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-xs uppercase font-bold text-indigo-600">This request</div>
+              <span id="stateBadge" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-600">no request yet</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>Cost vs a full, uncached call</span><span class="mono"><span id="costPct">—</span></span></div>
+              <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                <div id="costBar" class="fillbar h-2.5 rounded-full bg-indigo-500" style="width:0%"></div>
+              </div>
+              <div class="text-[11px] text-slate-400 mt-1 mono"><span id="costVal">$0.00000</span> this call · full price would be <span id="costFull">$0.00000</span></div>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>Latency vs re-prefilling the whole prefix</span><span class="mono"><span id="latPct">—</span></span></div>
+              <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                <div id="latBar" class="fillbar h-2.5 rounded-full bg-indigo-500" style="width:0%"></div>
+              </div>
+              <div class="text-[11px] text-slate-400 mt-1 mono"><span id="latVal">0 ms</span> this call · cold prefill would be <span id="latFull">0 ms</span></div>
+            </div>
+
+            <div id="breakdown" class="space-y-2"></div>
+            <div id="savingsNote" class="mt-3 text-xs"></div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-xs uppercase font-bold text-indigo-600">Cache state</div>
+              <span id="cacheStatus" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-600">empty</span>
+            </div>
+            <div class="text-[11px] text-slate-500 mb-2 mono">prefix key: <span id="keyVal" class="text-slate-700">—</span></div>
+            <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>Time to live (5-min default TTL)</span><span class="mono" id="ttlText">—</span></div>
+            <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+              <div id="ttlBar" class="fillbar h-2.5 rounded-full bg-emerald-500" style="width:0%"></div>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-2">Each hit refreshes the TTL. Let it hit zero (or press <strong>Expire</strong>) and the next call is a miss again — the cached prefix has been evicted.</p>
+          </div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mt-4 text-center max-w-3xl mx-auto">Prompt caching stores the <strong>prefill</strong> of a fixed prefix so it isn't recomputed on every call — the across-request cousin of the per-token KV-cache from Day 22. Get one thing right (keep the prefix byte-identical and put it first) and you get ~90% cheaper input plus a big latency cut, for free, on every repeat call.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">How prompt caching works</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Make a long, repeated prompt cheap</h2>
+    <p class="text-slate-500 mb-8">Prompt caching is one design decision — <strong>split the prompt into a stable prefix and a volatile suffix, put the stable part first, and mark it</strong> — plus a bit of cost math. Here's the whole thing, layer by layer.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Split the prompt: stable prefix vs volatile suffix</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Look at what changes between calls. The system prompt, tool definitions, a long document, and few-shot examples usually <em>don't</em> change — that's your <strong>prefix</strong>. The user's question changes every call — that's your <strong>suffix</strong>. Caching only pays off when the prefix is large and reused, so this split is the whole game.</p>
+        <div class="relative"><pre>STABLE PREFIX  (same every call &rarr; cache it)
+  system prompt + tool defs + long doc + few-shot
+
+VOLATILE SUFFIX  (new every call &rarr; never cached)
+  the user's actual question</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Order for cache-friendliness — stable first</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The cache is a <strong>prefix match</strong>: it works from the start of the prompt up to a breakpoint. A byte change anywhere invalidates everything after it, so anything volatile must come <em>last</em>. Never interpolate <code>datetime.now()</code>, a request ID, or the user's name into the system prompt — that changes the prefix every call and nothing ever caches.</p>
+        <div class="relative"><pre># render order is: tools &rarr; system &rarr; messages
+# GOOD: volatile bits live at the very end
+system = FROZEN_SYSTEM_PROMPT          # never changes
+messages = [{"role":"user","content": todays_question}]
+
+# BAD: a timestamp at the front breaks caching every call
+system = f"Today is {datetime.now()}. " + FROZEN_SYSTEM_PROMPT</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Mark the breakpoint</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Tell the API where the stable prefix ends. On Anthropic you add an explicit <code>cache_control</code> breakpoint on the last stable block; OpenAI caches long prefixes automatically. Either way the prefix must clear a minimum length (~1,024–4,096 tokens depending on model) or it silently won't cache.</p>
+        <div class="relative"><pre>r = client.messages.create(
+    model="claude-opus-4-8", max_tokens=512,
+    system=[{
+        "type": "text",
+        "text": LONG_PREFIX,                 # frozen system + doc + few-shot
+        "cache_control": {"type": "ephemeral"}   # &larr; breakpoint (5-min TTL)
+    }],
+    messages=[{"role": "user", "content": question}],
+)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Detect hits and misses</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Never assume it worked — read the usage fields. <code>cache_creation_input_tokens</code> is what you wrote (first call, the miss); <code>cache_read_input_tokens</code> is what you reused (the hits). If reads stay at zero across identical-prefix calls, a silent invalidator is at work — a timestamp, unsorted JSON keys, or a changing tool set in the prefix.</p>
+        <div class="relative"><pre>u = r.usage
+print(u.cache_creation_input_tokens)  # written to cache (~1.25x cost, once)
+print(u.cache_read_input_tokens)      # served from cache (~0.1x cost)
+print(u.input_tokens)                 # the uncached remainder (full price)
+# reads stuck at 0? diff the rendered prompt bytes between two calls.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Do the cost math — when it actually pays</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A cache <em>write</em> costs a premium (~1.25× for the 5-min TTL, ~2× for the 1-hour TTL); a cache <em>read</em> costs ~0.1×. So the first call is slightly more expensive and every reuse is ~90% cheaper on the cached tokens. With the 5-min TTL you break even on the second call; the 1-hour TTL needs a third. Cache only what's reused enough to clear that bar.</p>
+        <div class="relative"><pre>read_cost  = 0.10 * base_input_price   # ~90% cheaper — the win
+write_cost = 1.25 * base_input_price   # paid once, on the first (miss) call
+# 5-min TTL: 1.25x + 0.10x  &lt; 2x  &rarr; break even on call #2
+# 1-hour TTL: 2.00x write   &rarr; needs ~3 calls to pay off</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Keep the prefix byte-identical · TTL, pre-warm, providers</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Freeze the prefix: sort JSON keys deterministically, don't swap tools or models mid-conversation, and inject dynamic context <em>after</em> the breakpoint (or as a mid-conversation system message). Cache entries expire on a TTL (5 min or 1 hour) and evict under pressure — pre-warm with a cheap call if first-request latency matters. Anthropic uses explicit <code>cache_control</code> breakpoints; OpenAI/others cache automatically — the design is the same either way.</p>
+        <div class="relative"><pre>import json
+prefix = SYSTEM + json.dumps(config, sort_keys=True) + DOC  # deterministic
+# don't: change the tool list, switch model, or edit the prefix mid-session
+# do: put per-request context after the breakpoint; pre-warm on startup
+# ttl: {"type":"ephemeral"} = 5 min &middot; {"type":"ephemeral","ttl":"1h"} = 1 hour</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 31 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw why prompt caching is the highest-leverage cost fix for any app with a long, repeated prefix: the model runs the expensive <strong>prefill</strong> over the stable prefix once, stores its state, and on every later call with a <strong>byte-identical</strong> prefix serves it back at ~10% of the price with the prefill latency gone. You learned the split (stable prefix vs volatile suffix), why order matters (prefix match — stable first), the write/read cost math, TTL and eviction, and the provider split (Anthropic explicit breakpoints vs OpenAI automatic). It's a massive win for agents, RAG and long-system-prompt apps. <strong>👉 Tomorrow — Day 32: Perplexity — the single number that says how "surprised" a language model is, and why lower means better.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+/* CACHE-ENGINE-START */
+// ===================== LOOK · prompt-caching engine =====================
+// Pure functions, no DOM. A prompt = a big STABLE PREFIX (system + doc +
+// few-shot) + a small VOLATILE SUFFIX (the question). The cache key is the
+// exact bytes of the prefix. First call with a given prefix = MISS: the whole
+// prefix is prefilled and WRITTEN to cache (~1.25x input price). Later calls
+// with a byte-identical, still-live prefix = HIT: the prefix is READ from
+// cache (~0.1x price) and its prefill latency is skipped. Editing one byte of
+// the prefix changes the key -> miss. Changing only the suffix -> still a hit.
+// This is the exact logic Node verifies.
+
+const INPUT_PER_MTOK  = 5.00;    // $ per 1M input tokens (uncached, full price)
+const OUTPUT_PER_MTOK = 25.00;   // $ per 1M output tokens
+const CACHED_READ     = 0.10;    // cached input priced at ~10% of normal -> 90% cheaper
+const CACHE_WRITE     = 1.25;    // 5-min TTL write premium (~1.25x)
+const MIN_CACHEABLE   = 1024;    // shortest prefix that will cache (model-dependent)
+const TTL_MS          = 300000;  // 5-minute default TTL
+
+const BASE_MS      = 40;    // fixed request overhead
+const PREFILL_MS   = 0.20;  // ms to prefill one prompt token
+const DECODE_MS    = 6;     // ms to decode one output token
+const CACHE_READ_MS= 15;    // near-instant cache load (flat)
+
+const DOC_TOKENS     = 1800; // frozen product manual
+const FEWSHOT_TOKENS = 600;  // frozen few-shot examples
+const OUTPUT_TOKENS  = 120;  // typical answer length
+
+function estTokens(s){ return Math.max(1, Math.round(String(s).trim().length / 4)); }
+function prefixTokensFor(systemText){ return DOC_TOKENS + FEWSHOT_TOKENS + estTokens(systemText); }
+
+function hashPrefix(s){                 // deterministic hash of the exact bytes
+  let h = 5381; const str = String(s);
+  for(let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) & 0xffffffff;
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+function createCache(){ return { key: null, expiresAt: 0 }; }   // one cached prefix slot
+
+// ---- one API call: price it, time it, update the cache, return the trace ----
+function sendRequest(cache, req){
+  const { prefixText, prefixTokens, suffixTokens } = req;
+  const outputTokens = req.outputTokens != null ? req.outputTokens : OUTPUT_TOKENS;
+  const now = req.now != null ? req.now : Date.now();
+
+  const key       = hashPrefix(prefixText);
+  const cacheable = prefixTokens >= MIN_CACHEABLE;
+  const warm      = cache.key === key && now < cache.expiresAt;
+  const hit       = cacheable && warm;
+
+  const inRate = INPUT_PER_MTOK / 1e6, outRate = OUTPUT_PER_MTOK / 1e6;
+  let prefixCost;
+  if(!cacheable)   prefixCost = prefixTokens * inRate;                // too short: full price, no caching
+  else if(hit)     prefixCost = prefixTokens * inRate * CACHED_READ;  // reused: ~10%
+  else             prefixCost = prefixTokens * inRate * CACHE_WRITE;  // first call: write premium
+  const suffixCost = suffixTokens * inRate;   // the new question is always full price
+  const outputCost = outputTokens * outRate;
+  const total        = prefixCost + suffixCost + outputCost;
+  const baselineTotal = prefixTokens * inRate + suffixCost + outputCost; // full price, no cache
+
+  const baselineLatency = BASE_MS + (prefixTokens + suffixTokens) * PREFILL_MS + outputTokens * DECODE_MS;
+  const latency = hit
+    ? BASE_MS + CACHE_READ_MS + suffixTokens * PREFILL_MS + outputTokens * DECODE_MS  // prefix prefill skipped
+    : baselineLatency;
+
+  if(cacheable){                          // a read refreshes the TTL; a miss writes the entry
+    cache.key = key;
+    cache.expiresAt = now + TTL_MS;
+  }
+
+  return {
+    hit, cacheable, key, prefixTokens, suffixTokens, outputTokens,
+    prefixCost, suffixCost, outputCost, total, baselineTotal,
+    latency, baselineLatency, saved: baselineTotal - total,
+    expiresAt: cache.expiresAt
+  };
+}
+
+function expireCache(cache){ cache.expiresAt = 0; }   // evict now -> next call misses
+/* CACHE-ENGINE-END */
+
+// ===================== LOOK · UI wiring =====================
+let cache = createCache();
+let stats = { calls: 0, hits: 0, saved: 0, latSum: 0 };
+let lastRes = null;
+let ttlTimer = null;
+
+const money = n => "$" + n.toFixed(5);
+const ms = n => Math.round(n) + " ms";
+
+const PRESETS = [
+  "How do I reset my API key?",
+  "What are the rate limits?",
+  "Does the free plan include webhooks?",
+  "How do I cancel my subscription?"
+];
+const qPresets = document.getElementById("qPresets");
+PRESETS.forEach(q => {
+  const b = document.createElement("button");
+  b.className = "kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100";
+  b.textContent = "❓ " + q;
+  b.onclick = () => { document.getElementById("qBox").value = q; send(); };
+  qPresets.appendChild(b);
+});
+
+function fullPrefixText(){
+  // the exact bytes that form the cache key: editable system + frozen doc + frozen few-shot
+  return document.getElementById("sysBox").value + "\n[DOC:1800]\n[FEWSHOT:600]";
+}
+
+function renderPrefixBadge(){
+  document.getElementById("prefixTok").textContent =
+    prefixTokensFor(document.getElementById("sysBox").value).toLocaleString();
+}
+
+function send(){
+  const sys = document.getElementById("sysBox").value;
+  const q   = document.getElementById("qBox").value.trim();
+  if(!q) return;
+  const res = sendRequest(cache, {
+    prefixText:   fullPrefixText(),
+    prefixTokens: prefixTokensFor(sys),
+    suffixTokens: estTokens(q),
+    now: Date.now()
+  });
+  lastRes = res;
+  stats.calls++;
+  if(res.hit) stats.hits++;
+  stats.saved += res.saved;
+  stats.latSum += res.latency;
+
+  pushTrace(q, res);
+  renderThisRequest(res);
+  renderStats();
+  renderCache();
+}
+
+function pushTrace(q, res){
+  const el = document.getElementById("callTrace");
+  const badge = res.hit
+    ? '<span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">✓ cache HIT</span>'
+    : '<span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">✗ cache MISS</span>';
+  const row = document.createElement("div");
+  row.className = "stepline border " + (res.hit ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50") + " rounded-xl px-3 py-2";
+  row.innerHTML = `<div class="flex items-center justify-between gap-2">${badge}<span class="mono text-[10px] text-slate-400">${money(res.total)} · ${ms(res.latency)}</span></div>
+    <div class="text-xs text-slate-700 mt-1 mono">"${esc(q)}"</div>`;
+  el.prepend(row);
+  while(el.children.length > 6) el.removeChild(el.lastChild);
+}
+
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+function renderThisRequest(res){
+  const badge = document.getElementById("stateBadge");
+  if(res.hit){ badge.textContent = "cache HIT"; badge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-700"; }
+  else       { badge.textContent = "cache MISS"; badge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800"; }
+
+  const costPct = res.total / res.baselineTotal * 100;
+  const cb = document.getElementById("costBar");
+  cb.style.width = Math.min(100, costPct) + "%";
+  cb.className = "fillbar h-2.5 rounded-full " + (res.hit ? "bg-emerald-500" : "bg-amber-500");
+  document.getElementById("costPct").textContent = Math.round(costPct) + "% of full price";
+  document.getElementById("costVal").textContent = money(res.total);
+  document.getElementById("costFull").textContent = money(res.baselineTotal);
+
+  const latPct = res.latency / res.baselineLatency * 100;
+  const lb = document.getElementById("latBar");
+  lb.style.width = Math.min(100, latPct) + "%";
+  lb.className = "fillbar h-2.5 rounded-full " + (res.hit ? "bg-emerald-500" : "bg-amber-500");
+  document.getElementById("latPct").textContent = Math.round(latPct) + "% of cold";
+  document.getElementById("latVal").textContent = ms(res.latency);
+  document.getElementById("latFull").textContent = ms(res.baselineLatency);
+
+  const prefixLabel = res.hit ? "prefix (cached · read ~10%)" : "prefix (prefilled + written ~125%)";
+  const prefixCls = res.hit ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200";
+  document.getElementById("breakdown").innerHTML = `
+    <div class="stepline border ${prefixCls} rounded-xl px-3 py-2 flex items-center justify-between">
+      <span class="text-xs text-slate-700">${prefixLabel}</span>
+      <span class="mono text-[11px] text-slate-500">${res.prefixTokens.toLocaleString()} tok · ${money(res.prefixCost)}</span></div>
+    <div class="stepline border border-slate-200 bg-white rounded-xl px-3 py-2 flex items-center justify-between">
+      <span class="text-xs text-slate-700">suffix — the question (full price)</span>
+      <span class="mono text-[11px] text-slate-500">${res.suffixTokens} tok · ${money(res.suffixCost)}</span></div>
+    <div class="stepline border border-slate-200 bg-white rounded-xl px-3 py-2 flex items-center justify-between">
+      <span class="text-xs text-slate-700">output — the answer</span>
+      <span class="mono text-[11px] text-slate-500">${res.outputTokens} tok · ${money(res.outputCost)}</span></div>`;
+
+  const note = document.getElementById("savingsNote");
+  if(res.hit){
+    note.innerHTML = `<span class="font-bold text-emerald-700">Saved ${money(res.saved)} this call.</span> The cached prefix was billed at ~10% instead of 100% — a <strong>90% cut</strong> on the cached tokens, and its prefill was skipped entirely.`;
+  } else {
+    note.innerHTML = `<span class="font-bold text-amber-700">First call for this prefix — a miss.</span> The prefix was prefilled and written to cache (a ~25% write premium). Send again with the <em>same</em> prefix and it flips to a cheap hit.`;
+  }
+}
+
+function renderStats(){
+  document.getElementById("callCount").textContent = stats.calls;
+  document.getElementById("hitCount").textContent = stats.hits;
+  document.getElementById("savedVal").textContent = "$" + stats.saved.toFixed(4);
+  document.getElementById("avgLat").textContent = stats.calls ? Math.round(stats.latSum / stats.calls) + " ms" : "0 ms";
+}
+
+function renderCache(){
+  const now = Date.now();
+  const status = document.getElementById("cacheStatus");
+  const bar = document.getElementById("ttlBar");
+  const ttlText = document.getElementById("ttlText");
+  const live = cache.key && now < cache.expiresAt;
+
+  document.getElementById("keyVal").textContent = cache.key ? cache.key : "—";
+
+  if(!cache.key){
+    status.textContent = "empty"; status.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-600";
+    bar.style.width = "0%"; ttlText.textContent = "—"; return;
+  }
+  if(!live){
+    status.textContent = "expired"; status.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-red-100 text-red-700";
+    bar.style.width = "0%"; bar.className = "fillbar h-2.5 rounded-full bg-red-500";
+    ttlText.textContent = "0:00 — next call misses"; return;
+  }
+  status.textContent = "warm"; status.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-700";
+  const remain = cache.expiresAt - now;
+  const pct = Math.max(0, Math.min(100, remain / TTL_MS * 100));
+  bar.style.width = pct + "%";
+  bar.className = "fillbar h-2.5 rounded-full " + (pct < 20 ? "bg-amber-500" : "bg-emerald-500");
+  const s = Math.max(0, Math.round(remain / 1000));
+  ttlText.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+document.getElementById("sendBtn").onclick = send;
+document.getElementById("qBox").addEventListener("keydown", e => { if(e.key === "Enter") send(); });
+document.getElementById("sysBox").addEventListener("input", renderPrefixBadge);
+document.getElementById("expireBtn").onclick = () => { expireCache(cache); renderCache(); };
+document.getElementById("resetBtn").onclick = () => {
+  cache = createCache(); stats = { calls:0, hits:0, saved:0, latSum:0 }; lastRes = null;
+  document.getElementById("callTrace").innerHTML = "";
+  document.getElementById("breakdown").innerHTML = "";
+  document.getElementById("savingsNote").innerHTML = "";
+  document.getElementById("stateBadge").textContent = "no request yet";
+  document.getElementById("stateBadge").className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-600";
+  ["costBar","latBar"].forEach(id => { const b = document.getElementById(id); b.style.width = "0%"; b.className = "fillbar h-2.5 rounded-full bg-indigo-500"; });
+  document.getElementById("costPct").textContent = "—"; document.getElementById("latPct").textContent = "—";
+  document.getElementById("costVal").textContent = "$0.00000"; document.getElementById("costFull").textContent = "$0.00000";
+  document.getElementById("latVal").textContent = "0 ms"; document.getElementById("latFull").textContent = "0 ms";
+  renderStats(); renderCache();
+};
+
+ttlTimer = setInterval(renderCache, 1000);
+renderPrefixBadge(); renderStats(); renderCache();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Prefill vs decode — the two phases", why:"Every generation has two phases. <strong>Prefill</strong> reads the entire prompt in one pass and builds the model's internal state for it — this cost scales with prompt length. <strong>Decode</strong> then emits the answer one token at a time. For a long prompt and a short answer, prefill dominates the time and the input bill. Prompt caching attacks prefill: if the prompt starts with a chunk you've prefilled before, why compute it again?", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">PREFILL: read the whole prompt &rarr; build state<br>&nbsp;&nbsp;&nbsp;cost &amp; time &prop; prompt length<br><br>DECODE: emit answer, one token at a time<br>&nbsp;&nbsp;&nbsp;cost &amp; time &prop; answer length<br><br>long prompt + short answer &rArr; prefill dominates</div>`, code:`# a long prompt makes prefill the expensive part
+prompt = LONG_SYSTEM + BIG_DOC + FEWSHOT + question
+#        └─── prefilled every call ───┘   <- the waste
+# prompt caching: prefill the fixed part ONCE, reuse it` },
+ { title:"2. The KV-cache within one request (Day 22)", why:"Inside a single generation, the model already caches. As it decodes token 500 it doesn't re-read tokens 1&ndash;499 — it stores their key/value attention tensors (the <strong>KV-cache</strong> from Day 22) and reuses them. That's what makes decoding each new token cheap. Prompt caching takes the same idea and stretches it <em>across</em> separate API calls.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">within ONE request (Day 22 KV-cache):<br>token 500 reuses the KV of tokens 1&ndash;499<br>&nbsp;&nbsp;&nbsp;&rarr; don't re-read what you've read<br><br>prompt caching = the same trick,<br>but ACROSS requests</div>`, code:`# Day 22 KV-cache: reused per-token, within one generation
+# prompt caching: persist that prefill state so the NEXT
+#                 API call can start from it -- no re-read` },
+ { title:"3. Prompt caching across requests", why:"When you cache a prefix, the provider stores the prefill state (the KV tensors) for those exact tokens, keyed by their bytes. The next request that starts with the same bytes skips straight past them — it loads the saved state instead of recomputing it. The model behaves identically; you just don't pay to prefill the prefix twice.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">call #1: prefill PREFIX &rarr; store its state (MISS)<br>call #2: load PREFIX state, prefill only the new bit (HIT)<br>call #3: load PREFIX state again (HIT)<br><br>same output &mdash; the prefix just isn't recomputed</div>`, code:`r1 = client.messages.create(system=[{**PREFIX,
+        "cache_control":{"type":"ephemeral"}}],
+        messages=[{"role":"user","content": q1}])   # MISS: writes cache
+r2 = client.messages.create(system=[{**PREFIX, ...}],
+        messages=[{"role":"user","content": q2}])   # HIT: reads cache` },
+ { title:"4. What gets cached — the prefix's prefill state", why:"The cache stores the model's computed state (KV tensors) for the prefix tokens — not the text, not the answer. It's reusable because the same input tokens always produce the same prefill state. The suffix (the question) and the output are never cached; they're new every call and always billed at full price. That's why only a large, reused prefix is worth caching.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">CACHED: prefill state (KV) of the PREFIX tokens<br>NOT cached: the suffix (new question)<br>NOT cached: the output (new answer)<br><br>reusable because same tokens &rArr; same state</div>`, code:`# cached: the KV/prefill of these exact prefix tokens
+PREFIX  = system + tools + long_doc + few_shot   # -> cached
+SUFFIX  = todays_question                        # -> full price
+OUTPUT  = model_answer                           # -> full price` },
+ { title:"5. A hit needs a byte-identical prefix", why:"Caching is a <strong>prefix match</strong>: the key is the exact bytes from the start of the prompt to the breakpoint. Change a single character anywhere in the prefix and the key changes — you get a miss and pay to re-prefill. Two consequences: put stable content <em>first</em> and volatile content last, and keep the prefix deterministic (sort JSON keys, fix tool order, no timestamps). Order matters as much as content.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">key = exact bytes of the prefix (up to breakpoint)<br><br>"You are a helpful assistant."&nbsp;&nbsp;&rarr; key ABC &rarr; HIT<br>"You are a helpful assistant!"&nbsp;&nbsp;&rarr; key XYZ &rarr; MISS<br><br>one byte differs &rArr; everything after it re-prefills</div>`, code:`# stable first, volatile last -- never interpolate into the prefix
+system = FROZEN_PREFIX                 # byte-identical every call
+messages = [{"role":"user","content": q}]   # volatile -> at the end
+# killers of caching: datetime.now(), uuid4(), unsorted json.dumps()` },
+ { title:"6. Pricing — cached input costs ~10%", why:"The economics: a cache <strong>write</strong> (the first, miss call) costs a small premium — about 1.25&times; for the 5-minute TTL, 2&times; for the 1-hour TTL. A cache <strong>read</strong> (every hit) costs about 0.1&times; — a 90% discount on those tokens. So you pay slightly more once, then bank ~90% on every reuse. With the 5-min TTL you break even on the second call; with the 1-hour TTL, around the third.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">write (miss, once): ~1.25x  (5-min TTL)<br>read (every hit):&nbsp;&nbsp;~0.10x  &rarr; 90% cheaper<br><br>full price &times; N calls&nbsp;&nbsp;vs&nbsp;&nbsp;1.25x + 0.10x &times; (N&minus;1)<br>break even at N = 2 (5-min TTL)</div>`, code:`# per cached token, relative to the base input price:
+write = 1.25   # paid once (first / miss call)
+read  = 0.10   # paid on every hit  -> 90% off
+# verify: usage.cache_read_input_tokens should be > 0 on hits` },
+ { title:"7. The latency win — skip re-prefilling", why:"Cost isn't the only prize. Prefilling a long prefix takes real wall-clock time, and it's the first thing that happens before any token streams back. On a hit, that prefill is replaced by a near-instant cache load — so time-to-first-token drops sharply. For a chatbot on a 2,000-token system prompt, that can be the difference between a snappy reply and a visible pause.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">MISS: prefill 2,400 prefix tokens &rarr; then answer<br>HIT:&nbsp;&nbsp;load cache (near-instant) &rarr; then answer<br><br>the prefix-prefill time vanishes<br>&rArr; much lower time-to-first-token</div>`, code:`# miss: latency ~ prefill(prefix + suffix) + decode(answer)
+# hit:  latency ~ cache_load + prefill(suffix) + decode(answer)
+#                 └─ prefix prefill is skipped entirely ─┘` },
+ { title:"8. TTL and eviction — caches don't live forever", why:"A cache entry has a time-to-live. Anthropic's default is 5 minutes, with a 1-hour option; the timer refreshes on each hit. When the TTL lapses, or the entry is evicted under memory pressure, the next call is a miss again and re-writes the prefix. For bursty or intermittent traffic, either use the longer TTL or <em>pre-warm</em> the cache with a cheap request so the first real user hits a warm cache.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">write &rarr; [ warm, TTL ticking ] &rarr; hit refreshes TTL<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;| TTL lapses / evicted<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&darr;<br>next call = MISS (re-write the prefix)</div>`, code:`# default 5-min TTL; 1-hour option for gappy traffic
+"cache_control": {"type": "ephemeral"}            # ~5 min
+"cache_control": {"type": "ephemeral", "ttl":"1h"} # ~1 hour
+# pre-warm at startup so the first real request hits a warm cache` },
+ { title:"9. Provider differences · what NOT to cache", why:"Providers expose caching differently. <strong>Anthropic</strong> is explicit: you place a <code>cache_control</code> breakpoint on the last stable block (up to 4 breakpoints). <strong>OpenAI</strong> and others cache long prefixes <em>automatically</em> once they clear a length threshold. Either way the rules are the same — and the same things should <em>never</em> be in the cached prefix: timestamps, request IDs, per-user data, or anything else that changes call to call.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">Anthropic: explicit cache_control breakpoints<br>OpenAI &amp; others: automatic on long prefixes<br><br>NEVER cache: timestamps &middot; request IDs<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;per-user data &middot; anything volatile</div>`, code:`# Anthropic -- explicit breakpoint on the last stable block
+system=[{"type":"text","text": PREFIX,
+         "cache_control":{"type":"ephemeral"}}]
+# OpenAI -- no marker; long identical prefixes cache automatically
+# both: keep volatile content OUT of the cached prefix` },
+ { title:"10. Where it pays off most", why:"Prompt caching is highest-leverage anywhere the same big prefix repeats: <strong>agents</strong> (a long system prompt + tool defs replayed every turn), <strong>RAG</strong> (retrieved documents reused across follow-up questions), <strong>long-system-prompt apps</strong> (detailed instructions or a style guide on every call), and few-shot pipelines. The more you reuse a large, fixed prefix, the closer your effective input cost falls toward that 10% floor — often a majority cut on a real workload's bill.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">AGENTS: system + tools replayed every turn<br>RAG: retrieved docs reused across follow-ups<br>LONG SYSTEM PROMPTS: instructions on every call<br><br>more reuse &rArr; effective input cost &rarr; ~10% floor</div>`, code:`# agent loop: the prefix (system + tools) is identical each turn
+for turn in conversation:
+    r = client.messages.create(
+        system=[{"type":"text","text": PREFIX,
+                 "cache_control":{"type":"ephemeral"}}],
+        messages=history + [turn])   # only the tail changes -> mostly hits` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curS=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curS-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curS+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curS>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curS+1); },3600); };
+show(0);
+
+function copy(btn){ const pre=btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o=btn.textContent; btn.textContent="✓ Copied!"; setTimeout(()=>btn.textContent=o,1500); }
+</script>
+</body>
+</html>

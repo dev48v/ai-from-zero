@@ -37,6 +37,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 28 — Function Calling & Tool Use](https://dev48v.infy.uk/ai/days/day28-function-calling.html) — `day28-function-calling.html`
 - [AIFromZero · Day 29 — Guardrails & Safety](https://dev48v.infy.uk/ai/days/day29-guardrails.html) — `day29-guardrails.html`
 - [AIFromZero · Day 30 — Agentic Memory](https://dev48v.infy.uk/ai/days/day30-agentic-memory.html) — `day30-agentic-memory.html`
+- [AIFromZero · Day 31 — Prompt Caching](https://dev48v.infy.uk/ai/days/day31-prompt-caching.html) — `day31-prompt-caching.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
