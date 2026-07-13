@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 32 — Perplexity</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:8px; border-radius:6px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:50%; background:#4f46e5; cursor:pointer; box-shadow:0 1px 4px rgba(79,70,229,.5); }
+  input[type=range]::-moz-range-thumb{ width:22px; height:22px; border:none; border-radius:50%; background:#4f46e5; cursor:pointer; }
+  .stepline { animation: fadeIn .35s ease-out; }
+  .kbtn.on { background:#4f46e5; color:#fff; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .jsonbox { white-space:pre; overflow-x:auto; }
+  .flowarrow { color:#94a3b8; text-align:center; font-size:18px; line-height:1; }
+  .fillbar { transition:width .45s ease; }
+  .bar { transition:height .45s ease, background .3s ease; border-radius:4px 4px 0 0; }
+  .retpulse { animation: retPulse 1.1s ease-in-out infinite; }
+  @keyframes retPulse { 0%,100% { box-shadow:0 0 0 0 rgba(79,70,229,.45);} 50% { box-shadow:0 0 0 6px rgba(79,70,229,0);} }
+  .zonelbl { letter-spacing:.12em; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 32</div>
+      <h1 class="text-xl font-bold">📉 Perplexity — the One Number That Says How "Surprised" a Language Model Is</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-5">
+        <h2 class="text-2xl font-bold mb-1">A language model reads your sentence one token at a time and, before each one, says how likely it thought that token was. <em>Perplexity</em> rolls all those guesses into a single score: how surprised the model was, on average, per token.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">For every token the model gives a probability <strong>P(token | the words so far)</strong>. Turn each into <strong>surprisal</strong> — <span class="mono">&minus;log₂P</span> <em>bits</em> — big when the token was unlikely, near zero when it was expected. Average the surprisal over the sentence and you have the <strong>cross-entropy</strong>; raise 2 to that power and you have <strong>PERPLEXITY = 2^(avg bits) = exp(avg negative log-likelihood)</strong>. <strong>Lower is better</strong> — the model was less surprised. Type a fluent sentence (low PPL), a garbled one (high PPL), or a mostly-fluent one with a surprise word, and toggle a confident vs an uncertain model. Every probability, bit, and PPL below is <strong>real code</strong> running in your browser on a tiny scripted next-token model.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- LEFT: input + token walk -->
+        <div class="space-y-5">
+          <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-xs uppercase font-bold text-indigo-600">The sentence · scored token-by-token</div>
+              <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 mono">vocab = <span id="vocabN">12</span> tokens</span>
+            </div>
+            <div class="flex gap-2">
+              <input id="pplInput" class="flex-1 text-sm border border-slate-300 rounded-lg p-3 mono focus:outline-none focus:border-indigo-400" placeholder="Type a sentence…" value="the cat sat on the mat" />
+              <button id="scoreBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap">Score ▶</button>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1">The toy model only knows these words: <span class="mono text-slate-500" id="vocabList"></span>. Anything else is out-of-vocabulary &rarr; maximally surprising.</p>
+            <div class="flex flex-wrap gap-2 mt-3" id="pplPresets"></div>
+
+            <div class="text-xs uppercase font-bold text-indigo-600 mt-4 mb-1">The model's confidence</div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="confBtn"   class="kbtn on px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">🎯 Confident model (sharp)</button>
+              <button id="uncertBtn" class="kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">🌫️ Uncertain model (flat)</button>
+              <button id="resetBtn"  class="kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">↺ Reset</button>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1">A <strong>confident</strong> model bets hard on one token — it wins big when right, loses big when wrong. An <strong>uncertain</strong> model spreads its bet toward a flat <span class="mono">1/V</span> guess.</p>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-3">Walk it token-by-token</div>
+            <div class="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 text-[10px] uppercase font-bold text-slate-400 px-3 mb-1">
+              <span>token · P(token | context)</span><span class="text-right">P</span><span class="text-right">surprise</span><span class="text-right">avg</span>
+            </div>
+            <div id="tokRows" class="space-y-1.5 min-h-[140px]"></div>
+          </div>
+        </div>
+
+        <!-- RIGHT: PPL + surprise chart -->
+        <div class="space-y-5">
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-xs uppercase font-bold text-indigo-600">Perplexity of this sentence</div>
+              <span id="modelBadge" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-700">confident model</span>
+            </div>
+            <div class="text-center py-2">
+              <div class="text-6xl font-black text-indigo-600 stat" id="pplBig">—</div>
+              <div class="text-xs text-slate-400 mt-1">PPL = 2^(avg bits) = exp(avg &minus;ln P)</div>
+            </div>
+            <div class="grid grid-cols-3 gap-2 text-center mt-3">
+              <div class="bg-slate-50 border border-slate-200 rounded-lg p-2">
+                <div class="text-[10px] uppercase font-bold text-slate-400">avg surprise</div>
+                <div><span id="avgBits" class="stat text-lg font-bold text-slate-700">—</span><span class="text-[10px] text-slate-400"> bits</span></div>
+              </div>
+              <div class="bg-slate-50 border border-slate-200 rounded-lg p-2">
+                <div class="text-[10px] uppercase font-bold text-slate-400">cross-entropy</div>
+                <div><span id="avgNLL" class="stat text-lg font-bold text-slate-700">—</span><span class="text-[10px] text-slate-400"> nats</span></div>
+              </div>
+              <div class="bg-slate-50 border border-slate-200 rounded-lg p-2">
+                <div class="text-[10px] uppercase font-bold text-slate-400">tokens</div>
+                <div><span id="tokN" class="stat text-lg font-bold text-slate-700">—</span></div>
+              </div>
+            </div>
+            <div id="branchBox" class="mt-3 bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 text-xs text-indigo-800">—</div>
+            <div id="verdict" class="mt-2 text-xs"></div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-xs uppercase font-bold text-indigo-600">Per-token surprise</div>
+              <span class="text-[10px] text-slate-400 mono">bits = &minus;log₂P</span>
+            </div>
+            <p class="text-[11px] text-slate-400 mb-2">Tall red bars = tokens the model did <em>not</em> see coming. A fluent sentence stays low and flat; one surprise word spikes.</p>
+            <div id="barChart" class="flex items-end gap-1.5 h-40 border-b border-slate-200 pb-0"></div>
+            <div id="barLabels" class="flex gap-1.5 mt-1"></div>
+          </div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mt-4 text-center max-w-3xl mx-auto">Perplexity is the standard <strong>intrinsic</strong> yardstick for a language model: average how surprised it is per token and report it as an effective branching factor. A PPL of 8 means the model was, on average, about as unsure as if it were picking uniformly among 8 words. It measures <em>fit to the text distribution</em> — not whether the text is true, useful, or safe.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">From next-token probabilities to perplexity</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Compute perplexity yourself</h2>
+    <p class="text-slate-500 mb-8">Perplexity is a five-line calculation on top of the probabilities a model already produces — <strong>collect the per-token probability of the correct token, take its negative log, average, exponentiate</strong>. Here's the whole thing, layer by layer, with the traps that quietly corrupt the number.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Get the probability of each correct token</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Run the model over the text. At each position it outputs logits over the whole vocabulary; softmax turns them into a probability distribution. The one number you keep is the probability it assigned to the token that <em>actually</em> came next — that's <code>P(tokenᵢ | token₁…tokenᵢ₋₁)</code>. Everything else follows from this list of probabilities.</p>
+        <div class="relative"><pre>import torch, torch.nn.functional as F
+logits = model(input_ids).logits[:, :-1, :]     # predict-next, drop last
+targets = input_ids[:, 1:]                       # the actual next tokens
+logp = F.log_softmax(logits, dim=-1)             # log-probs over the vocab
+tok_logp = logp.gather(-1, targets.unsqueeze(-1)).squeeze(-1)  # log P(correct)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Negative log-likelihood, then average = cross-entropy</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Take the negative log of each probability (its surprisal) and average over all tokens. That average <strong>negative log-likelihood</strong> is exactly the <strong>cross-entropy loss</strong> the model was trained to minimize — perplexity and training loss are the same quantity, just reported differently. Work in log space: it turns a product of tiny probabilities into a sum and avoids numeric underflow.</p>
+        <div class="relative"><pre>nll = -tok_logp                     # surprisal per token (nats, natural log)
+cross_entropy = nll.mean()          # average NLL == the training loss
+# this is identical to:
+#   F.cross_entropy(logits.reshape(-1, V), targets.reshape(-1))</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Exponentiate → perplexity</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Perplexity is just <code>exp(cross_entropy)</code> when you used natural log, or <code>2^(cross_entropy)</code> when you measured in bits — the two are equal. Exponentiating undoes the log and puts the score back on a human scale: an <em>effective branching factor</em>. Keep your log base consistent end-to-end or the number is meaningless.</p>
+        <div class="relative"><pre>ppl = torch.exp(cross_entropy)          # natural log throughout
+# equivalently, in bits:
+#   bits = nll / math.log(2)
+#   ppl  = 2 ** bits.mean()
+# a perplexity of 8  ->  "as unsure as picking among 8 equally-likely tokens"</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Mask padding & sum correctly over long texts</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Two silent bugs. First, never average surprisal over <code>&lt;pad&gt;</code> tokens — they aren't predictions and will fake a low perplexity; mask them out. Second, for a document longer than the context window, slide the window and average the log-likelihoods over the <em>whole</em> corpus (sum the NLLs, divide by the true token count) before exponentiating once at the end.</p>
+        <div class="relative"><pre>mask = (targets != PAD_ID)
+total_nll = (nll * mask).sum()
+n_tokens  = mask.sum()
+ppl = torch.exp(total_nll / n_tokens)   # average over REAL tokens only
+# long doc: accumulate total_nll & n_tokens across sliding windows, exp() once</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Only compare on the same tokenizer — or use bits-per-byte</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Perplexity is per <em>token</em>, so it depends on how the text was split. A model with a bigger vocabulary uses fewer, "easier" tokens and looks better on raw PPL even if it's no smarter. Never compare perplexities across different tokenizers. To compare fairly, normalize to the text itself: <strong>bits-per-byte</strong> (total bits ÷ number of UTF-8 bytes) is tokenizer-independent.</p>
+        <div class="relative"><pre>total_bits = total_nll / math.log(2)          # nats -> bits
+bits_per_byte = total_bits / num_utf8_bytes    # tokenizer-independent
+# raw PPL: only comparable when the tokenizer + eval text are identical
+# leaderboards use bits-per-byte / bits-per-char for cross-model comparisons</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Read it right — and know what it can't tell you</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Lower perplexity means the model fits the text distribution better — great for tracking pretraining and picking checkpoints. But it measures <em>fluency/fit</em>, not <em>truth, usefulness, or safety</em>: a model can be confidently, fluently wrong and score a low perplexity. Use PPL as an intrinsic training/eval signal, and pair it with task benchmarks and human/LLM judgement for anything user-facing.</p>
+        <div class="relative"><pre># PPL answers: "how well does this fit the text?"  (intrinsic)
+# PPL does NOT answer: is it true? helpful? safe? on-task?
+# track PPL / bits-per-byte on a held-out set during pretraining;
+# gate releases on downstream evals (MMLU, human prefs), not PPL alone.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 32 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw the single most-used intrinsic metric for a language model, built from the ground up: a model gives <strong>P(next token | context)</strong>, each token's <strong>surprisal</strong> is <span class="mono">&minus;log₂P</span> bits, the average is the <strong>cross-entropy</strong> (the very loss it trains on), and <strong>perplexity = 2^(avg bits) = exp(avg NLL)</strong>. Lower means less surprised means a better fit; the value reads as an effective branching factor — "about this many equally-likely choices." You learned why we use logs (products → sums, no underflow), why PPL is tokenizer-dependent (and how bits-per-byte fixes cross-model comparisons), and — crucially — what it does <em>not</em> measure: truth, usefulness, or safety. <strong>👉 Tomorrow — Day 33: Beam Search vs Sampling — once you can score a sequence's probability, how do you actually pick one to generate?</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+/* PPL-ENGINE-START */
+// ===================== LOOK · perplexity engine =====================
+// A language model assigns P(next token | context). Here that model is a tiny
+// scripted bigram over a fixed vocabulary. For each token: surprisal = -log2(P)
+// bits (big when the token was unlikely, ~0 when expected). The AVERAGE
+// surprisal over the sentence is the CROSS-ENTROPY; PERPLEXITY = 2^(avg bits)
+// = exp(avg negative log-likelihood). Lower = the model was less surprised =
+// better. A confident (sharp) model bets hard on one token; an uncertain
+// (flat) model spreads mass toward a uniform 1/V guess. This is the exact
+// math Node verifies.
+
+const VOCAB = ["the","cat","sat","on","mat","dog","ran","fast","a","big","and","slept"];
+const V = VOCAB.length;   // vocabulary size
+
+// unnormalized bigram weights: previous token -> { next token: weight }.
+// "^" is the sentence-start context. Unlisted next-tokens have base weight 0.
+const BIGRAM = {
+  "^":   { the:50, a:28, dog:6, cat:6, big:6, mat:2, and:2 },
+  the:   { cat:34, dog:28, mat:22, big:12, and:4 },
+  cat:   { sat:45, ran:25, slept:22, and:8 },
+  sat:   { on:70, and:18, the:6, a:6 },
+  on:    { the:75, a:20, mat:5 },
+  mat:   { and:45, the:30, a:15, mat:10 },
+  dog:   { ran:45, sat:22, slept:22, and:11 },
+  ran:   { fast:55, on:16, and:16, the:13 },
+  fast:  { and:50, the:30, on:20 },
+  a:     { cat:30, dog:30, big:26, mat:14 },
+  big:   { cat:35, dog:35, mat:22, and:8 },
+  and:   { the:40, a:28, dog:12, cat:12, big:8 },
+  slept: { on:40, and:32, the:28 }
+};
+
+function normalize(weights){                 // -> proper distribution over VOCAB
+  const d = {}; let sum = 0;
+  for(const k of VOCAB) sum += (weights && weights[k]) ? weights[k] : 0;
+  for(const k of VOCAB) d[k] = sum > 0 ? ((weights && weights[k] ? weights[k] : 0) / sum) : 0;
+  return d;
+}
+
+// The model's distribution over the NEXT token given the previous one.
+// alpha = smoothing toward the uniform 1/V guess. Small alpha = CONFIDENT
+// (sharp); large alpha = UNCERTAIN (flat). Always sums to 1 over VOCAB.
+function modelDist(prevTok, alpha){
+  const base = normalize(BIGRAM[prevTok] || {});
+  const floor = 1 / V;
+  const d = {};
+  for(const k of VOCAB) d[k] = (1 - alpha) * base[k] + alpha * floor;
+  return d;
+}
+
+// probability the model assigns to an ACTUAL token. Out-of-vocabulary tokens
+// only receive the uniform smoothing mass -> maximally surprising.
+function tokenProb(prevTok, tok, alpha){
+  const d = modelDist(prevTok, alpha);
+  if(Object.prototype.hasOwnProperty.call(d, tok)) return d[tok];
+  return alpha * (1 / V);
+}
+
+const bits = p => -Math.log2(p);   // surprisal in bits
+
+// PERPLEXITY from a list of per-token probabilities:
+// exp(mean negative log-likelihood in nats) === 2^(mean bits).
+function perplexity(probs){
+  let sumNLL = 0;
+  for(const p of probs) sumNLL += -Math.log(p);   // natural log -> nats
+  const avgNLL = sumNLL / probs.length;           // cross-entropy (nats)
+  return Math.exp(avgNLL);
+}
+
+function tokenize(s){
+  return String(s).toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+}
+
+// score a whole sentence under the toy model at a given confidence (alpha).
+function scoreSentence(text, alpha){
+  const toks = tokenize(text);
+  let prev = "^", sumNLL = 0, sumBits = 0;
+  const rows = [];
+  toks.forEach((tok, i) => {
+    const inVocab = VOCAB.includes(tok);
+    const p = tokenProb(prev, tok, alpha);
+    const b = bits(p);
+    sumNLL += -Math.log(p); sumBits += b;
+    rows.push({ i, tok, prev, p, bits: b, inVocab, runAvgBits: sumBits / (i + 1) });
+    prev = inVocab ? tok : prev;    // OOV token doesn't advance the bigram context
+  });
+  const n = toks.length || 1;
+  const avgNLL = sumNLL / n, avgBits = sumBits / n;
+  return {
+    rows, n: toks.length, avgNLL, avgBits,
+    ppl: toks.length ? Math.exp(avgNLL) : 0,    // === 2^avgBits
+    probs: rows.map(r => r.p)
+  };
+}
+/* PPL-ENGINE-END */
+
+// ===================== LOOK · UI wiring =====================
+const ALPHA_CONFIDENT = 0.08;   // sharp
+const ALPHA_UNCERTAIN = 0.45;   // flat, closer to uniform
+let alpha = ALPHA_CONFIDENT;
+
+const PRESETS = [
+  { label: "✅ fluent", text: "the cat sat on the mat" },
+  { label: "✅ fluent", text: "a big dog ran fast" },
+  { label: "🌀 garbled", text: "mat cat the on sat the" },
+  { label: "⚠️ one surprise", text: "the big dog ran mat" },
+  { label: "❓ out-of-vocab", text: "the wolf devoured breakfast" }
+];
+
+document.getElementById("vocabN").textContent = V;
+document.getElementById("vocabList").textContent = VOCAB.join(" · ");
+
+const pplPresets = document.getElementById("pplPresets");
+PRESETS.forEach(pz => {
+  const b = document.createElement("button");
+  b.className = "kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100";
+  b.textContent = pz.label + " · " + pz.text;
+  b.onclick = () => { document.getElementById("pplInput").value = pz.text; run(); };
+  pplPresets.appendChild(b);
+});
+
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+let walkTimer = null;
+const BAR_MAX_BITS = 8;   // full-height bar
+
+function run(){
+  const text = document.getElementById("pplInput").value;
+  const res = scoreSentence(text, alpha);
+
+  // headline numbers
+  document.getElementById("pplBig").textContent = res.n ? res.ppl.toFixed(2) : "—";
+  document.getElementById("avgBits").textContent = res.n ? res.avgBits.toFixed(2) : "—";
+  document.getElementById("avgNLL").textContent = res.n ? res.avgNLL.toFixed(2) : "—";
+  document.getElementById("tokN").textContent = res.n || "—";
+
+  const badge = document.getElementById("modelBadge");
+  const confident = alpha === ALPHA_CONFIDENT;
+  badge.textContent = confident ? "confident model" : "uncertain model";
+  badge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded " + (confident ? "bg-indigo-100 text-indigo-700" : "bg-slate-200 text-slate-600");
+
+  // branching-factor intuition
+  const branch = document.getElementById("branchBox");
+  if(res.n){
+    branch.innerHTML = `<strong>Branching factor ≈ ${res.ppl.toFixed(1)}.</strong> On average the model was about as unsure as if it were choosing uniformly among <strong>${res.ppl.toFixed(1)}</strong> of its ${V} words. PPL = 1 would mean it knew every token for certain; PPL = ${V} means it was as lost as random guessing over the whole vocabulary.`;
+  } else {
+    branch.innerHTML = "Type a sentence and press Score.";
+  }
+
+  // verdict
+  const verdict = document.getElementById("verdict");
+  if(res.n){
+    let msg, cls;
+    if(res.ppl < 3){ msg = "Very low — a fluent sentence the model expected. It was barely surprised."; cls = "text-emerald-700"; }
+    else if(res.ppl < 12){ msg = "Middling — some tokens landed, some surprised the model."; cls = "text-amber-700"; }
+    else { msg = "High — the model was very surprised (garbled, out-of-vocab, or against a confident wrong guess)."; cls = "text-red-700"; }
+    verdict.innerHTML = `<span class="font-bold ${cls}">${msg}</span> Lower perplexity = less surprise = a better fit to the text.`;
+  } else { verdict.innerHTML = ""; }
+
+  // surprise bar chart
+  const chart = document.getElementById("barChart");
+  const labels = document.getElementById("barLabels");
+  chart.innerHTML = ""; labels.innerHTML = "";
+  res.rows.forEach(r => {
+    const h = Math.max(4, Math.min(100, r.bits / BAR_MAX_BITS * 100));
+    const color = r.bits < 1.2 ? "bg-emerald-500" : r.bits < 3 ? "bg-amber-500" : "bg-red-500";
+    const col = document.createElement("div");
+    col.className = "flex-1 flex flex-col justify-end items-center";
+    col.innerHTML = `<span class="text-[9px] text-slate-400 mono mb-0.5">${r.bits.toFixed(1)}</span><div class="bar w-full ${color}" style="height:0%"></div>`;
+    chart.appendChild(col);
+    requestAnimationFrame(() => { col.querySelector(".bar").style.height = h + "%"; });
+    const lab = document.createElement("div");
+    lab.className = "flex-1 text-center text-[9px] mono truncate " + (r.inVocab ? "text-slate-500" : "text-red-500 font-bold");
+    lab.textContent = r.tok;
+    labels.appendChild(lab);
+  });
+
+  // token-by-token walk (staggered)
+  const box = document.getElementById("tokRows");
+  box.innerHTML = "";
+  if(walkTimer){ clearInterval(walkTimer); walkTimer = null; }
+  let i = 0;
+  const emit = () => {
+    if(i >= res.rows.length){ clearInterval(walkTimer); walkTimer = null; return; }
+    const r = res.rows[i];
+    const surpColor = r.bits < 1.2 ? "text-emerald-600" : r.bits < 3 ? "text-amber-600" : "text-red-600";
+    const ctx = r.prev === "^" ? "&lt;start&gt;" : esc(r.prev);
+    const oob = r.inVocab ? "" : ` <span class="text-[9px] font-bold uppercase px-1 py-0.5 rounded bg-red-100 text-red-600">OOV</span>`;
+    const row = document.createElement("div");
+    row.className = "stepline grid grid-cols-[1fr_auto_auto_auto] gap-x-3 items-center border border-slate-200 rounded-lg px-3 py-1.5 text-xs";
+    row.innerHTML = `
+      <span class="mono text-slate-600"><span class="text-slate-400">${ctx} →</span> <strong class="text-slate-900">${esc(r.tok)}</strong>${oob}</span>
+      <span class="mono text-right text-slate-500">${(r.p * 100).toFixed(1)}%</span>
+      <span class="mono text-right font-bold ${surpColor}">${r.bits.toFixed(2)}b</span>
+      <span class="mono text-right text-slate-400">${r.runAvgBits.toFixed(2)}</span>`;
+    box.appendChild(row);
+    i++;
+  };
+  emit();
+  walkTimer = setInterval(emit, 260);
+}
+
+document.getElementById("scoreBtn").onclick = run;
+document.getElementById("pplInput").addEventListener("keydown", e => { if(e.key === "Enter") run(); });
+document.getElementById("confBtn").onclick = () => {
+  alpha = ALPHA_CONFIDENT;
+  document.getElementById("confBtn").classList.add("on");
+  document.getElementById("uncertBtn").classList.remove("on");
+  run();
+};
+document.getElementById("uncertBtn").onclick = () => {
+  alpha = ALPHA_UNCERTAIN;
+  document.getElementById("uncertBtn").classList.add("on");
+  document.getElementById("confBtn").classList.remove("on");
+  run();
+};
+document.getElementById("resetBtn").onclick = () => {
+  alpha = ALPHA_CONFIDENT;
+  document.getElementById("confBtn").classList.add("on");
+  document.getElementById("uncertBtn").classList.remove("on");
+  document.getElementById("pplInput").value = "the cat sat on the mat";
+  run();
+};
+
+run();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. A language model is just P(next token | context)", why:"Strip away the mystique and a language model is a machine that, given the tokens so far, outputs a probability for every possible next token. Feed it 'the cat sat on the' and it might say <span class='mono'>mat</span> 40%, <span class='mono'>floor</span> 12%, <span class='mono'>roof</span> 3%… — a full distribution that sums to 1. Everything about evaluating it comes down to one question: how much probability did it put on the token that actually came next?", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">context: "the cat sat on the ___"<br><br>P(mat)&nbsp;&nbsp;= 0.40<br>P(floor) = 0.12<br>P(rug)&nbsp;&nbsp;= 0.08<br>&hellip; (sums to 1 over the whole vocab)<br><br>actual next token = "mat" &rarr; model gave it 0.40</div>`, code:`# the model outputs a distribution over the vocabulary
+dist = model.next_token_probs("the cat sat on the")
+# {"mat":0.40, "floor":0.12, "rug":0.08, ...}  sums to 1
+p_correct = dist["mat"]   # 0.40  <- the only number we need per token` },
+ { title:"2. Likelihood of a whole sequence", why:"The probability the model assigns to an entire sentence is the product of its per-token probabilities (chain rule): P(w₁)·P(w₂|w₁)·P(w₃|w₁w₂)… A model that fits the text well makes this product large; a bad model makes it tiny. But multiplying hundreds of numbers below 1 collapses toward zero fast — which is exactly why we don't stay in probability space.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">P(sentence) =<br>P(w&#8321;) &times; P(w&#8322;|w&#8321;) &times; P(w&#8323;|w&#8321;w&#8322;) &times; &hellip;<br><br>0.5 &times; 0.33 &times; 0.42 &times; 0.65 &times; &hellip;<br>&rarr; a vanishingly small number</div>`, code:`# chain rule: sequence prob = product of next-token probs
+seq_prob = 1.0
+for p in per_token_probs:
+    seq_prob *= p         # 0.5 * 0.33 * 0.42 * ...  -> underflows fast
+# 200 tokens of ~0.3 each  ->  ~1e-104   (useless directly)` },
+ { title:"3. Log-likelihood — why we take logs", why:"Take the logarithm and the product becomes a <strong>sum</strong>: log P(sequence) = Σ log P(tokenᵢ). Two wins. First, sums of a few hundred numbers are numerically stable — no underflow to zero. Second, addition is far cheaper and differentiable, which is what training needs. Log is monotonic, so 'higher likelihood' still means 'higher log-likelihood' — we lose nothing by switching.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">log( a &times; b &times; c ) = log a + log b + log c<br><br>log P(sentence) = &Sigma;&#7522; log P(token&#7522;)<br><br>products &rarr; sums &nbsp;&middot;&nbsp; no underflow &nbsp;&middot;&nbsp; easy gradients</div>`, code:`import math
+log_lik = sum(math.log(p) for p in per_token_probs)   # a sum, not a product
+# stable for any length; monotonic in the true likelihood
+# (log of a probability is <= 0, so log_lik is negative)` },
+ { title:"4. Negative log-likelihood = cross-entropy loss", why:"Log-probabilities are negative (probabilities are ≤ 1), so we flip the sign to get a positive <strong>loss</strong> we can minimize. The average negative log-likelihood per token IS the <strong>cross-entropy loss</strong> — the exact objective LLMs are trained on. So the number you optimize during pretraining and the number you evaluate with are the same quantity; perplexity is just a friendlier way to report it.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">surprisal of a token = &minus;log P(token)&nbsp;&nbsp;(&ge; 0)<br><br>cross-entropy = average(&minus;log P) over all tokens<br><br>= the training loss the model minimizes</div>`, code:`nll = [-math.log(p) for p in per_token_probs]  # surprisal per token, >= 0
+cross_entropy = sum(nll) / len(nll)            # avg NLL == training loss
+# minimizing cross-entropy == maximizing the data's likelihood` },
+ { title:"5. Perplexity = exp(cross-entropy) = 2^(bits/token)", why:"Cross-entropy is an abstract loss; perplexity puts it on a human scale by undoing the log. If you measured surprisal in <em>nats</em> (natural log), PPL = exp(cross-entropy). If in <em>bits</em> (log base 2), PPL = 2^(avg bits). They're the same number. It is literally the geometric mean of 1/P over the tokens — the 'typical' inverse probability the model assigned.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">PPL = exp( avg &minus;ln P )&nbsp;&nbsp;=&nbsp;&nbsp;2^( avg &minus;log&#8322; P )<br><br>e.g. avg surprisal = 3 bits &rarr; PPL = 2&#179; = 8<br><br>= geometric mean of 1/P&#7522; across the tokens</div>`, code:`ppl = math.exp(cross_entropy)      # if nll used natural log
+# identical to:
+bits = [x / math.log(2) for x in nll]
+ppl  = 2 ** (sum(bits) / len(bits))
+# 3.0 bits/token  ->  PPL = 8.0` },
+ { title:"6. Branching-factor intuition", why:"Here's what the number <em>means</em>. A perplexity of K says the model was, on average, as uncertain as if it had to pick uniformly among <strong>K equally-likely tokens</strong> at each step. A fair 6-sided die has perplexity 6. PPL = 1 is perfect certainty (it always knew the next token). If your vocabulary has V tokens, pure random guessing gives PPL = V — the ceiling any real model must beat.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">PPL = 1&nbsp;&nbsp;&rarr; certain every time (best)<br>PPL = 6&nbsp;&nbsp;&rarr; like rolling a fair 6-sided die<br>PPL = V&nbsp;&nbsp;&rarr; random guessing over the vocab (worst)<br><br>"effectively choosing among PPL equally-likely tokens"</div>`, code:`# a uniform guess over K options has perplexity exactly K:
+#   each p = 1/K  ->  exp(mean(-ln(1/K))) = exp(ln K) = K
+# real LLMs on English: perplexity roughly ~3-20 per token
+# (depends heavily on the tokenizer and the text)` },
+ { title:"7. Lower = less surprised = better", why:"Because perplexity is average surprise, a lower value is unambiguously better: the model needed fewer effective guesses to predict the text. Watching perplexity fall on a held-out set is the classic signal that pretraining is working. A jump <em>up</em> flags distribution shift, a data bug, or overfitting to the training set. It's the go-to intrinsic health check for a language model.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">PPL over training on held-out text:<br><br>step 0:&nbsp;&nbsp;PPL &asymp; V&nbsp;&nbsp;(knows nothing)<br>step 1k: PPL &asymp; 40<br>step 100k: PPL &asymp; 12&nbsp;&nbsp;&darr; learning<br><br>lower &rArr; less surprised &rArr; better fit</div>`, code:`# validation perplexity is the standard pretraining dashboard metric
+for step in training:
+    if step % eval_every == 0:
+        val_ppl = exp(cross_entropy(model, held_out))
+        log(val_ppl)     # should trend DOWN; a rise = trouble` },
+ { title:"8. It's tokenizer-dependent — beware comparisons", why:"Perplexity is measured <em>per token</em>, so it hinges on how the text was tokenized. A model with a larger vocabulary chops text into fewer, longer tokens, each easier to predict — so it can show a lower perplexity without being any smarter. This makes raw PPL <strong>not comparable across different tokenizers</strong>. Only compare models that share a tokenizer <em>and</em> are scored on identical text.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">same text, different tokenizers:<br><br>tok-A: 100 tokens &rarr; PPL 12<br>tok-B:&nbsp;&nbsp;60 tokens &rarr; PPL 20<br><br>NOT a fair fight — fewer/longer tokens look "easier"</div>`, code:`# raw PPL is only comparable when tokenizer + eval text match.
+# DON'T rank two models with different tokenizers by perplexity.
+# same model, coarser tokenizer -> lower PPL, no real improvement.` },
+ { title:"9. Bits-per-byte — the tokenizer-free fix", why:"To compare models fairly across tokenizers, normalize the total information to the raw text instead of to tokens: <strong>bits-per-byte</strong> = total bits ÷ number of UTF-8 bytes (or bits-per-character). Because bytes don't change with the tokenizer, this is a clean cross-model number — which is why compression-style leaderboards report bits-per-byte rather than perplexity.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">total_bits = &Sigma; &minus;log&#8322; P(token&#7522;)<br><br>bits-per-byte = total_bits / #UTF-8 bytes<br><br>bytes are tokenizer-independent &rArr; fair across models</div>`, code:`total_bits = sum(-math.log2(p) for p in per_token_probs)
+bits_per_byte = total_bits / num_utf8_bytes   # tokenizer-independent
+# used by compression-flavored LM leaderboards for cross-model ranking` },
+ { title:"10. What perplexity does NOT measure", why:"This is the trap. Perplexity only scores how well the model fits the <em>distribution of the text</em> — its fluency. It says nothing about whether the output is <strong>true, useful, on-task, or safe</strong>. A model can be confidently, fluently wrong and post a great perplexity. Use PPL as an intrinsic training/eval signal, then gate anything user-facing on downstream benchmarks and human or LLM judgement.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">PPL measures: fluency / fit to the text&nbsp;&nbsp;&#10003;<br><br>PPL says NOTHING about:<br>truth &middot; usefulness &middot; safety &middot; on-task-ness &#10007;<br><br>low PPL + confidently wrong = totally possible</div>`, code:`# intrinsic (PPL) vs extrinsic (task) evaluation:
+val_ppl = exp(cross_entropy(model, held_out))   # fluency / fit
+# but ALSO run:  MMLU, GSM8K, human/LLM preference, safety evals
+# ship on downstream results -- never on perplexity alone.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s,i)=>{ const bn=document.createElement("button"); bn.className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML=`<div class="font-semibold">${s.title}</div>`; bn.onclick=()=>show(i); stepsEl.appendChild(bn); });
+function show(i){ curS=i; const s=STEPS[i];
+  document.getElementById("concept").innerHTML=`<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML=`<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent=s.code;
+  stepsEl.querySelectorAll("button").forEach((bn,idx)=>{ bn.className = idx===i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick=()=>show(Math.max(0,curS-1)); nextB.onclick=()=>show(Math.min(STEPS.length-1,curS+1));
+let tm=null; autoB.onclick=()=>{ if(tm){clearInterval(tm);tm=null;autoB.textContent="▶ Auto-play";return;} autoB.textContent="⏸ Pause"; show(0); tm=setInterval(()=>{ if(curS>=STEPS.length-1){clearInterval(tm);tm=null;autoB.textContent="▶ Replay";return;} show(curS+1); },3600); };
+show(0);
+
+function copy(btn){ const pre=btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o=btn.textContent; btn.textContent="✓ Copied!"; setTimeout(()=>btn.textContent=o,1500); }
+</script>
+</body>
+</html>
