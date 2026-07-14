@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 33 — Beam Search vs Sampling</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:8px; border-radius:6px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:50%; background:#4f46e5; cursor:pointer; box-shadow:0 1px 4px rgba(79,70,229,.5); }
+  input[type=range]::-moz-range-thumb{ width:22px; height:22px; border:none; border-radius:50%; background:#4f46e5; cursor:pointer; }
+  .stepline { animation: fadeIn .35s ease-out; }
+  .kbtn.on { background:#4f46e5; color:#fff; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .chip { animation: chipIn .3s ease-out; }
+  @keyframes chipIn { from { opacity:0; transform:scale(.8); } to { opacity:1; transform:none; } }
+  .param { display:none; }
+  .param.on { display:block; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 33</div>
+      <h1 class="text-xl font-bold">🎲 Beam Search vs Sampling — how a model turns "probabilities per token" into actual words</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-5">
+        <h2 class="text-2xl font-bold mb-1">A model doesn't hand you a sentence — at every step it hands you a <em>probability distribution</em> over the next token. <em>Decoding</em> is the rule you use to turn that distribution into one chosen word, over and over.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Same model, same prompt <span class="mono">"the movie was …"</span>, five different decoding rules. <strong>Greedy</strong> grabs the single most-likely token every step (and gets stuck in a loop). <strong>Beam search</strong> carries the top-B whole sequences ranked by cumulative log-probability and returns the best (great for translation, oddly bland for open text). <strong>Temperature, top-k, and top-p (nucleus)</strong> reshape or trim the distribution and then <em>roll the dice</em> — trading determinism for diversity. Pick a strategy, tune its knobs, and watch it generate token-by-token. Every distribution, log-prob, beam prune, and sampled draw below is <strong>real code</strong> running in your browser on a tiny scripted next-token model.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- LEFT: controls + output -->
+        <div class="space-y-5">
+          <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">1 · Pick a decoding strategy</div>
+            <div class="flex flex-wrap gap-2" id="stratBtns">
+              <button data-strat="greedy"      class="kbtn on px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">🎯 Greedy</button>
+              <button data-strat="beam"        class="kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">🌿 Beam search</button>
+              <button data-strat="temperature" class="kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">🌡️ Temperature</button>
+              <button data-strat="topk"        class="kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">🔢 Top-k</button>
+              <button data-strat="topp"        class="kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">🎯 Top-p</button>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-2" id="stratTag">—</p>
+
+            <div class="text-xs uppercase font-bold text-indigo-600 mt-4 mb-2">2 · Tune the knob</div>
+            <div class="space-y-3">
+              <div id="paramB" class="param">
+                <label class="text-xs font-semibold text-slate-600">Beam width B = <span id="valB" class="mono text-indigo-600">3</span></label>
+                <input id="inB" type="range" min="2" max="5" step="1" value="3" class="w-full mt-1" />
+                <p class="text-[10px] text-slate-400">How many partial sequences to keep alive. B=1 is exactly greedy.</p>
+              </div>
+              <div id="paramT" class="param">
+                <label class="text-xs font-semibold text-slate-600">Temperature T = <span id="valT" class="mono text-indigo-600">1.0</span></label>
+                <input id="inT" type="range" min="0.1" max="2" step="0.1" value="1" class="w-full mt-1" />
+                <p class="text-[10px] text-slate-400">T&lt;1 sharpens toward greedy · T&gt;1 flattens toward random.</p>
+              </div>
+              <div id="paramK" class="param">
+                <label class="text-xs font-semibold text-slate-600">k = <span id="valK" class="mono text-indigo-600">3</span> most-likely tokens</label>
+                <input id="inK" type="range" min="1" max="6" step="1" value="3" class="w-full mt-1" />
+                <p class="text-[10px] text-slate-400">Sample only from the k tallest bars; zero out the rest.</p>
+              </div>
+              <div id="paramP" class="param">
+                <label class="text-xs font-semibold text-slate-600">p = <span id="valP" class="mono text-indigo-600">0.90</span></label>
+                <input id="inP" type="range" min="0.1" max="1" step="0.05" value="0.9" class="w-full mt-1" />
+                <p class="text-[10px] text-slate-400">Keep the smallest set of tokens whose probability sums to ≥ p.</p>
+              </div>
+              <div id="paramNone" class="param on">
+                <p class="text-[11px] text-slate-400">Greedy has no knob — it always takes the single most-likely token.</p>
+              </div>
+            </div>
+
+            <button id="genBtn" class="mt-4 w-full bg-indigo-600 text-white px-4 py-2.5 rounded-lg font-semibold text-sm">▶ Generate token-by-token</button>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Output so far</div>
+            <div class="flex flex-wrap items-center gap-1.5 min-h-[44px]" id="genRow">
+              <span class="mono text-xs px-2 py-1 rounded bg-slate-100 text-slate-400">the</span>
+              <span class="mono text-xs px-2 py-1 rounded bg-slate-100 text-slate-400">movie</span>
+              <span class="mono text-xs px-2 py-1 rounded bg-slate-100 text-slate-400">was</span>
+              <span id="genTokens" class="contents"></span>
+            </div>
+            <div id="behaviour" class="mt-3 bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 text-xs text-indigo-800">—</div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Determinism check</div>
+            <div id="samplesBox" class="min-h-[40px]">—</div>
+          </div>
+        </div>
+
+        <!-- RIGHT: step view -->
+        <div class="space-y-5">
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-xs uppercase font-bold text-indigo-600" id="rightTitle">What the strategy sees this step</div>
+              <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-700" id="stepLabel">—</span>
+            </div>
+            <p class="text-[11px] text-slate-400 mb-3" id="rightHelp">⭐ = the token chosen · faded / ✕ = trimmed away by the filter.</p>
+            <div id="stepDist" class="min-h-[220px]"></div>
+            <div class="mt-3 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2" id="entRow">
+              <span>Entropy of this step's distribution</span>
+              <span><span id="stepEnt" class="mono font-bold text-slate-700">—</span></span>
+            </div>
+          </div>
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">The tradeoff in one line</div>
+            <div class="grid grid-cols-2 gap-3 text-center">
+              <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <div class="text-[10px] uppercase font-bold text-slate-400">Diversity</div>
+                <div id="divVal" class="text-sm font-bold text-slate-700 mt-1">—</div>
+              </div>
+              <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <div class="text-[10px] uppercase font-bold text-slate-400">Failure mode</div>
+                <div id="riskVal" class="text-sm font-bold text-slate-700 mt-1">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mt-4 text-center max-w-3xl mx-auto">The model is fixed; only the <em>decoding rule</em> changes. That single choice is why the same model can be a precise, repeatable translator (beam / low-temperature) and a chatty, creative writing partner (temperature + nucleus sampling) — and why "regenerate" gives you a different answer while <code>temperature = 0</code> gives you the same one every time.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">From a distribution to a decoding strategy</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build every decoder from one distribution</h2>
+    <p class="text-slate-500 mb-8">A decoder is a thin wrapper around the one thing the model already gives you: <strong>logits → a probability distribution over the vocabulary, at every step</strong>. Greedy, beam, temperature, top-k and top-p are each a handful of lines on top of that. Here's the whole ladder, from the simplest rule to the sampler a modern chat model actually ships with.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Start from the distribution the model already produces</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Every step the model emits <em>logits</em> — one raw score per vocabulary token. Softmax turns them into a probability distribution that sums to 1. Decoding is just: given this distribution, which token do I emit, and how do I use its shape? Everything below operates on <code>probs</code>.</p>
+        <div class="relative"><pre>import torch, torch.nn.functional as F
+logits = model(input_ids).logits[:, -1, :]   # scores for the NEXT token
+probs  = F.softmax(logits, dim=-1)            # distribution over the vocab, sums to 1
+# probs = {"the":0.32, "very":0.30, "really":0.16, ...}</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Greedy = argmax (and watch it loop)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The simplest rule: take the single highest-probability token every step. Fully deterministic, dirt cheap — and it frequently walks straight into a repetition loop (<em>"very very very…"</em>) because the locally-best token isn't the globally-best sequence. Fine for short, factual completions; poor for anything open-ended.</p>
+        <div class="relative"><pre>def greedy(model, ids, max_new=40):
+    for _ in range(max_new):
+        probs = F.softmax(model(ids).logits[:, -1, :], dim=-1)
+        nxt = probs.argmax(dim=-1, keepdim=True)   # THE most-likely token
+        ids = torch.cat([ids, nxt], dim=-1)
+        if nxt.item() == EOS: break
+    return ids
+# deterministic: same input -> same output, every time</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Beam search = carry the top-B sequences by cumulative log-prob</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Instead of committing to one token, keep <code>B</code> partial sequences ("beams"). Each step: expand every beam over the vocabulary, score each candidate by its <strong>cumulative log-probability</strong> (sum of log-probs — you add in log space to avoid underflow), then prune back to the top B. Return the best complete beam. It searches wider than greedy and shines on translation/summarization where there's one "right" answer.</p>
+        <div class="relative"><pre>def beam_search(model, ids, B=4, max_new=40):
+    beams = [(ids, 0.0)]                       # (sequence, cumulative logprob)
+    for _ in range(max_new):
+        cand = []
+        for seq, lp in beams:
+            logp = F.log_softmax(model(seq).logits[:, -1, :], dim=-1)
+            for tok in range(V):
+                cand.append((torch.cat([seq, tok]), lp + logp[0, tok].item()))
+        beams = sorted(cand, key=lambda x: x[1], reverse=True)[:B]   # prune to top-B
+    return max(beams, key=lambda x: x[1])[0]   # best cumulative logprob wins</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Temperature — reshape the distribution before you sample</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Divide the logits by <code>T</code> before softmax. <code>T&lt;1</code> sharpens the peak (more confident, closer to greedy); <code>T&gt;1</code> flattens it (higher entropy, more surprising, more diverse). <code>T→0</code> is greedy; <code>T→∞</code> is uniform noise. This is the "creativity dial" — it changes <em>how random</em> the draw is, before any trimming.</p>
+        <div class="relative"><pre>def sample_temperature(logits, T=0.8):
+    probs = F.softmax(logits / T, dim=-1)      # /T reshapes: <1 sharper, >1 flatter
+    return torch.multinomial(probs, num_samples=1)   # roll the dice
+# T=0.0 -> greedy   |   T=1.0 -> the model's own probs   |   T=2.0 -> wild</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Top-k and top-p — trim the tail, then sample</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Pure temperature sampling can still, rarely, pick a garbage token from the long tail. So we cut the tail first. <strong>Top-k</strong> keeps a fixed number <code>k</code> of the most-likely tokens. <strong>Top-p / nucleus</strong> keeps the <em>smallest</em> set whose probabilities sum to ≥ <code>p</code> — an adaptive cutoff that's wide when the model is unsure and narrow when it's confident. Renormalize the survivors, then sample.</p>
+        <div class="relative"><pre>def top_p(probs, p=0.9):
+    s, idx = torch.sort(probs, descending=True)
+    cum = torch.cumsum(s, dim=-1)
+    keep = cum - s &lt; p            # smallest set whose cumulative prob >= p
+    s[~keep] = 0.0
+    s = s / s.sum()               # renormalize the "nucleus"
+    return idx[torch.multinomial(s, 1)]
+# top-k is the same idea with a FIXED cutoff: keep s[:k], zero the rest</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">The real sampler: temperature + top-p + a repetition penalty</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Modern chat models combine them: apply a <strong>repetition/presence penalty</strong> to logits of tokens already used, scale by <strong>temperature</strong>, trim with <strong>top-p</strong> (often plus a top-k safety cap), then sample. Rule of thumb: <em>need one correct answer?</em> greedy or low temperature (even beam for MT). <em>Need variety, brainstorming, natural chat?</em> temperature ≈ 0.7–1.0 with top-p ≈ 0.9. Set <code>temperature = 0</code> when you need reproducibility.</p>
+        <div class="relative"><pre>def decode_step(logits, prev_ids, T=0.8, p=0.9, rep=1.15):
+    for t in set(prev_ids):
+        logits[t] /= rep                 # 1) discourage repeats
+    logits = logits / T                  # 2) temperature
+    probs  = F.softmax(logits, dim=-1)
+    probs  = top_p(probs, p)             # 3) nucleus cutoff (+ optional top-k)
+    return torch.multinomial(probs, 1)   # 4) sample
+# task -> deterministic (greedy / T=0 / beam);  chat -> sample (T~0.8, p~0.9)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 33 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw that a language model never outputs a sentence — it outputs a <strong>distribution per step</strong>, and <em>decoding</em> is the rule that turns those distributions into words. <strong>Greedy</strong> takes the argmax (fast, deterministic, loops). <strong>Beam search</strong> keeps the top-B sequences by cumulative log-probability and returns the best (excellent for translation, generic for open text, still repeats). For open-ended and chat generation we <strong>sample</strong>: <strong>temperature</strong> reshapes the distribution, <strong>top-k</strong> keeps a fixed cutoff, and <strong>top-p / nucleus</strong> keeps an adaptive one — the modern default being temperature + top-p, often with a repetition penalty. The whole game is the <strong>determinism ↔ diversity</strong> tradeoff: same model, wildly different behaviour, decided entirely by how you decode. <strong>👉 Tomorrow — Day 34: Structured Output &amp; Constrained Decoding — how to force the model to emit valid JSON by masking every token that would break the schema.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+/* DECODE-ENGINE-START */
+// ============ Day 33 · decoding engine (real code, no DOM) ============
+// A tiny scripted "language model": each context (its last token) maps to
+// unnormalized weights over the next token. dist() turns those into a proper
+// probability distribution (optionally reshaped by temperature). On top of
+// that ONE distribution we run five decoding strategies exactly as a real
+// sampler would: greedy (argmax), beam search (top-B by cumulative log-prob),
+// and temperature / top-k / top-p filtering before a random draw. This is the
+// exact math the Node check verifies.
+
+const PROMPT = ["the", "movie", "was"];   // fixed context shown to the user
+const EOS = ".";                          // end-of-sequence token
+
+// context (previous token) -> unnormalized next-token weights.
+const MODEL = {
+  "was":    { very:32, really:30, good:16, quite:12, pretty:10 },
+  "very":   { very:30, good:28, long:20, dull:12, boring:10 },
+  "really": { good:48, funny:22, moving:18, dull:8, really:4 },
+  "quite":  { good:40, funny:30, dull:18, long:12 },
+  "pretty": { good:42, funny:28, dull:18, bad:12 },
+  "good":   { ".":46, and:24, but:18, ",":12 },
+  "funny":  { ".":40, and:30, too:18, but:12 },
+  "moving": { ".":44, and:30, but:16, too:10 },
+  "long":   { and:34, ".":30, but:20, dull:16 },
+  "dull":   { ".":40, and:34, but:16, too:10 },
+  "boring": { ".":42, and:30, but:18, too:10 },
+  "bad":    { ".":44, and:30, but:16, too:10 },
+  "and":    { the:30, i:26, funny:24, very:20 },
+  "but":    { the:30, i:28, not:24, very:18 },
+  "too":    { ".":52, and:26, but:22 },
+  "not":    { very:40, bad:30, good:18, that:12 },
+  "that":   { good:40, funny:34, bad:26 },
+  "i":      { loved:40, liked:30, hated:18, enjoyed:12 },
+  "loved":  { it:60, ".":40 },
+  "liked":  { it:58, ".":42 },
+  "hated":  { it:58, ".":42 },
+  "enjoyed":{ it:60, ".":40 },
+  "it":     { ".":70, too:16, and:14 },
+  "the":    { acting:40, plot:34, ending:26 },
+  "acting": { was:50, ".":26, and:24 },
+  "plot":   { was:48, ".":28, and:24 },
+  "ending": { was:50, ".":26, and:24 },
+  ",":      { and:40, but:34, very:26 }
+};
+
+function lastTok(seq){ return seq.length ? seq[seq.length - 1] : PROMPT[PROMPT.length - 1]; }
+
+// unnormalized weights for the next token, given the sequence so far.
+function rawWeights(seq){
+  const ctx = lastTok(seq);
+  return MODEL[ctx] || { [EOS]: 1 };   // unknown context -> just end
+}
+
+// A proper probability distribution over the admitted tokens, AFTER an optional
+// temperature. We treat log(weight) as the logit, divide by T, softmax back.
+// T=1 is the model's own probs; T<1 sharpens; T>1 flattens toward uniform.
+function dist(seq, T){
+  if (T === undefined) T = 1;
+  const w = rawWeights(seq);
+  const toks = Object.keys(w);
+  const logits = toks.map(t => Math.log(w[t]) / T);
+  const m = Math.max.apply(null, logits);
+  const exps = logits.map(l => Math.exp(l - m));
+  const Z = exps.reduce((a, b) => a + b, 0);
+  const d = {};
+  toks.forEach((t, i) => { d[t] = exps[i] / Z; });
+  return d;   // { token: prob }, sums to 1
+}
+
+// Shannon entropy of a distribution, in bits. Rises as the distribution flattens.
+function entropy(d){
+  let h = 0;
+  for (const t in d){ const p = d[t]; if (p > 0) h -= p * Math.log2(p); }
+  return h;
+}
+
+// GREEDY: take the single most-likely token every step. Deterministic.
+function greedy(maxLen){
+  maxLen = maxLen || 8;
+  const seq = [], trace = [];
+  for (let i = 0; i < maxLen; i++){
+    const d = dist(seq, 1);
+    let best = null, bp = -1;
+    for (const t in d){ if (d[t] > bp){ bp = d[t]; best = t; } }
+    trace.push({ dist: d, picked: best, p: bp });
+    seq.push(best);
+    if (best === EOS) break;
+  }
+  return { tokens: seq, trace };
+}
+
+// BEAM SEARCH: keep the top-B partial sequences ranked by cumulative log-prob.
+// Each step: expand every live beam over the vocab, add log-probs, prune to B.
+// Finished beams (ending in EOS) are carried but not expanded. Return best.
+function beam(B, maxLen){
+  B = B || 3; maxLen = maxLen || 8;
+  let beams = [{ tokens: [], logprob: 0, done: false }];
+  const history = [];
+  for (let step = 0; step < maxLen; step++){
+    const cand = [];
+    for (const b of beams){
+      if (b.done){ cand.push(b); continue; }
+      const d = dist(b.tokens, 1);
+      for (const t in d){
+        cand.push({
+          tokens: b.tokens.concat(t),
+          logprob: b.logprob + Math.log(d[t]),
+          done: t === EOS
+        });
+      }
+    }
+    cand.sort((a, b) => b.logprob - a.logprob);   // rank by cumulative log-prob
+    beams = cand.slice(0, B);                      // prune to the top-B
+    history.push(beams.map(b => ({ tokens: b.tokens.slice(), logprob: b.logprob, done: b.done })));
+    if (beams.every(b => b.done)) break;
+  }
+  let best = beams[0];
+  for (const b of beams) if (b.logprob > best.logprob) best = b;   // best cumulative log-prob wins
+  return { tokens: best.tokens, logprob: best.logprob, beams: beams, history: history };
+}
+
+// TOP-K: keep only the k most-likely tokens, renormalize.
+function topK(d, k){
+  const sorted = Object.entries(d).sort((a, b) => b[1] - a[1]).slice(0, k);
+  const Z = sorted.reduce((s, e) => s + e[1], 0);
+  const out = {};
+  sorted.forEach(e => { out[e[0]] = e[1] / Z; });
+  return out;
+}
+
+// TOP-P / NUCLEUS: keep the SMALLEST set whose probabilities sum to >= p, renormalize.
+function topP(d, p){
+  const sorted = Object.entries(d).sort((a, b) => b[1] - a[1]);
+  const kept = [];
+  let cum = 0;
+  for (const e of sorted){
+    kept.push(e); cum += e[1];
+    if (cum >= p) break;   // stop as soon as the running sum reaches p
+  }
+  const Z = kept.reduce((s, e) => s + e[1], 0);
+  const out = {};
+  kept.forEach(e => { out[e[0]] = e[1] / Z; });
+  return out;
+}
+
+// Draw one token from a distribution using a random number in [0,1).
+function sampleFrom(d, rng){
+  const r = (rng || Math.random)();
+  let cum = 0;
+  const entries = Object.entries(d);
+  for (const e of entries){ cum += e[1]; if (r <= cum) return e[0]; }
+  return entries[entries.length - 1][0];
+}
+
+// Small seedable PRNG (only used for reproducible checks; the UI uses Math.random).
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+/* DECODE-ENGINE-END */
+
+// ===================== LOOK · UI wiring =====================
+const STRAT_INFO = {
+  greedy:      { name:"Greedy",          tag:"Deterministic · takes the single most-likely token every step.", diversity:"None — same every run", risk:"Repetition loops, dull, local-optimal" },
+  beam:        { name:"Beam search",     tag:"Deterministic · keeps the top-B whole sequences by cumulative log-prob, returns the best.", diversity:"None — same every run", risk:"Safe / generic, biased to short & bland" },
+  temperature: { name:"Temperature",     tag:"Sampling · divides the logits by T, then draws at random.", diversity:"Rises with T", risk:"Low T → dull · high T → incoherent" },
+  topk:        { name:"Top-k",           tag:"Sampling · keeps only the k most-likely tokens, then draws.", diversity:"Bounded by k", risk:"Fixed k ignores how peaky the step is" },
+  topp:        { name:"Top-p (nucleus)", tag:"Sampling · keeps the smallest set with prob ≥ p, then draws.", diversity:"Adapts to each step", risk:"p too high admits junk from the tail" }
+};
+
+let strat = "greedy";
+const params = { B:3, T:1.0, k:3, p:0.9 };
+let animTimer = null;
+
+function tokLabel(t){ return t === EOS ? "⟨end⟩" : t; }
+function stopAnim(){ if (animTimer){ clearInterval(animTimer); animTimer = null; } }
+function argmaxTok(d){ let best = null, bp = -1; for (const t in d){ if (d[t] > bp){ bp = d[t]; best = t; } } return best; }
+
+const stratBtns = document.querySelectorAll("#stratBtns button");
+stratBtns.forEach(b => b.onclick = () => {
+  strat = b.dataset.strat;
+  stratBtns.forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+  syncStrat();
+  run();
+});
+
+function syncStrat(){
+  document.getElementById("stratTag").textContent = STRAT_INFO[strat].tag;
+  document.getElementById("divVal").textContent = STRAT_INFO[strat].diversity;
+  document.getElementById("riskVal").textContent = STRAT_INFO[strat].risk;
+  const show = { greedy:"paramNone", beam:"paramB", temperature:"paramT", topk:"paramK", topp:"paramP" }[strat];
+  ["paramNone","paramB","paramT","paramK","paramP"].forEach(id =>
+    document.getElementById(id).classList.toggle("on", id === show));
+  const beamMode = strat === "beam";
+  document.getElementById("rightTitle").textContent = beamMode ? "The live beams (top-B by cumulative log-prob)" : "What the strategy sees this step";
+  document.getElementById("rightHelp").innerHTML = beamMode
+    ? "Each row is a surviving sequence · ✓done = ended · ★ best = returned. Lower rows get pruned."
+    : "⭐ = the token chosen · faded / ✕ = trimmed away by the filter.";
+  document.getElementById("entRow").style.display = beamMode ? "none" : "flex";
+}
+
+function bindSlider(inId, valId, key, fmt){
+  const el = document.getElementById(inId);
+  el.addEventListener("input", () => {
+    params[key] = parseFloat(el.value);
+    document.getElementById(valId).textContent = fmt(params[key]);
+    run();
+  });
+}
+bindSlider("inB", "valB", "B", v => v.toFixed(0));
+bindSlider("inT", "valT", "T", v => v.toFixed(1));
+bindSlider("inK", "valK", "k", v => v.toFixed(0));
+bindSlider("inP", "valP", "p", v => v.toFixed(2));
+document.getElementById("genBtn").onclick = run;
+
+function addChip(t){
+  const gen = document.getElementById("genTokens");
+  const s = document.createElement("span");
+  s.className = "chip mono text-xs px-2 py-1 rounded bg-indigo-600 text-white";
+  s.textContent = tokLabel(t);
+  gen.appendChild(s);
+}
+
+// build a per-step trace for the stepwise (non-beam) strategies.
+function decodeStepwise(){
+  const seq = [], steps = [];
+  for (let i = 0; i < 8; i++){
+    const T = strat === "temperature" ? params.T : 1;
+    const full = dist(seq, T);
+    let admitted, picked;
+    if (strat === "greedy"){
+      picked = argmaxTok(full); admitted = new Set([picked]);
+    } else if (strat === "temperature"){
+      admitted = new Set(Object.keys(full)); picked = sampleFrom(full, Math.random);
+    } else if (strat === "topk"){
+      const f = topK(full, params.k); admitted = new Set(Object.keys(f)); picked = sampleFrom(f, Math.random);
+    } else {
+      const f = topP(full, params.p); admitted = new Set(Object.keys(f)); picked = sampleFrom(f, Math.random);
+    }
+    steps.push({ full: full, admitted: admitted, picked: picked, ent: entropy(full) });
+    seq.push(picked);
+    if (picked === EOS) break;
+  }
+  return { kind:"stepwise", steps: steps, output: seq };
+}
+
+function renderStepDist(step){
+  const box = document.getElementById("stepDist");
+  const entries = Object.entries(step.full).sort((a, b) => b[1] - a[1]);
+  const max = Math.max.apply(null, entries.map(e => e[1]));
+  box.innerHTML = entries.map(e => {
+    const t = e[0], p = e[1];
+    const adm = step.admitted.has(t);
+    const pick = t === step.picked;
+    const w = Math.max(3, p / max * 100);
+    const barc = pick ? "bg-indigo-600" : adm ? "bg-indigo-300" : "bg-slate-200";
+    const lblc = adm ? "text-slate-700" : "text-slate-300 line-through";
+    return `<div class="flex items-center gap-2 mb-1.5">
+      <span class="mono text-xs w-16 text-right ${lblc}">${tokLabel(t)}</span>
+      <div class="flex-1 bg-slate-100 rounded h-4 overflow-hidden"><div class="${barc} h-4 rounded" style="width:${w}%"></div></div>
+      <span class="mono text-[10px] w-9 text-right ${adm ? 'text-slate-500' : 'text-slate-300'}">${(p * 100).toFixed(0)}%</span>
+      <span class="w-4 text-xs text-center">${pick ? '⭐' : adm ? '' : '✕'}</span>
+    </div>`;
+  }).join("");
+  document.getElementById("stepEnt").textContent = step.ent.toFixed(2) + " bits";
+}
+
+function renderBeams(beams, winner){
+  const box = document.getElementById("stepDist");
+  box.innerHTML = beams.map(b => {
+    const win = winner && JSON.stringify(b.tokens) === JSON.stringify(winner);
+    const cls = win ? "border-indigo-500 bg-indigo-50" : b.done ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white";
+    return `<div class="border ${cls} rounded-lg px-3 py-2 mb-1.5 flex items-center justify-between gap-2">
+      <span class="mono text-[11px]"><span class="text-slate-400">${PROMPT.join(" ")}</span> <span class="text-slate-800 font-semibold">${b.tokens.map(tokLabel).join(" ")}</span>${b.done ? ' <span class="text-emerald-600 text-[10px] font-bold">✓done</span>' : ''}${win ? ' <span class="text-indigo-600 text-[10px] font-bold">★ best</span>' : ''}</span>
+      <span class="mono text-[11px] text-slate-500 whitespace-nowrap">logΣ ${b.logprob.toFixed(2)}</span>
+    </div>`;
+  }).join("");
+}
+
+function renderSamples(){
+  const box = document.getElementById("samplesBox");
+  if (strat === "greedy" || strat === "beam"){
+    box.innerHTML = `<div class="text-xs text-slate-500">🔒 <strong>Deterministic.</strong> ${STRAT_INFO[strat].name} returns the <em>same</em> output every single run — no randomness involved. Regenerate a thousand times, get one answer.</div>`;
+    return;
+  }
+  let rows = "";
+  for (let s = 0; s < 5; s++){
+    const seq = [];
+    for (let i = 0; i < 8; i++){
+      const T = strat === "temperature" ? params.T : 1;
+      let d = dist(seq, T);
+      if (strat === "topk") d = topK(d, params.k);
+      if (strat === "topp") d = topP(d, params.p);
+      const t = sampleFrom(d, Math.random);
+      seq.push(t); if (t === EOS) break;
+    }
+    rows += `<div class="mono text-[11px] text-slate-600 py-0.5">▶ <span class="text-slate-400">the movie was</span> <span class="text-indigo-700 font-semibold">${seq.map(tokLabel).join(" ")}</span></div>`;
+  }
+  box.innerHTML = `<div class="text-[11px] uppercase font-bold text-indigo-600 mb-1">🎲 Five independent runs — notice they differ</div>${rows}`;
+}
+
+function resetGenRow(){ document.getElementById("genTokens").innerHTML = ""; }
+
+function run(){
+  stopAnim();
+  resetGenRow();
+  renderSamples();
+  if (strat === "beam"){
+    const r = beam(params.B, 7);
+    document.getElementById("behaviour").innerHTML =
+      `<strong>Beam B=${params.B}.</strong> Keeps the ${params.B} best partial sequences by cumulative log-prob, prunes the rest, and returns the single highest-scoring one: <span class="mono font-semibold">"${r.tokens.map(tokLabel).join(" ")}"</span> (logΣ ${r.logprob.toFixed(2)}). Coherent and complete — but notice how <em>safe and generic</em> it is.`;
+    let i = 0;
+    const tick = () => {
+      if (i >= r.history.length){
+        stopAnim();
+        renderBeams(r.history[r.history.length - 1], r.tokens);
+        resetGenRow(); r.tokens.forEach(addChip);
+        document.getElementById("stepLabel").textContent = "done · best beam returned";
+        return;
+      }
+      renderBeams(r.history[i], null);
+      document.getElementById("stepLabel").textContent = `beam step ${i + 1}`;
+      i++;
+    };
+    tick(); animTimer = setInterval(tick, 850);
+    return;
+  }
+
+  const tr = decodeStepwise();
+  const detNote = strat === "greedy"
+    ? `<strong>Greedy.</strong> Argmax every step → <span class="mono font-semibold">"${tr.output.map(tokLabel).join(" ")}"</span>. Watch it fall into a <em>repetition loop</em> — the locally-best token is not a good sequence.`
+    : `<strong>${STRAT_INFO[strat].name}.</strong> Sampled → <span class="mono font-semibold">"${tr.output.map(tokLabel).join(" ")}"</span>. Hit Generate again — you'll get a different sentence. That's the diversity you want in open-ended text.`;
+  document.getElementById("behaviour").innerHTML = detNote;
+  let i = 0;
+  const tick = () => {
+    if (i >= tr.steps.length){ stopAnim(); document.getElementById("stepLabel").textContent = `done · ${tr.steps.length} tokens`; return; }
+    renderStepDist(tr.steps[i]);
+    document.getElementById("stepLabel").textContent = `step ${i + 1} of ${tr.steps.length}`;
+    addChip(tr.steps[i].picked);
+    i++;
+  };
+  tick(); animTimer = setInterval(tick, 750);
+}
+
+syncStrat();
+run();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. The decode problem — a distribution every step", why:"A language model never outputs a sentence. At each position it outputs a full <strong>probability distribution over the entire vocabulary</strong> — <span class='mono'>P(next token | everything so far)</span>. To actually produce text you must repeatedly turn that distribution into one concrete token, append it, and ask again. <em>Decoding</em> is the name for that selection rule, and the rule you choose changes the output more than most people expect.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">context: "the movie was ___"<br><br>P(very)&nbsp;&nbsp;= 0.32<br>P(really) = 0.30<br>P(good)&nbsp;&nbsp;= 0.16<br>&hellip; (sums to 1 over the vocab)<br><br>which one do I emit? &rarr; that's decoding</div>`, code:`# every step the model hands you a distribution, not a word
+probs = softmax(model(context).logits[-1])   # {"very":0.32, "really":0.30, ...}
+# decoding = the rule that turns this into ONE chosen token, repeatedly` },
+ { title:"2. Greedy decoding — and why it loops", why:"The simplest rule: always take the single most-likely token (<code>argmax</code>). It's fast and fully deterministic. But the locally-best token at each step is <em>not</em> the best whole sequence — greedy is short-sighted. In practice it frequently walks into a <strong>repetition loop</strong> (<span class='mono'>very very very…</span>) or dull, safe phrasing, because once it enters a high-probability rut it can never look sideways to escape.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">was &rarr; <b>very</b> (0.32) &rarr; <b>very</b> (0.30) &rarr; <b>very</b> &hellip;<br><br>locally best &ne; globally best<br><br>&#9888; deterministic, but repeats / gets stuck</div>`, code:`def greedy(probs_fn):
+    while True:
+        nxt = argmax(probs_fn(ctx))   # the single most-likely token
+        emit(nxt)                     # no look-ahead, no backtracking
+# fast + deterministic; prone to repetition loops & local optima` },
+ { title:"3. Beam search — keep B sequences by cumulative log-prob", why:"Instead of committing to one token, beam search keeps the <strong>B best partial sequences</strong> ('beams'). Each step it expands every beam over the vocabulary, scores each candidate by its <strong>cumulative log-probability</strong> (you sum log-probs — adding in log space avoids underflow), and prunes back to the top B. It searches a wider slice of the tree than greedy and returns the highest-scoring complete sequence.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">keep B=2 by &Sigma; log P:<br><br>really good&nbsp;&nbsp;(logΣ &minus;1.94) &#9989;<br>very good&nbsp;&nbsp;&nbsp;(logΣ &minus;2.41) &#9989;<br>very long&nbsp;&nbsp;&nbsp;(logΣ &minus;2.75) &#10007; pruned<br><br>expand &rarr; score &rarr; prune, repeat</div>`, code:`beams = [([], 0.0)]                       # (tokens, cumulative logprob)
+for step in range(max_len):
+    cand = [(seq+[t], lp + log(P(t|seq)))   # expand every beam
+            for seq, lp in beams for t in vocab]
+    beams = top_B(cand, key=cumulative_logprob)   # prune to top-B
+return best(beams)                          # highest cumulative logprob` },
+ { title:"4. Beam is great for MT — and bland for open text", why:"Beam search shines where there's essentially <em>one</em> correct output: machine translation, summarization, speech-to-text. But for open-ended writing it produces <strong>generic, safe, oddly repetitive</strong> text. Two reasons: cumulative log-prob rewards <em>high-probability = unsurprising</em> sequences, and (unless length-normalized) it favors shorter outputs. The most-probable sentence is usually the most boring one — and beam can still repeat.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">translation ("le chat" &rarr; "the cat"):<br>one right answer &rarr; beam WINS &#9989;<br><br>story / chat:<br>"the movie was really good." &larr; safe &amp; generic<br>high-probability = low-surprise = bland</div>`, code:`# beam maximizes sequence probability:
+#   great when there IS a single best answer (MT, ASR, summarize)
+#   bad for creativity -> picks the most GENERIC continuation
+# also length-biased: add length normalization (score / len**alpha)` },
+ { title:"5. Why we SAMPLE for open-ended & chat", why:"For stories, brainstorming, and chat we don't want the single most-probable sequence — we want <strong>variety and surprise</strong>. So instead of maximizing, we <em>sample</em>: draw the next token at random <em>in proportion</em> to its probability. High-probability tokens are still most likely, but the model can occasionally take an interesting turn. This is why 'regenerate' gives you a fresh answer — and why greedy/beam never do.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">draw ~ P(token):<br><br>run 1: was really good.<br>run 2: was very funny and moving.<br>run 3: was quite dull but the acting &hellip;<br><br>diversity &rarr; needed for open-ended text</div>`, code:`nxt = random_choice(vocab, weights=probs)   # sample, don't argmax
+# high-prob tokens usually win, but not always -> variety
+# this is the source of "regenerate gives a different answer"` },
+ { title:"6. Temperature — sharpen or flatten first", why:"Before sampling, we can reshape the distribution. <strong>Temperature</strong> divides the logits by <code>T</code> and re-softmaxes. <code>T&lt;1</code> sharpens the peak (more confident, closer to greedy, lower entropy); <code>T&gt;1</code> flattens it (more uniform, higher entropy, more surprising). <code>T→0</code> collapses to greedy; <code>T→∞</code> is uniform noise. It's the single most-used 'creativity dial'.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">softmax(logits / T)<br><br>T=0.5 &rarr; &#9613;&#9601;&#9601; peaky&nbsp;&nbsp;(safe, focused)<br>T=1.0 &rarr; &#9611;&#9613;&#9601; the model's own probs<br>T=1.5 &rarr; &#9612;&#9612;&#9613; flat&nbsp;&nbsp;&nbsp;(wild, creative)<br><br>higher T &rArr; higher entropy</div>`, code:`probs = softmax(logits / T)     # T reshapes BEFORE sampling
+# T -> 0   : argmax (greedy)     lowest entropy
+# T = 1    : the model's own distribution
+# T -> inf : uniform             highest entropy` },
+ { title:"7. Top-k — sample from the k most likely", why:"Pure temperature sampling has a flaw: the long tail of thousands of tiny-probability tokens can, collectively, still get picked — producing an out-of-nowhere junk word. <strong>Top-k</strong> fixes this bluntly: keep only the <code>k</code> highest-probability tokens, zero the rest, renormalize, then sample. It caps the risk of tail garbage. Its weakness: <code>k</code> is fixed, so it's too wide when the model is confident and too narrow when the model is genuinely unsure.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">k = 3:<br><br>good 0.46 &#9989;&nbsp;&nbsp;and 0.24 &#9989;&nbsp;&nbsp;but 0.18 &#9989;<br>, 0.12 &#10007;&nbsp;&nbsp;(+ the whole tail) &#10007;<br><br>sample from the survivors only</div>`, code:`def top_k(probs, k):
+    keep = probs.topk(k)          # the k tallest bars
+    keep = keep / keep.sum()      # renormalize
+    return sample(keep)
+# blocks tail garbage, but k is FIXED regardless of the step's shape` },
+ { title:"8. Top-p / nucleus — an adaptive cutoff", why:"<strong>Top-p (nucleus) sampling</strong> fixes top-k's rigidity. Sort tokens by probability and keep the <em>smallest set whose probabilities sum to ≥ p</em> — the 'nucleus'. When the model is confident, that's 1–2 tokens; when it's unsure, it's many. The cutoff adapts to the shape of each step's distribution, which is why <code>top-p ≈ 0.9</code> is the workhorse default for chat and creative generation.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">p = 0.9, sort &amp; accumulate:<br><br>good 0.46 &rarr; 0.46<br>and&nbsp;&nbsp;0.24 &rarr; 0.70<br>but&nbsp;&nbsp;0.18 &rarr; 0.88<br>,&nbsp;&nbsp;&nbsp;&nbsp;0.12 &rarr; 1.00 &#10004; crossed 0.9 &rarr; STOP<br><br>smallest set with cumprob &ge; p</div>`, code:`def top_p(probs, p=0.9):
+    s = sort_desc(probs)
+    nucleus = smallest_prefix(s, cumsum >= p)  # adaptive size!
+    return sample(renormalize(nucleus))
+# confident step -> few tokens ; unsure step -> many` },
+ { title:"9. The modern default — temp + top-p (+ penalties)", why:"Real chat models combine these. Typical recipe: apply a <strong>repetition / presence penalty</strong> to logits of already-used tokens (kills loops), scale by <strong>temperature</strong> (~0.7–1.0), then trim with <strong>top-p</strong> (~0.9), often with a top-k safety cap, and sample. Temperature sets how bold, top-p removes the tail, penalties stop repetition. These are the knobs behind every 'temperature' / 'top_p' / 'frequency_penalty' API parameter you've seen.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">1. penalize repeats&nbsp;&nbsp;(logit /= rep)<br>2. temperature&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(logits / T)<br>3. top-p nucleus&nbsp;&nbsp;(trim the tail)<br>4. sample<br><br>the stack behind most chat APIs</div>`, code:`logits[used_tokens] /= rep_penalty     # 1) stop loops
+logits = logits / T                    # 2) temperature (~0.8)
+probs  = top_p(softmax(logits), 0.9)   # 3) nucleus (~0.9)
+nxt    = sample(probs)                  # 4) draw` },
+ { title:"10. Determinism vs creativity — when to use which", why:"It all reduces to one tradeoff. Need a <strong>single correct, reproducible answer</strong> — code, extraction, classification, translation? Use greedy / <code>temperature = 0</code> (or beam for MT). Need <strong>variety, ideas, natural conversation</strong>? Sample with temperature ≈ 0.7–1.0 and top-p ≈ 0.9. Same model, opposite behaviour — chosen entirely by how you decode. Set <code>temperature = 0</code> whenever you need the same output every time.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">DETERMINISTIC &nbsp;&harr;&nbsp; DIVERSE<br>greedy / T=0 / beam &nbsp;&nbsp; temp + top-p<br><br>facts, code, translate&nbsp;&nbsp;|&nbsp;&nbsp;chat, stories, ideas<br>reproducible&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;fresh every run</div>`, code:`# one dial, two worlds:
+if need_reproducible_or_correct:  decode = greedy      # T=0 / beam for MT
+else:                             decode = sample(T=0.8, top_p=0.9)
+# the model is identical -- only the decoding rule changes.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>

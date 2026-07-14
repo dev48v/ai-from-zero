@@ -39,6 +39,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 30 — Agentic Memory](https://dev48v.infy.uk/ai/days/day30-agentic-memory.html) — `day30-agentic-memory.html`
 - [AIFromZero · Day 31 — Prompt Caching](https://dev48v.infy.uk/ai/days/day31-prompt-caching.html) — `day31-prompt-caching.html`
 - [AIFromZero · Day 32 — Perplexity](https://dev48v.infy.uk/ai/days/day32-perplexity.html) — `day32-perplexity.html`
+- [AIFromZero · Day 33 — Beam Search vs Sampling](https://dev48v.infy.uk/ai/days/day33-beam-vs-sampling.html) — `day33-beam-vs-sampling.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
