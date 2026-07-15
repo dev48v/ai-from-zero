@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 34 — RLHF</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:8px; border-radius:6px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:50%; background:#4f46e5; cursor:pointer; box-shadow:0 1px 4px rgba(79,70,229,.5); }
+  input[type=range]::-moz-range-thumb{ width:22px; height:22px; border:none; border-radius:50%; background:#4f46e5; cursor:pointer; }
+  .kbtn.on { background:#4f46e5; color:#fff; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .chip { animation: chipIn .3s ease-out; }
+  @keyframes chipIn { from { opacity:0; transform:scale(.8); } to { opacity:1; transform:none; } }
+  .bar { transition: width .35s ease-out; }
+  .arrow { color:#c7d2fe; font-weight:700; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 34</div>
+      <h1 class="text-xl font-bold">👍 RLHF — teaching a model to <em>behave</em>: SFT → reward model → PPO with a KL leash</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-5">
+        <h2 class="text-2xl font-bold mb-1">Pretraining gives a model <em>knowledge</em>. RLHF gives it <em>manners</em>. It happens in three stages — and the last one is on a leash.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">A base LLM just predicts the next token from the internet — it doesn't know it's supposed to be helpful, honest, or harmless. <strong>RLHF (Reinforcement Learning from Human Feedback)</strong> aligns it in three moves: <strong>(1) SFT</strong> imitates human-written demonstrations; <strong>(2)</strong> humans <strong>rank pairs</strong> of answers and a <strong>reward model</strong> learns to score them; <strong>(3) PPO</strong> optimizes the model against that reward — while a <strong>KL penalty</strong> keeps it from drifting off the reference model and gaming the score. Step through each stage below. Every reward score, gradient step, and reward-vs-KL trade-off is <strong>real code running in your browser</strong>.</p>
+      </div>
+
+      <div class="flex items-center justify-center gap-2 mb-6" id="stageBtns">
+        <button data-stage="sft" class="kbtn on px-4 py-2 rounded-lg font-semibold text-sm bg-slate-100">1 · ✍️ SFT</button>
+        <span class="arrow text-xl">→</span>
+        <button data-stage="rm"  class="kbtn px-4 py-2 rounded-lg font-semibold text-sm bg-slate-100">2 · 🏆 Reward model</button>
+        <span class="arrow text-xl">→</span>
+        <button data-stage="ppo" class="kbtn px-4 py-2 rounded-lg font-semibold text-sm bg-slate-100">3 · 🎯 PPO</button>
+      </div>
+
+      <!-- ===================== STAGE 1 · SFT ===================== -->
+      <div id="panelSft">
+        <div class="grid lg:grid-cols-2 gap-5">
+          <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Stage 1 · Supervised fine-tuning</div>
+            <p class="text-sm text-slate-600 mb-3">Humans write high-quality <em>demonstrations</em> — prompt → ideal answer — and we fine-tune the base model to imitate them. This is plain supervised learning. It teaches the model the <strong>format</strong> and the habit of <strong>following instructions</strong>, and it produces the <strong>reference policy</strong> that Stage 3 will anchor to.</p>
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Pick an instruction</div>
+            <div class="flex flex-wrap gap-2" id="sftExamples"></div>
+            <div class="text-xs uppercase font-bold text-indigo-600 mt-4 mb-2">Which model answers?</div>
+            <div class="flex gap-2" id="sftToggle">
+              <button data-mode="base" class="kbtn on px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">🪨 Base model (pretrained only)</button>
+              <button data-mode="sft"  class="kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100">✨ After SFT</button>
+            </div>
+          </div>
+          <div class="space-y-5">
+            <div class="bg-white rounded-2xl border border-slate-200 p-5">
+              <div class="text-xs uppercase font-bold text-slate-400 mb-1">Prompt</div>
+              <div id="sftPrompt" class="mono text-sm text-slate-800 mb-4">—</div>
+              <div class="text-xs uppercase font-bold text-indigo-600 mb-1" id="sftOutLabel">Output</div>
+              <div id="sftOutput" class="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-xl p-3 min-h-[96px]">—</div>
+            </div>
+            <div id="sftNote" class="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-xs text-indigo-800">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== STAGE 2 · REWARD MODEL ===================== -->
+      <div id="panelRm" class="hidden">
+        <div class="grid lg:grid-cols-2 gap-5">
+          <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-xs uppercase font-bold text-indigo-600">Stage 2 · Rank the pair — you are the human labeller</div>
+              <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-700" id="rmProgress">pair 1</span>
+            </div>
+            <div class="text-xs uppercase font-bold text-slate-400 mt-1 mb-1">Prompt</div>
+            <div id="rmPrompt" class="mono text-sm text-slate-800 mb-3">—</div>
+
+            <div class="rounded-xl border-2 border-slate-200 p-3 mb-2">
+              <div class="flex items-center justify-between mb-1"><span class="text-xs font-bold text-slate-500">Response A</span><span id="rmAScore" class="mono text-xs text-indigo-600">r = —</span></div>
+              <div id="rmAText" class="text-sm text-slate-700 mb-2">—</div>
+              <div class="bg-slate-100 rounded h-3 overflow-hidden mb-2"><div id="rmABar" class="bar bg-indigo-500 h-3 rounded" style="width:0%"></div></div>
+              <button id="pickA" class="w-full bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-semibold text-xs">👍 A is better</button>
+            </div>
+            <div class="rounded-xl border-2 border-slate-200 p-3 mb-2">
+              <div class="flex items-center justify-between mb-1"><span class="text-xs font-bold text-slate-500">Response B</span><span id="rmBScore" class="mono text-xs text-indigo-600">r = —</span></div>
+              <div id="rmBText" class="text-sm text-slate-700 mb-2">—</div>
+              <div class="bg-slate-100 rounded h-3 overflow-hidden mb-2"><div id="rmBBar" class="bar bg-indigo-500 h-3 rounded" style="width:0%"></div></div>
+              <button id="pickB" class="w-full bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-semibold text-xs">👍 B is better</button>
+            </div>
+            <div id="rmPred" class="text-[11px] text-slate-500 mb-2">—</div>
+            <button id="rmReset" class="text-xs text-slate-400 hover:text-indigo-600 underline">↺ reset the reward model</button>
+          </div>
+
+          <div class="space-y-5">
+            <div class="bg-white rounded-2xl border border-slate-200 p-5">
+              <div class="text-xs uppercase font-bold text-indigo-600 mb-2">What the reward model learned <span class="text-slate-400 normal-case font-normal">— weights over quality signals</span></div>
+              <div id="rmWeights" class="space-y-2"></div>
+              <p class="text-[11px] text-slate-400 mt-3">Reward <span class="mono">r(y) = w · features(y)</span>. Each ranking you give nudges <span class="mono">w</span> so the response you picked scores higher (Bradley–Terry gradient step). The model is inferring <em>what you value</em> from your choices — not from a written rulebook.</p>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-5">
+              <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Training loss per ranking</div>
+              <div id="rmLoss" class="flex items-end gap-1 h-16 mb-2"></div>
+              <div class="grid grid-cols-2 gap-3 text-center">
+                <div class="bg-slate-50 border border-slate-200 rounded-lg p-2"><div class="text-[10px] uppercase font-bold text-slate-400">Pairs ranked</div><div id="rmCount" class="text-sm font-bold text-slate-700 mt-1 stat">0</div></div>
+                <div class="bg-slate-50 border border-slate-200 rounded-lg p-2"><div class="text-[10px] uppercase font-bold text-slate-400">RM agreed with you</div><div id="rmAgree" class="text-sm font-bold text-slate-700 mt-1 stat">—</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== STAGE 3 · PPO ===================== -->
+      <div id="panelPpo" class="hidden">
+        <div class="grid lg:grid-cols-2 gap-5">
+          <div class="bg-white rounded-2xl border border-indigo-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Stage 3 · Optimize the reward — but stay on the leash</div>
+            <p class="text-sm text-slate-600 mb-4">PPO treats the model as a <strong>policy</strong> and pushes it to produce answers the <strong>reward model</strong> scores highly. Left unchecked it will happily drift far from the reference model and start <em>gaming</em> the reward. The <strong>KL penalty</strong> is the leash: it charges the policy for every step away from the frozen reference (the SFT model). Set the leash length, then run PPO and watch the trade-off.</p>
+            <label class="text-xs font-semibold text-slate-600">KL coefficient β = <span id="valBeta" class="mono text-indigo-600">0.10</span></label>
+            <input id="inBeta" type="range" min="0" max="0.5" step="0.02" value="0.1" class="w-full mt-1" />
+            <div class="flex justify-between text-[10px] text-slate-400 mb-3"><span>← long leash (free to drift)</span><span>short leash (glued to reference) →</span></div>
+            <div class="flex gap-2">
+              <button id="ppoRun" class="flex-1 bg-indigo-600 text-white px-4 py-2.5 rounded-lg font-semibold text-sm">▶ Run PPO training</button>
+              <button id="ppoReset" class="bg-slate-200 px-4 py-2.5 rounded-lg font-semibold text-sm">↺</button>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-3" id="ppoStep">Reference model (SFT) sits at KL = 0. Press run.</p>
+          </div>
+
+          <div class="space-y-4">
+            <div class="bg-white rounded-2xl border border-slate-200 p-5">
+              <div class="text-xs uppercase font-bold text-indigo-600 mb-3">The trade-off, live</div>
+              <div class="space-y-3">
+                <div>
+                  <div class="flex justify-between text-xs mb-1"><span class="font-semibold text-slate-600">🎯 RM proxy reward <span class="text-slate-400 font-normal">(what PPO maximizes)</span></span><span id="proxyVal" class="mono text-indigo-600">0.0</span></div>
+                  <div class="bg-slate-100 rounded h-4 overflow-hidden"><div id="proxyBar" class="bar bg-indigo-500 h-4 rounded" style="width:0%"></div></div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs mb-1"><span class="font-semibold text-slate-600">📈 KL from reference <span class="text-slate-400 font-normal">(how far it drifted)</span></span><span id="klVal" class="mono text-amber-600">0.0</span></div>
+                  <div class="bg-slate-100 rounded h-4 overflow-hidden"><div id="klBar" class="bar bg-amber-500 h-4 rounded" style="width:0%"></div></div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs mb-1"><span class="font-semibold text-slate-600">✅ True quality <span class="text-slate-400 font-normal">(the thing you actually want)</span></span><span id="goldVal" class="mono text-emerald-600">0.0</span></div>
+                  <div class="bg-slate-100 rounded h-4 overflow-hidden"><div id="goldBar" class="bar bg-emerald-500 h-4 rounded" style="width:0%"></div></div>
+                </div>
+              </div>
+              <div class="mt-4 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-3">
+                <span>PPO objective = reward − β·KL</span>
+                <span class="mono font-bold text-slate-700" id="netVal">—</span>
+              </div>
+            </div>
+            <div id="ppoVerdict" class="bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600">Press run to train the policy against the reward model.</div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto">Same base model, three stages. SFT teaches it to <em>answer</em>, the reward model captures <em>what humans prefer</em>, and PPO chases that reward on a KL leash so it improves without going off the rails. This pipeline is what turned raw GPT-style pretraining into the helpful assistants you actually talk to.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">From a base model to a helpful assistant</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build the RLHF pipeline, stage by stage</h2>
+    <p class="text-slate-500 mb-8">RLHF is three training jobs chained together: a <strong>supervised fine-tune</strong>, a <strong>reward model</strong> trained on human preference pairs, and a <strong>PPO loop</strong> that optimizes the policy against that reward with a <strong>KL penalty</strong> back to the reference. Here's the whole thing in annotated pseudo-code.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Stage 1 — SFT: imitate human demonstrations</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Start from a pretrained base model. Collect a dataset of prompt → ideal-answer pairs written by humans, and fine-tune with ordinary next-token cross-entropy. The result follows instructions and is the <strong>reference policy</strong> everything else is measured against.</p>
+        <div class="relative"><pre>base   = load_pretrained("base-llm")          # knows language, not manners
+demos  = [(prompt, human_written_answer), ...]  # a few thousand demonstrations
+
+sft = finetune(base, demos, loss="cross_entropy")   # plain supervised learning
+# sft now follows instructions. FREEZE a copy as the reference:
+ref = freeze(copy(sft))                        # PPO's KL penalty anchors here</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Collect preference data — rank, don't write</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Writing perfect answers is expensive; <em>judging</em> two answers is cheap. For each prompt, sample a few completions from the SFT model and have humans pick the better one. Each label is a <code>(chosen, rejected)</code> pair — far more data per dollar, and it captures preferences you could never fully write down.</p>
+        <div class="relative"><pre>prefs = []
+for prompt in prompts:
+    a, b = sft.sample(prompt), sft.sample(prompt)   # two candidate answers
+    chosen, rejected = human_rank(prompt, a, b)     # label: which is better
+    prefs.append((prompt, chosen, rejected))
+# prefs = a dataset of comparisons, not gold answers</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Train the reward model (Bradley–Terry)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The reward model <code>r(x, y)</code> outputs a single scalar for a prompt/answer. Train it so the chosen answer scores higher than the rejected one. The Bradley–Terry loss says: the probability a human prefers the chosen answer is <code>σ(r_chosen − r_rejected)</code> — maximize it.</p>
+        <div class="relative"><pre>reward_model = add_scalar_head(copy(sft))   # LLM body + a 1-number output head
+
+def rm_loss(x, y_chosen, y_rejected):
+    r_c = reward_model(x, y_chosen)
+    r_r = reward_model(x, y_rejected)
+    return -log_sigmoid(r_c - r_r)          # push chosen above rejected
+
+train(reward_model, prefs, loss=rm_loss)    # now r(x,y) ~ human preference</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">The RLHF objective — reward minus a KL leash</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Now optimize the policy to maximize reward. But the reward model is only a <em>proxy</em> — push too hard and the policy finds gibberish that scores high but is useless (<strong>reward hacking</strong>). So subtract a <strong>KL-divergence</strong> penalty from the frozen reference: every token of drift costs reward. <code>β</code> sets the leash length.</p>
+        <div class="relative"><pre># per-token reward given to PPO:
+#   reward_model score, minus how far the policy strayed from the reference
+def rlhf_reward(x, y):
+    r  = reward_model(x, y)                       # want this HIGH
+    kl = log pi_theta(y|x) - log pi_ref(y|x)      # per-token KL to reference
+    return r - beta * kl                          # the leash: penalize drift
+# beta large  -> short leash, stays near ref (safe, smaller gains)
+# beta small  -> long leash,  higher proxy reward but risks drift / hacking</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Stage 3 — the PPO loop</h3></div>
+        <p class="text-sm text-slate-600 mb-3">PPO (Proximal Policy Optimization) is the RL algorithm that applies that reward. Each iteration: roll out answers from the current policy, score them with the reward-minus-KL signal, estimate advantages, and take a <em>clipped</em> gradient step so the policy never moves too far at once. Repeat until reward plateaus.</p>
+        <div class="relative"><pre>policy = copy(sft)                              # start the policy AT the reference
+for step in range(n_ppo_steps):
+    prompts = sample_batch()
+    ys   = policy.generate(prompts)             # 1) roll out answers
+    rew  = rlhf_reward(prompts, ys)             # 2) reward - beta*KL
+    adv  = advantages(rew, value_fn)            # 3) how much better than expected
+    # 4) clipped policy-gradient update (the "proximal" part = small, safe steps)
+    ratio = policy.logp(ys) / policy_old.logp(ys)
+    loss  = -min(ratio*adv, clip(ratio, 1-eps, 1+eps)*adv).mean()
+    policy.update(loss)
+return policy                                    # the aligned model</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Watch for over-optimization — proxy ≠ truth</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The single most important RLHF failure mode: as you optimize harder, <strong>proxy reward keeps rising while true quality peaks and then falls</strong>. The reward model was trained on limited data; off-distribution the policy exploits its blind spots. The KL leash and early stopping keep you in the region where the proxy still tracks reality.</p>
+        <div class="relative"><pre># proxy reward (RM) rises monotonically with training...
+# ...but GOLD (true human) quality rises, peaks, then DROPS -> over-optimization
+if kl_to_reference &gt; kl_budget:        # drifted too far off-distribution
+    stop_or_raise_beta()               # the RM is no longer trustworthy here
+# modern shortcut: DPO skips the separate RM + PPO loop, optimizing
+# the preference pairs directly against the reference (Day 35).</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 34 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw the three moves that turn a raw next-token predictor into a helpful assistant. <strong>SFT</strong> fine-tunes the base model on human demonstrations, giving it instruction-following and a <strong>reference policy</strong>. A <strong>reward model</strong> then learns from cheap human <strong>preference rankings</strong> (Bradley–Terry: push the chosen answer's score above the rejected one) to produce a scalar reward. Finally <strong>PPO</strong> optimizes the policy against that reward — but subtracts a <strong>KL penalty</strong> to the frozen reference so it can't drift off-distribution and <em>reward-hack</em> the proxy. The whole game is <strong>reward up vs KL up</strong>: pull too gently and you gain nothing, pull too hard and true quality collapses even as proxy reward climbs. The KL leash keeps you in the sweet spot. <strong>👉 Tomorrow — Day 35: DPO (Direct Preference Optimization) — skip the reward model and PPO entirely and train straight on preference pairs.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+/* RLHF-ENGINE-START */
+// ============ Day 34 · RLHF engine (real code, no DOM) ============
+// Three honest little simulations. Stage 2 trains a linear reward model with
+// the real Bradley-Terry gradient from the rankings you click. Stage 3 runs a
+// toy PPO trajectory: proxy reward saturates as the policy drifts (KL up),
+// true "gold" quality rises then falls (over-optimization), and the KL penalty
+// beta throttles how far the policy is allowed to wander from the reference.
+
+function sigmoid(z){ return 1 / (1 + Math.exp(-z)); }
+function dot(a, b){ let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
+
+// ----- Stage 2: reward-model preference learning -----
+// Each response is described by 3 quality features in [0,1]. The reward model
+// is a weight vector w; reward r(y) = w . features(y). A ranking (chosen vs
+// rejected) is one Bradley-Terry gradient step:
+//   p = sigmoid(r_chosen - r_rejected);  w += lr * (1 - p) * (x_chosen - x_rejected)
+const RM_FEATURES = ["helpful", "honest", "harmless"];
+const RM_LR = 0.45;
+
+function rmReward(w, feat){ return dot(w, feat); }
+
+// one labelled comparison -> updated weights + the loss BEFORE the update.
+function rmStep(w, xChosen, xRejected){
+  const rc = rmReward(w, xChosen), rr = rmReward(w, xRejected);
+  const p  = sigmoid(rc - rr);                 // RM's prob the chosen one wins
+  const loss = -Math.log(Math.max(p, 1e-9));   // Bradley-Terry loss
+  const nw = w.slice();
+  for (let i = 0; i < w.length; i++) nw[i] += RM_LR * (1 - p) * (xChosen[i] - xRejected[i]);
+  return { w: nw, loss: loss, p: p, rc: rc, rr: rr };
+}
+
+// ----- Stage 3: PPO trajectory as a function of the KL coefficient beta -----
+// KL grows toward an asymptote that SHRINKS as beta grows (a shorter leash).
+// Proxy reward saturates with KL (more drift = more proxy reward -> the pull to
+// drift). Gold quality is a bump: it rises then falls once the policy leaves the
+// region the reward model was trained on. This is the classic RLHF picture.
+const KL_PEAK = 2.5, R_MAX = 10, Q_MAX = 10;
+
+function ppoState(beta, t){
+  const klInf = 12 / (1 + beta * 22);          // asymptotic drift; big beta -> small
+  const kl    = klInf * (1 - Math.exp(-t / 6));
+  const proxy = R_MAX * (1 - Math.exp(-kl / 2));            // saturating, monotone up
+  const gold  = Q_MAX * (kl / KL_PEAK) * Math.exp(1 - kl / KL_PEAK); // bump, peaks at KL_PEAK
+  const net   = proxy - beta * kl;             // the PPO objective
+  return { kl: kl, proxy: proxy, gold: Math.max(0, gold), net: net };
+}
+/* RLHF-ENGINE-END */
+
+// ===================== LOOK · stage switching =====================
+let stage = "sft";
+const stageBtns = document.querySelectorAll("#stageBtns button");
+const stagePanels = { sft: "panelSft", rm: "panelRm", ppo: "panelPpo" };
+stageBtns.forEach(b => b.onclick = () => {
+  stage = b.dataset.stage;
+  stageBtns.forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+  Object.entries(stagePanels).forEach(([k, id]) =>
+    document.getElementById(id).classList.toggle("hidden", k !== stage));
+  stopPpo();
+});
+
+// ===================== STAGE 1 · SFT =====================
+const SFT_EXAMPLES = [
+  { prompt: "Write a haiku about the ocean.",
+    base: "Write a haiku about the ocean. Write a poem about the sea. Write a limerick about a sailing boat. 10 facts about the ocean: the ocean covers about 71% of the Earth's surface and…",
+    sft:  "Endless sheet of blue —\nwaves whisper to the shoreline,\nthe tide breathes softly." },
+  { prompt: "Explain gravity to a 5-year-old.",
+    base: "Explain gravity to a 5-year-old. Explain photosynthesis to a 10-year-old. Explain the following concepts in simple terms: (1) gravity (2) magnetism (3) friction. Answer key:",
+    sft:  "Gravity is like an invisible hug from the Earth. It gently pulls everything down toward the ground — that's why when you jump up, you always come back down!" },
+  { prompt: "Give me three tips to sleep better.",
+    base: "Give me three tips to sleep better. Give me five tips to eat healthier. 10 morning-routine tips you need. Subscribe to our newsletter for weekly wellness tips and a free ebook!",
+    sft:  "1. Keep a consistent bedtime, even on weekends.\n2. Dim screens and bright lights for an hour before bed.\n3. Keep your room cool, dark, and quiet." }
+];
+let sftIdx = 0, sftMode = "base";
+const sftExEl = document.getElementById("sftExamples");
+SFT_EXAMPLES.forEach((e, i) => {
+  const bn = document.createElement("button");
+  bn.className = "kbtn px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-100" + (i === 0 ? " on" : "");
+  bn.textContent = e.prompt.length > 34 ? e.prompt.slice(0, 32) + "…" : e.prompt;
+  bn.onclick = () => { sftIdx = i; sftExEl.querySelectorAll("button").forEach(x => x.classList.remove("on")); bn.classList.add("on"); renderSft(); };
+  sftExEl.appendChild(bn);
+});
+document.querySelectorAll("#sftToggle button").forEach(b => b.onclick = () => {
+  sftMode = b.dataset.mode;
+  document.querySelectorAll("#sftToggle button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on"); renderSft();
+});
+function renderSft(){
+  const e = SFT_EXAMPLES[sftIdx];
+  document.getElementById("sftPrompt").textContent = e.prompt;
+  const out = document.getElementById("sftOutput");
+  out.textContent = sftMode === "base" ? e.base : e.sft;
+  out.className = "text-sm rounded-xl p-3 min-h-[96px] whitespace-pre-line " +
+    (sftMode === "base" ? "text-slate-500 bg-slate-50 border border-slate-200 italic" : "text-slate-800 bg-indigo-50 border border-indigo-200");
+  document.getElementById("sftOutLabel").textContent = sftMode === "base" ? "🪨 Base model output" : "✨ SFT model output";
+  document.getElementById("sftNote").innerHTML = sftMode === "base"
+    ? "The <strong>base model</strong> only knows how to continue internet text, so it treats your instruction as a <em>document to keep writing</em> — it lists more instructions, drifts, and never actually answers."
+    : "After <strong>SFT</strong> the model has seen thousands of human demonstrations of <em>following an instruction</em>, so it now answers directly and in the right format. This obedient model becomes the <strong>reference policy</strong> for Stage 3.";
+}
+renderSft();
+
+// ===================== STAGE 2 · REWARD MODEL =====================
+const RM_PAIRS = [
+  { prompt: "How do I make my password stronger?",
+    A: { text: "Use a long passphrase of random words, turn on 2FA, and never reuse it across sites.", feat: [0.9, 0.9, 0.9] },
+    B: { text: "Just use 'password123' — it's nice and easy to remember.", feat: [0.2, 0.3, 0.2] } },
+  { prompt: "Is it safe to mix bleach and ammonia to clean?",
+    A: { text: "Sure, mix them together — it makes a really powerful cleaner!", feat: [0.3, 0.1, 0.05] },
+    B: { text: "No. Mixing them releases toxic chloramine gas. Never combine them — use one at a time with ventilation.", feat: [0.9, 0.95, 0.98] } },
+  { prompt: "Summarize the water cycle in one sentence.",
+    A: { text: "Water evaporates, condenses into clouds, falls as precipitation, then flows back to the sea.", feat: [0.9, 0.9, 0.8] },
+    B: { text: "The water cycle is a cycle in which water cycles around in a cyclical water-cycling cycle.", feat: [0.3, 0.5, 0.8] } },
+  { prompt: "I'm feeling really down today.",
+    A: { text: "That's not my problem — just figure it out yourself.", feat: [0.1, 0.6, 0.3] },
+    B: { text: "I'm sorry you're feeling low. Want to talk about what's going on, or maybe try a short walk or calling a friend?", feat: [0.9, 0.8, 0.95] } },
+  { prompt: "What year did the Eiffel Tower open?",
+    A: { text: "It opened in 1889, for the Paris World's Fair.", feat: [0.9, 0.95, 0.9] },
+    B: { text: "Sometime in the 1600s, I'm fairly sure.", feat: [0.4, 0.15, 0.85] } }
+];
+let rmW, rmIdx, rmLossHist, rmCount, rmAgree;
+function rmInit(){
+  rmW = [0.15, 0.15, 0.15]; rmIdx = 0; rmLossHist = []; rmCount = 0; rmAgree = 0;
+  renderRm();
+}
+function renderRm(){
+  const pair = RM_PAIRS[rmIdx];
+  document.getElementById("rmProgress").textContent = "pair " + (rmIdx + 1) + " / " + RM_PAIRS.length;
+  document.getElementById("rmPrompt").textContent = pair.prompt;
+  document.getElementById("rmAText").textContent = pair.A.text;
+  document.getElementById("rmBText").textContent = pair.B.text;
+  const rA = rmReward(rmW, pair.A.feat), rB = rmReward(rmW, pair.B.feat);
+  const mx = Math.max(rA, rB, 0.001);
+  document.getElementById("rmABar").style.width = Math.max(2, rA / mx * 100) + "%";
+  document.getElementById("rmBBar").style.width = Math.max(2, rB / mx * 100) + "%";
+  document.getElementById("rmAScore").textContent = "r = " + rA.toFixed(2);
+  document.getElementById("rmBScore").textContent = "r = " + rB.toFixed(2);
+  const better = rA >= rB ? "A" : "B";
+  const conf = (sigmoid(Math.abs(rA - rB)) * 100).toFixed(0);
+  document.getElementById("rmPred").innerHTML = rmCount === 0
+    ? "The reward model starts <em>ignorant</em> (equal weights). Rank a few pairs and watch it learn what you value."
+    : "🤖 RM currently predicts <strong>" + better + "</strong> is better (" + conf + "% confident). Your ranking will nudge it.";
+  // weights
+  document.getElementById("rmWeights").innerHTML = RM_FEATURES.map((f, i) => {
+    const wv = rmW[i], mxw = Math.max.apply(null, rmW.map(Math.abs), 0.001);
+    const w = Math.max(2, Math.abs(wv) / Math.max(mxw, 0.001) * 100);
+    return '<div class="flex items-center gap-2"><span class="text-xs w-16 text-right text-slate-600 font-semibold">' + f + '</span>' +
+      '<div class="flex-1 bg-slate-100 rounded h-3 overflow-hidden"><div class="bar ' + (wv < 0 ? 'bg-rose-400' : 'bg-indigo-500') + ' h-3 rounded" style="width:' + w + '%"></div></div>' +
+      '<span class="mono text-[11px] w-10 text-right text-slate-500">' + wv.toFixed(2) + '</span></div>';
+  }).join("");
+  // loss sparkline
+  const mxl = Math.max.apply(null, rmLossHist.concat([0.7]));
+  document.getElementById("rmLoss").innerHTML = rmLossHist.length
+    ? rmLossHist.map(l => '<div class="bg-indigo-400 rounded-t" style="width:14px;height:' + Math.max(3, l / mxl * 100) + '%" title="loss ' + l.toFixed(3) + '"></div>').join("")
+    : '<span class="text-xs text-slate-400 self-center">no rankings yet</span>';
+  document.getElementById("rmCount").textContent = rmCount;
+  document.getElementById("rmAgree").textContent = rmCount === 0 ? "—" : rmAgree + " / " + rmCount;
+}
+function rmRank(pickedKey){
+  const pair = RM_PAIRS[rmIdx];
+  const chosen = pickedKey === "A" ? pair.A : pair.B;
+  const rejected = pickedKey === "A" ? pair.B : pair.A;
+  // did the RM (pre-update) already agree with the human?
+  const rc = rmReward(rmW, chosen.feat), rr = rmReward(rmW, rejected.feat);
+  if (rc >= rr) rmAgree++;
+  const step = rmStep(rmW, chosen.feat, rejected.feat);
+  rmW = step.w; rmLossHist.push(step.loss); rmCount++;
+  rmIdx = (rmIdx + 1) % RM_PAIRS.length;
+  renderRm();
+}
+document.getElementById("pickA").onclick = () => rmRank("A");
+document.getElementById("pickB").onclick = () => rmRank("B");
+document.getElementById("rmReset").onclick = rmInit;
+rmInit();
+
+// ===================== STAGE 3 · PPO =====================
+let beta = 0.1, ppoTimer = null;
+const inBeta = document.getElementById("inBeta");
+inBeta.addEventListener("input", () => {
+  beta = parseFloat(inBeta.value);
+  document.getElementById("valBeta").textContent = beta.toFixed(2);
+});
+function stopPpo(){ if (ppoTimer){ clearInterval(ppoTimer); ppoTimer = null; } }
+function renderPpo(s){
+  document.getElementById("klBar").style.width    = Math.min(100, s.kl / 12 * 100) + "%";
+  document.getElementById("proxyBar").style.width = Math.min(100, s.proxy / R_MAX * 100) + "%";
+  document.getElementById("goldBar").style.width  = Math.min(100, s.gold / Q_MAX * 100) + "%";
+  document.getElementById("klVal").textContent    = s.kl.toFixed(2);
+  document.getElementById("proxyVal").textContent = s.proxy.toFixed(2);
+  document.getElementById("goldVal").textContent  = s.gold.toFixed(2);
+  document.getElementById("netVal").textContent   = s.net.toFixed(2);
+}
+function ppoVerdict(kl){
+  const box = document.getElementById("ppoVerdict");
+  if (kl < 1.2){
+    box.className = "bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800";
+    box.innerHTML = "😴 <strong>Under-trained.</strong> β is high — a very short leash. The policy barely left the reference, so it's safe but you left most of the reward on the table. Loosen the leash a little.";
+  } else if (kl <= 4){
+    box.className = "bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-xs text-emerald-800";
+    box.innerHTML = "✅ <strong>Well-aligned.</strong> Reward climbed <em>and</em> true quality is near its peak, because the policy stayed close to the reference. This is the KL sweet spot RLHF aims for.";
+  } else {
+    box.className = "bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-xs text-rose-800";
+    box.innerHTML = "💀 <strong>Reward-hacked / drifted.</strong> β is tiny — a long leash. Proxy reward looks fantastic, but the policy wandered off-distribution and <em>true quality has collapsed</em>: it's gaming the reward model. This is exactly why you need the KL leash.";
+  }
+}
+function runPpo(){
+  stopPpo();
+  const N = 26; let t = 0;
+  document.getElementById("ppoVerdict").className = "bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600";
+  document.getElementById("ppoVerdict").textContent = "Training…";
+  ppoTimer = setInterval(() => {
+    t++;
+    const s = ppoState(beta, t);
+    renderPpo(s);
+    document.getElementById("ppoStep").textContent = "PPO iteration " + t + " / " + N + "  ·  drift from reference (KL) = " + s.kl.toFixed(2);
+    if (t >= N){ stopPpo(); ppoVerdict(s.kl); }
+  }, 110);
+}
+document.getElementById("ppoRun").onclick = runPpo;
+document.getElementById("ppoReset").onclick = () => { stopPpo(); renderPpo(ppoState(beta, 0)); document.getElementById("ppoStep").textContent = "Reference model (SFT) sits at KL = 0. Press run."; document.getElementById("ppoVerdict").className = "bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600"; document.getElementById("ppoVerdict").textContent = "Press run to train the policy against the reward model."; };
+renderPpo(ppoState(beta, 0));
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. The problem — knowledge ≠ behaviour", why:"Pretraining makes a model an expert next-token predictor over the whole internet. It's brimming with knowledge, but it has <strong>no notion of being helpful, honest, or harmless</strong> — ask it a question and it may just continue the text, list more questions, or produce something toxic it saw online. <strong>RLHF</strong> is how we take that raw capability and align its <em>behaviour</em> with what humans actually want.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">prompt: "Give me three tips to sleep better."<br><br><b>base model</b> &rarr; "Give me five tips to eat healthy.<br>10 morning routine tips. Subscribe to&hellip;"<br><br>knows language &ne; knows how to <b>help</b></div>`, code:`# a pretrained base model just continues text:
+base("Give me three tips to sleep better.")
+# -> "...Give me five tips to eat healthy. 10 morning tips..."
+# fluent, knowledgeable -- but does NOT answer. RLHF fixes behaviour.` },
+ { title:"2. Stage 1 — SFT (imitate demonstrations)", why:"First, <strong>supervised fine-tuning</strong>. Humans write a few thousand ideal <em>prompt → answer</em> demonstrations, and we fine-tune the base model to copy them with ordinary next-token loss. Now it follows instructions and uses the right format. Crucially, we <strong>freeze a copy of the SFT model as the reference policy</strong> — Stage 3's KL penalty will measure drift against it.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">demos = [(prompt, human_answer), &hellip;]<br>sft = finetune(base, demos)   # imitate<br><br>&rArr; follows instructions &#9989;<br>ref = freeze(copy(sft))   # the anchor</div>`, code:`demos = [(prompt, human_written_answer), ...]   # ideal behaviour
+sft   = finetune(base, demos, loss="cross_entropy")
+ref   = freeze(copy(sft))   # reference policy for the KL leash later` },
+ { title:"3. Why SFT isn't enough", why:"SFT can only imitate the answers humans bother to <em>write</em>, and writing gold answers is slow and expensive. Worse, demonstrations can't express <strong>comparative</strong> judgements — 'this answer is a bit better than that one', 'this one is safer', 'this tone is nicer'. To capture the full richness of human preference cheaply, we stop writing answers and start <strong>ranking</strong> them.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">writing a perfect answer &rarr; slow, costly<br>judging two answers &rarr; fast, cheap<br><br>"A is better than B" carries signal<br>you could never fully <b>write down</b></div>`, code:`# SFT limitation: it only learns from answers humans WROTE.
+# It can't learn "A is slightly better than B" -> that needs comparisons.
+# So: sample candidates, and have humans RANK them instead.` },
+ { title:"4. Stage 2a — collect human preferences", why:"For each prompt we sample two (or more) completions from the SFT model and ask a human: <strong>which is better?</strong> Each answer is a labelled <code>(chosen, rejected)</code> pair. This is far cheaper per label than writing demonstrations, scales to millions of comparisons, and captures nuance — helpfulness, honesty, tone, safety — that's hard to articulate but easy to <em>recognise</em>.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">prompt &rarr; sample A, sample B<br><br>human picks: <b>A &#8811; B</b><br><br>store (prompt, chosen=A, rejected=B)<br>millions of these = the preference dataset</div>`, code:`for prompt in prompts:
+    a, b = sft.sample(prompt), sft.sample(prompt)
+    chosen, rejected = human_rank(prompt, a, b)   # cheap: just pick one
+    prefs.append((prompt, chosen, rejected))` },
+ { title:"5. Stage 2b — train the reward model", why:"A human can't sit in the training loop scoring millions of samples, so we <strong>distil</strong> their preferences into a model. The <strong>reward model</strong> <code>r(x, y)</code> outputs one scalar. We train it with the <strong>Bradley–Terry</strong> loss: the probability a human prefers the chosen answer is <code>σ(r_chosen − r_rejected)</code>, so we push the chosen answer's score above the rejected one's. Now we have an automatic stand-in for human judgement.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">r(x, y) &rarr; one scalar "how good"<br><br>loss = &minus;log &sigma;( r(chosen) &minus; r(rejected) )<br><br>&rArr; r(chosen) &gt; r(rejected)<br>an automatic judge trained on YOUR picks</div>`, code:`def rm_loss(x, y_chosen, y_rejected):
+    return -log_sigmoid(rm(x, y_chosen) - rm(x, y_rejected))
+train(rm, prefs, loss=rm_loss)   # Bradley-Terry
+# rm(x,y) now approximates a human preference score` },
+ { title:"6. Stage 3 — PPO optimizes the policy", why:"Now the reinforcement learning. Treat the LLM as a <strong>policy</strong> that, given a prompt, generates an answer (a sequence of actions = tokens). The <strong>reward</strong> is the reward-model score. <strong>PPO (Proximal Policy Optimization)</strong> nudges the policy to produce higher-reward answers, using a <em>clipped</em> update so it never lurches too far in one step. Repeat: roll out, score, update.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">policy generates y &rarr; rm scores it<br>&darr;<br>PPO nudges policy toward higher reward<br>(clipped = small, stable steps)<br><br>reward &#8593; over training iterations</div>`, code:`policy = copy(sft)                 # start AT the reference
+for step in range(N):
+    y   = policy.generate(prompt)  # roll out
+    rew = reward_model(prompt, y)  # score
+    policy = ppo_update(policy, y, rew)   # clipped policy gradient` },
+ { title:"7. The KL leash — don't drift off the reference", why:"Here's the catch: the reward model is only a <em>proxy</em> for humans, trained on limited data. If PPO optimizes it without limit, the policy escapes the region the RM understands and produces high-scoring nonsense — <strong>reward hacking</strong>. The fix is a <strong>KL-divergence penalty</strong>: subtract <code>β · KL(policy ‖ reference)</code> from the reward. Every step away from the frozen SFT model costs reward, so the policy improves <em>while staying in-distribution</em>.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">objective = reward &minus; &beta; &middot; KL(&pi; &#8214; ref)<br><br>&beta; big &rarr; short leash (stays near ref, safe)<br>&beta; small &rarr; long leash (more reward, more risk)<br><br>the leash keeps the RM trustworthy</div>`, code:`# reward handed to PPO, per token:
+r  = reward_model(x, y)
+kl = log pi_theta(y|x) - log pi_ref(y|x)   # drift from the SFT reference
+reward = r - beta * kl                      # penalize leaving the reference` },
+ { title:"8. Reward hacking & over-optimization", why:"The single most important RLHF picture: as training pushes the policy further (KL up), <strong>proxy reward keeps rising, but true human-judged quality rises, peaks, and then falls</strong>. The policy has learned to exploit the reward model's blind spots off-distribution. The KL budget plus early stopping keep you on the left side of that peak — where the proxy still tracks reality. (Try β ≈ 0 in the LOOK tab to see the collapse.)", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">as KL rises:<br>proxy reward:&nbsp;&nbsp;&#8599;&#8599;&#8599;&#8599; (always up)<br>true quality:&nbsp;&nbsp;&#8599;&#8599;&#8600;&#8600; (peaks, then drops)<br><br>optimize the proxy too hard &rarr; hack it<br>KL leash keeps you before the peak</div>`, code:`# Goodhart's law for RLHF:
+#   maximizing the PROXY (reward model) eventually HURTS the true goal.
+if kl_to_reference > kl_budget:   # off-distribution -> RM untrustworthy
+    stop_or_raise_beta()          # early-stop / shorten the leash` },
+ { title:"9. The full pipeline (and what's next)", why:"Put together: <strong>SFT</strong> teaches format and gives the reference; a <strong>reward model</strong> distils human preference rankings into a scalar; <strong>PPO</strong> optimizes the policy against it under a <strong>KL leash</strong>. This three-stage recipe is what turned base GPT/Claude-style models into the assistants people actually use. It works, but it's heavy — three models, an unstable RL loop. That's why <strong>DPO</strong> (tomorrow) rewrites the math to train straight on the preference pairs, no separate reward model or PPO required.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">SFT &rarr; reward model &rarr; PPO (+ KL)<br>imitate &rarr; score &rarr; optimize (on a leash)<br><br>= the assistant you actually talk to<br><br>Day 35: DPO folds it into ONE step</div>`, code:`# the whole recipe:
+sft    = finetune(base, human_demos)          # 1) imitate
+rm     = train(prefs, bradley_terry_loss)     # 2) score preferences
+policy = ppo(sft, reward=rm, ref=sft, beta)   # 3) optimize on a KL leash
+# -> aligned assistant.  (DPO collapses steps 2+3 into one; see Day 35.)` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
