@@ -41,6 +41,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 32 — Perplexity](https://dev48v.infy.uk/ai/days/day32-perplexity.html) — `day32-perplexity.html`
 - [AIFromZero · Day 33 — Beam Search vs Sampling](https://dev48v.infy.uk/ai/days/day33-beam-vs-sampling.html) — `day33-beam-vs-sampling.html`
 - [AIFromZero · Day 34 — RLHF](https://dev48v.infy.uk/ai/days/day34-rlhf.html) — `day34-rlhf.html`
+- [AIFromZero · Day 35 — DPO](https://dev48v.infy.uk/ai/days/day35-dpo.html) — `day35-dpo.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

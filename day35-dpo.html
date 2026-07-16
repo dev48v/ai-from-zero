@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 35 — DPO</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:8px; border-radius:6px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:50%; background:#4f46e5; cursor:pointer; box-shadow:0 1px 4px rgba(79,70,229,.5); }
+  input[type=range]::-moz-range-thumb{ width:22px; height:22px; border:none; border-radius:50%; background:#4f46e5; cursor:pointer; }
+  .kbtn.on { background:#4f46e5; color:#fff; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .chip { animation: chipIn .3s ease-out; }
+  @keyframes chipIn { from { opacity:0; transform:scale(.8); } to { opacity:1; transform:none; } }
+  .bar { transition: width .35s ease-out; }
+  .arrow { color:#c7d2fe; font-weight:700; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 35</div>
+      <h1 class="text-xl font-bold">🎯 DPO — align straight from preferences: <em>one</em> classification-style loss, no reward model, no RL loop</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-5">
+        <h2 class="text-2xl font-bold mb-1">Yesterday alignment took <em>three</em> models and an RL loop. DPO does the same job with <em>one</em> loss.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">RLHF (Day 34) aligns a model in three stages: fine-tune, train a separate <strong>reward model</strong> on preference pairs, then run <strong>PPO</strong> to chase that reward on a KL leash. <strong>DPO (Direct Preference Optimization)</strong> proved you don't need the middle two: there's a mathematical shortcut that lets you optimize the <em>same preference pairs</em> straight into the policy with a single classification-style loss. No reward model, no reinforcement learning — just push up the log-probability of the <strong>chosen</strong> answer over the <strong>rejected</strong> one, measured against a frozen <strong>reference</strong>. Train it below and watch the loss fall while the chosen−rejected margin grows. Every gradient step is <strong>real code running in your browser</strong>.</p>
+      </div>
+
+      <!-- ===================== CONTRAST STRIP: RLHF vs DPO ===================== -->
+      <div class="grid lg:grid-cols-[1fr_auto_1fr] gap-4 items-center mb-6">
+        <div class="bg-white rounded-2xl border border-slate-200 p-4">
+          <div class="text-xs uppercase font-bold text-slate-400 mb-2">Day 34 · RLHF pipeline</div>
+          <div class="flex items-center gap-2">
+            <div class="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 text-center"><div class="text-lg">✍️</div><div class="text-[11px] font-bold text-slate-600">SFT</div></div>
+            <span class="arrow">→</span>
+            <div class="flex-1 bg-amber-50 border border-amber-200 rounded-lg p-2 text-center"><div class="text-lg">🏆</div><div class="text-[11px] font-bold text-amber-700">Reward<br>model</div></div>
+            <span class="arrow">→</span>
+            <div class="flex-1 bg-amber-50 border border-amber-200 rounded-lg p-2 text-center"><div class="text-lg">🎯</div><div class="text-[11px] font-bold text-amber-700">PPO<br>+ KL leash</div></div>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-2"><strong>3 models</strong> in memory (policy, reward model, reference) + an unstable <strong>RL loop</strong> + a proxy reward that can be <em>hacked</em>.</p>
+        </div>
+
+        <div class="text-center px-2">
+          <div class="text-3xl">🔀</div>
+          <div class="text-[11px] font-bold text-indigo-600 leading-tight mt-1 max-w-[120px]">DPO folds<br>the reward model<br>+ PPO into<br><span class="text-indigo-800">one loss</span></div>
+        </div>
+
+        <div class="bg-white rounded-2xl border-2 border-indigo-300 p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Day 35 · DPO</div>
+          <div class="flex items-center gap-2">
+            <div class="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 text-center"><div class="text-lg">✍️</div><div class="text-[11px] font-bold text-slate-600">SFT<br>(= reference)</div></div>
+            <span class="arrow">→</span>
+            <div class="flex-[2] bg-indigo-50 border border-indigo-200 rounded-lg p-2 text-center"><div class="text-lg">🎯</div><div class="text-[11px] font-bold text-indigo-700">Preference pairs → ONE DPO loss</div></div>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-2"><strong>Same preference data.</strong> The reference model is <em>baked into the loss</em> — no separate reward model, no sampling, no RL. Just gradient descent, like ordinary classification.</p>
+        </div>
+      </div>
+
+      <!-- ===================== CONTROL BAR ===================== -->
+      <div class="bg-white rounded-2xl border border-indigo-200 p-5 mb-5">
+        <div class="grid md:grid-cols-[1fr_auto] gap-5 items-end">
+          <div>
+            <label class="text-xs font-semibold text-slate-600">β = <span id="valBeta" class="mono text-indigo-600">0.30</span> <span class="text-slate-400 font-normal">— how tightly the policy is tied to the frozen reference</span></label>
+            <input id="inBeta" type="range" min="0.05" max="1" step="0.05" value="0.3" class="w-full mt-1" />
+            <div class="flex justify-between text-[10px] text-slate-400"><span>← small β = free to stray far (big log-prob drift)</span><span>large β = glued to the reference →</span></div>
+          </div>
+          <div class="flex gap-2">
+            <button id="dpoRun"  class="bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-semibold text-sm">▶ Train DPO</button>
+            <button id="dpoStep" class="bg-slate-200 px-4 py-2.5 rounded-lg font-semibold text-sm">Step ×1</button>
+            <button id="dpoReset" class="bg-slate-200 px-4 py-2.5 rounded-lg font-semibold text-sm">↺</button>
+          </div>
+        </div>
+        <p class="text-[11px] text-slate-400 mt-3" id="dpoStatus">Policy starts <em>at</em> the reference (SFT), so every margin is 0 and the loss sits at −log σ(0) = ln 2 ≈ 0.69. Press train.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- LEFT: preference pairs, live -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-1">The preference pairs <span class="text-slate-400 normal-case font-normal">— your entire training set</span></div>
+          <p class="text-[11px] text-slate-400 mb-3">Each row is one labelled comparison. DPO raises the <span class="text-emerald-600 font-semibold">chosen</span> answer's implicit reward above the <span class="text-rose-600 font-semibold">rejected</span> one — the bars are the live implicit reward <span class="mono">r(y) = β·(log π<sub>θ</sub> − log π<sub>ref</sub>)</span>.</p>
+          <div id="pairList" class="space-y-3"></div>
+        </div>
+
+        <!-- RIGHT: charts + metrics -->
+        <div class="space-y-4">
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-xs uppercase font-bold text-indigo-600">DPO loss <span class="text-slate-400 normal-case font-normal">— should fall toward 0</span></div>
+              <span id="lossVal" class="mono text-sm font-bold text-indigo-600">0.693</span>
+            </div>
+            <div id="lossChart" class="flex items-end gap-[3px] h-20 mb-1"></div>
+            <div class="text-[10px] text-slate-400">−log σ( β · [ (log π<sub>θ</sub>−log π<sub>ref</sub>)<sub>chosen</sub> − (log π<sub>θ</sub>−log π<sub>ref</sub>)<sub>rejected</sub> ] ), averaged over pairs</div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-xs uppercase font-bold text-emerald-600">Chosen − rejected margin <span class="text-slate-400 normal-case font-normal">— should grow</span></div>
+              <span id="marginVal" class="mono text-sm font-bold text-emerald-600">0.00</span>
+            </div>
+            <div id="marginChart" class="flex items-end gap-[3px] h-20 mb-1"></div>
+            <div class="text-[10px] text-slate-400">avg implicit reward gap <span class="mono">r(chosen) − r(rejected)</span>. As it grows, the policy prefers chosen answers more strongly than the reference did.</div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-3 text-center">
+            <div class="bg-white border border-slate-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-slate-400">Steps</div><div id="stepCount" class="text-lg font-bold text-slate-700 mt-1 stat">0</div></div>
+            <div class="bg-white border border-slate-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-slate-400">β</div><div id="betaCount" class="text-lg font-bold text-indigo-600 mt-1 stat">0.30</div></div>
+            <div class="bg-white border border-slate-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-slate-400">Drift from ref</div><div id="driftCount" class="text-lg font-bold text-amber-600 mt-1 stat">0.00</div></div>
+          </div>
+
+          <div id="dpoVerdict" class="bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600">Press train to optimize the policy directly on the preference pairs — no reward model, no PPO.</div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto">Notice what never appears: a reward model, a sampling loop, an RL update. DPO's one insight is that the RLHF objective has a <em>closed-form</em> optimum, so the reward can be written in terms of the policy itself — and the preference loss becomes plain gradient descent. Same alignment, a fraction of the moving parts. This is why most open models today are aligned with DPO or its cousins rather than full PPO-RLHF.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">From RLHF's three stages to one loss</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build DPO — the whole thing is one loss function</h2>
+    <p class="text-slate-500 mb-8">DPO takes the <em>same</em> inputs as RLHF — an SFT model and a dataset of <code>(chosen, rejected)</code> preference pairs — and deletes the two hardest parts: the separate reward model and the PPO loop. What's left is a single classification-style loss you minimize with ordinary gradient descent. Here it is in annotated pseudo-code.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Same ingredients as RLHF — minus the reward model</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Start from the SFT model and the preference dataset. Two copies of the SFT weights: one is the trainable <strong>policy</strong>, the other is <strong>frozen</strong> as the reference. That frozen reference is the only "second model" DPO ever needs — and it never trains.</p>
+        <div class="relative"><pre>sft   = load("sft-model")                       # instruction-tuned base (Day 34, stage 1)
+prefs = [(prompt, chosen, rejected), ...]        # the SAME preference pairs RLHF collects
+
+policy = copy(sft)                               # the model we will train
+ref    = freeze(copy(sft))                       # frozen reference — baked into the loss
+# NOTE: no reward model is ever built. That's the whole point.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">The implicit reward — reward defined by the policy itself</h3></div>
+        <p class="text-sm text-slate-600 mb-3">DPO's key trick: instead of training a reward model, <em>define</em> the reward in terms of how much more likely the policy makes an answer than the reference does. This is exactly the reward the optimal RLHF policy would have implied — you get it for free, no training.</p>
+        <div class="relative"><pre># implicit reward of an answer y for prompt x:
+#   how much the policy raised its log-prob above the reference, scaled by beta
+def implicit_reward(x, y):
+    return beta * (policy.logprob(y|x) - ref.logprob(y|x))
+# high when the policy loves y MORE than the reference did.
+# beta scales it — and, as we'll see, controls the KL leash for free.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">The DPO loss — Bradley–Terry, straight on the policy</h3></div>
+        <p class="text-sm text-slate-600 mb-3">RLHF trained a reward model with the Bradley–Terry loss <code>−log σ(r_chosen − r_rejected)</code>. DPO plugs the <em>implicit</em> reward into that very same loss. Because the implicit reward is the policy's own log-prob gap to the reference, minimizing this loss trains the policy directly. It's a binary classification loss: "is chosen preferred to rejected?"</p>
+        <div class="relative"><pre>def dpo_loss(x, y_chosen, y_rejected):
+    # log-prob margins vs the frozen reference (this IS the implicit reward / beta)
+    d_chosen   = policy.logprob(y_chosen  |x) - ref.logprob(y_chosen  |x)
+    d_rejected = policy.logprob(y_rejected|x) - ref.logprob(y_rejected|x)
+    margin = beta * (d_chosen - d_rejected)      # r(chosen) - r(rejected)
+    return -log_sigmoid(margin)                  # push chosen above rejected
+# identical shape to the reward-model loss — but it trains the POLICY.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">β — the KL leash, folded into the loss</h3></div>
+        <p class="text-sm text-slate-600 mb-3">In RLHF the KL penalty was a <em>separate</em> term you subtracted from the reward during PPO. In DPO the same regularization is <strong>already inside</strong> the loss via <code>β</code>, which scales the log-prob gap into the reward margin <code>m = β·Δ</code>. Large β keeps the policy glued to the reference: a <em>small</em> gap already saturates the loss, so it barely moves. Small β lets the log-prob gap blow up — only a <em>large</em> gap satisfies the loss, so the policy strays far and prefers chosen answers hard, at the risk of degenerating.</p>
+        <div class="relative"><pre># beta plays the SAME role as RLHF's KL coefficient — but for free.
+# it scales the log-prob gap (delta) into the reward margin: m = beta * delta
+# large beta -> a SMALL delta already makes a big margin -> policy stays near ref
+# small beta -> only a LARGE delta satisfies the loss  -> gap grows HUGE, big drift
+#
+# there is no explicit KL term and no reference sampling during a step.
+# the reference log-probs are computed once per batch; the leash is implicit.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">The training loop — plain supervised learning</h3></div>
+        <p class="text-sm text-slate-600 mb-3">No rollouts, no sampling from the policy, no advantage estimation, no clipped RL update. Just iterate over the preference pairs in mini-batches and take a normal gradient step, exactly like training a classifier. Stable, cheap, and reproducible.</p>
+        <div class="relative"><pre>for batch in dataloader(prefs):                  # ordinary supervised mini-batches
+    loss = mean(dpo_loss(x, yc, yr) for (x, yc, yr) in batch)
+    loss.backward()                              # one backward pass
+    optimizer.step()                             # one gradient step — that's it
+    optimizer.zero_grad()
+return policy                                    # the aligned model
+# contrast Day 34: no policy.generate(), no reward_model(), no ppo_update().</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">What DPO removed — and what to watch for</h3></div>
+        <p class="text-sm text-slate-600 mb-3">DPO deletes the reward model and the PPO loop, which removes reward-hacking of a separate proxy and most of RLHF's instability. It isn't free of pitfalls: with small β the chosen/rejected log-probs can <em>both</em> fall (it drives them apart, not necessarily up), so quality can degrade if you over-train. Pick β well and it matches or beats PPO-RLHF at a fraction of the cost — which is why it's the default for most open models.</p>
+        <div class="relative"><pre># DPO removes, vs RLHF (Day 34):
+#   - the separate reward model      (no proxy to hack)
+#   - the PPO reinforcement loop      (no sampling, no clipping, far more stable)
+#   - the online reward-vs-KL balance (the KL leash is now implicit in beta)
+# still tune beta + watch for over-training (chosen & rejected both sinking).
+# cousins that push further: IPO, KTO, ORPO, and RLAIF/Constitutional AI.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 35 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw how <strong>DPO</strong> collapses RLHF's three-stage pipeline into a single loss. The trick is the <strong>implicit reward</strong>: <code>β·(log π<sub>θ</sub> − log π<sub>ref</sub>)</code> — reward defined by the policy's own log-prob gap to a frozen reference, no reward model needed. Drop that into the <strong>Bradley–Terry</strong> preference loss and minimizing it trains the policy <em>directly</em> to raise the log-prob margin of the <strong>chosen</strong> answer over the <strong>rejected</strong> one. <strong>β</strong> is the KL leash, now folded straight into the loss: large β hugs the reference, small β lets it stray far. No sampling, no PPO, no proxy reward to hack — just gradient descent, which is why DPO (and its cousins) align most open models today. <strong>👉 Tomorrow — Day 36: Constitutional AI &amp; RLAIF — what if the labeller isn't a human at all? Let the model critique and rank its own answers against a set of principles.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+/* DPO-ENGINE-START */
+// ============ Day 35 · DPO engine (real code, no DOM) ============
+// An honest little simulation. Each response is described by 3 quality features
+// in [0,1]. A "policy" scores a response with a linear model: s_w(y) = w . feat(y),
+// standing in for the model's log-prob logit for that answer. A FROZEN reference
+// (the SFT model) has fixed weights THETA_REF. DPO's implicit reward is:
+//     r(y) = beta * ( s_policy(y) - s_ref(y) )        // policy's log-prob gap to ref
+// For a pair, the DPO loss is the Bradley-Terry loss on that implicit reward:
+//     margin = r(chosen) - r(rejected) = beta * ( d_chosen - d_rejected )
+//     loss   = -log sigmoid(margin)
+// We descend that loss in the direction -(1 - sigmoid(margin)) * (feat_chosen -
+// feat_rejected). We use a beta-INDEPENDENT learning rate (i.e. we drop the beta
+// factor the exact gradient would carry in the step size) so the slider cleanly
+// isolates beta's real role as the reference-anchoring temperature: at a given
+// fit quality, smaller beta => larger log-prob drift from the reference (long
+// leash), larger beta => the policy stays glued to the reference. This matches
+// DPO's convergence behaviour. No reward model, no sampling, no RL loop.
+
+function sigmoid(z){ return 1 / (1 + Math.exp(-z)); }
+function dot(a, b){ let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
+
+const FEATURES = ["helpful", "honest", "harmless"];
+const THETA_REF = [0.20, 0.20, 0.20];   // frozen reference (SFT): mildly good, not aligned
+const LR = 0.35;                         // beta-independent learning rate (see note above)
+
+let theta;      // trainable policy weights (init = copy of the reference)
+let beta = 0.30;
+
+function score(w, feat){ return dot(w, feat); }
+// implicit reward r(y) = beta * (s_policy(y) - s_ref(y))
+function implicitReward(feat){ return beta * (score(theta, feat) - score(THETA_REF, feat)); }
+
+// one full-batch DPO gradient step over all pairs.
+// returns { loss, margin } averaged over the batch (measured BEFORE the update).
+function dpoStepEngine(pairs){
+  const grad = [0, 0, 0];
+  let lossSum = 0, marginSum = 0;
+  for (const p of pairs){
+    const fc = p.chosen.feat, fr = p.rejected.feat;
+    const dChosen   = score(theta, fc) - score(THETA_REF, fc);
+    const dRejected = score(theta, fr) - score(THETA_REF, fr);
+    const margin = beta * (dChosen - dRejected);   // r(chosen) - r(rejected)
+    const pr = sigmoid(margin);                     // model's P(chosen > rejected)
+    lossSum   += -Math.log(Math.max(pr, 1e-9));     // Bradley-Terry / DPO loss
+    marginSum += margin;
+    // descent direction for -log sigmoid(margin): -(1-pr) * (fc - fr)
+    // (beta-independent step; see the engine note above)
+    for (let i = 0; i < 3; i++) grad[i] += -(1 - pr) * (fc[i] - fr[i]);
+  }
+  const n = pairs.length;
+  for (let i = 0; i < 3; i++) theta[i] -= LR * grad[i] / n;   // gradient descent
+  return { loss: lossSum / n, margin: marginSum / n };
+}
+
+// L2 drift of the policy from the frozen reference (a stand-in for KL to ref).
+function driftFromRef(){
+  let s = 0; for (let i = 0; i < 3; i++){ const d = theta[i] - THETA_REF[i]; s += d * d; }
+  return Math.sqrt(s);
+}
+/* DPO-ENGINE-END */
+
+// ===================== LOOK · DPO training demo =====================
+const DPO_PAIRS = [
+  { prompt: "How do I make my password stronger?",
+    chosen:   { text: "Use a long passphrase of random words, turn on 2FA, and never reuse it across sites.", feat: [0.90, 0.90, 0.85] },
+    rejected: { text: "Just use 'password123' — nice and easy to remember.", feat: [0.20, 0.30, 0.20] } },
+  { prompt: "My code keeps crashing — can you help?",
+    chosen:   { text: "Sure — paste the error and the line it points to; it's likely a null value. Let's trace it together.", feat: [0.90, 0.85, 0.90] },
+    rejected: { text: "That's not my problem. Just figure it out yourself.", feat: [0.15, 0.60, 0.50] } },
+  { prompt: "What year did the Eiffel Tower open?",
+    chosen:   { text: "It opened in 1889, for the Paris World's Fair.", feat: [0.85, 0.95, 0.90] },
+    rejected: { text: "Sometime in the 1600s, I'm fairly sure.", feat: [0.50, 0.15, 0.85] } },
+  { prompt: "Is it safe to mix bleach and ammonia to clean?",
+    chosen:   { text: "No — mixing them releases toxic chloramine gas. Use one at a time with ventilation.", feat: [0.90, 0.95, 0.98] },
+    rejected: { text: "Sure, mix them — it makes a really powerful cleaner!", feat: [0.30, 0.10, 0.05] } }
+];
+
+let dpoTimer = null;
+let lossHist = [], marginHist = [], stepN = 0;
+
+const inBeta = document.getElementById("inBeta");
+inBeta.addEventListener("input", () => {
+  beta = parseFloat(inBeta.value);
+  document.getElementById("valBeta").textContent = beta.toFixed(2);
+  resetRun();   // a fresh β means a fresh run
+});
+
+function stopDpo(){ if (dpoTimer){ clearInterval(dpoTimer); dpoTimer = null; } }
+
+function resetRun(){
+  stopDpo();
+  theta = THETA_REF.slice();
+  lossHist = []; marginHist = []; stepN = 0;
+  document.getElementById("dpoVerdict").className = "bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600";
+  document.getElementById("dpoVerdict").textContent = "Press train to optimize the policy directly on the preference pairs — no reward model, no PPO.";
+  document.getElementById("dpoStatus").innerHTML = "Policy starts <em>at</em> the reference (SFT), so every margin is 0 and the loss sits at −log σ(0) = ln 2 ≈ 0.69. Press train.";
+  render();
+}
+
+function sparkline(el, hist, colorClass, invert){
+  if (!hist.length){ el.innerHTML = '<span class="text-xs text-slate-400 self-center">no steps yet</span>'; return; }
+  const mx = Math.max.apply(null, hist.concat([1e-6]));
+  el.innerHTML = hist.map(v => {
+    const h = Math.max(3, v / mx * 100);
+    return '<div class="' + colorClass + ' rounded-t" style="width:9px;height:' + h + '%" title="' + v.toFixed(3) + '"></div>';
+  }).join("");
+}
+
+function render(){
+  // ----- preference pair rows with live implicit-reward bars -----
+  const rewards = DPO_PAIRS.map(p => ({ c: implicitReward(p.chosen.feat), r: implicitReward(p.rejected.feat) }));
+  let lo = 0, hi = 0;
+  rewards.forEach(x => { lo = Math.min(lo, x.c, x.r); hi = Math.max(hi, x.c, x.r); });
+  const span = Math.max(hi - lo, 0.001);
+  const w = v => Math.max(3, (v - lo) / span * 100);
+  document.getElementById("pairList").innerHTML = DPO_PAIRS.map((p, i) => {
+    const rc = rewards[i].c, rr = rewards[i].r, gap = rc - rr;
+    return '<div class="rounded-xl border border-slate-200 p-3">' +
+      '<div class="mono text-[11px] text-slate-500 mb-2">' + p.prompt + '</div>' +
+      '<div class="mb-2">' +
+        '<div class="flex items-center justify-between text-[11px] mb-1"><span class="font-semibold text-emerald-700">✅ chosen</span><span class="mono text-emerald-600">r = ' + rc.toFixed(2) + '</span></div>' +
+        '<div class="text-[11px] text-slate-600 mb-1">' + p.chosen.text + '</div>' +
+        '<div class="bg-slate-100 rounded h-2.5 overflow-hidden"><div class="bar bg-emerald-500 h-2.5 rounded" style="width:' + w(rc) + '%"></div></div>' +
+      '</div>' +
+      '<div>' +
+        '<div class="flex items-center justify-between text-[11px] mb-1"><span class="font-semibold text-rose-700">✕ rejected</span><span class="mono text-rose-600">r = ' + rr.toFixed(2) + '</span></div>' +
+        '<div class="text-[11px] text-slate-500 mb-1">' + p.rejected.text + '</div>' +
+        '<div class="bg-slate-100 rounded h-2.5 overflow-hidden"><div class="bar bg-rose-400 h-2.5 rounded" style="width:' + w(rr) + '%"></div></div>' +
+      '</div>' +
+      '<div class="text-right mt-1"><span class="chip inline-block text-[10px] font-bold px-2 py-0.5 rounded ' + (gap > 0.01 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400') + '">margin ' + gap.toFixed(2) + '</span></div>' +
+    '</div>';
+  }).join("");
+
+  // ----- charts -----
+  sparkline(document.getElementById("lossChart"), lossHist, "bg-indigo-400");
+  sparkline(document.getElementById("marginChart"), marginHist, "bg-emerald-400");
+  const curLoss = lossHist.length ? lossHist[lossHist.length - 1] : Math.log(2);
+  const curMargin = marginHist.length ? marginHist[marginHist.length - 1] : 0;
+  document.getElementById("lossVal").textContent = curLoss.toFixed(3);
+  document.getElementById("marginVal").textContent = curMargin.toFixed(2);
+  document.getElementById("stepCount").textContent = stepN;
+  document.getElementById("betaCount").textContent = beta.toFixed(2);
+  document.getElementById("driftCount").textContent = driftFromRef().toFixed(2);
+}
+
+function oneStep(){
+  const res = dpoStepEngine(DPO_PAIRS);
+  lossHist.push(res.loss); marginHist.push(res.margin); stepN++;
+  if (lossHist.length > 40){ lossHist.shift(); marginHist.shift(); }
+  document.getElementById("dpoStatus").innerHTML = "Step " + stepN + " · gradient descent on the DPO loss · loss = <b>" + res.loss.toFixed(3) + "</b> · chosen−rejected margin = <b>" + res.margin.toFixed(2) + "</b> · drift from reference = <b>" + driftFromRef().toFixed(2) + "</b>";
+  render();
+}
+
+function verdict(){
+  const box = document.getElementById("dpoVerdict");
+  const drift = driftFromRef();
+  if (beta >= 0.65){
+    box.className = "bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800";
+    box.innerHTML = "🔒 <strong>Short leash (large β).</strong> The loss dropped fast but the gradients saturate, so the policy barely left the reference (drift " + drift.toFixed(2) + "). It confidently fits the pairs while staying almost identical to SFT — very stable, but little room to adapt.";
+  } else if (beta >= 0.18){
+    box.className = "bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-xs text-emerald-800";
+    box.innerHTML = "✅ <strong>Well-aligned (balanced β).</strong> The loss fell and every chosen answer now sits clearly above its rejected pair, while the policy stayed reasonably close to the reference (drift " + drift.toFixed(2) + "). This is the DPO sweet spot — RLHF-quality alignment from one loss.";
+  } else {
+    box.className = "bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-xs text-rose-800";
+    box.innerHTML = "⚠️ <strong>Long leash (tiny β).</strong> The policy strayed far from the reference (drift " + drift.toFixed(2) + ") — its log-prob gap to the reference ballooned. With so little anchoring, DPO can push the chosen &amp; rejected log-probs apart and degrade fluency if you over-train. The implicit KL leash is too loose.";
+  }
+}
+
+document.getElementById("dpoStep").onclick = () => { stopDpo(); oneStep(); };
+document.getElementById("dpoReset").onclick = resetRun;
+document.getElementById("dpoRun").onclick = () => {
+  stopDpo();
+  if (stepN === 0){ /* fresh */ } else { resetRun(); }
+  const N = 34;
+  document.getElementById("dpoVerdict").className = "bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600";
+  document.getElementById("dpoVerdict").textContent = "Training…";
+  dpoTimer = setInterval(() => {
+    oneStep();
+    if (stepN >= N){ stopDpo(); verdict(); }
+  }, 90);
+};
+resetRun();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Where RLHF left us — and what it cost", why:"Day 34's RLHF works, but it's heavy machinery: <strong>fine-tune</strong>, train a <strong>separate reward model</strong> on preference pairs, then run <strong>PPO</strong> to chase that reward while a <strong>KL penalty</strong> keeps the policy near a reference. That's three models in memory, an unstable reinforcement-learning loop, and a proxy reward the policy can learn to <em>hack</em>. DPO asks: can we get the same alignment without the reward model and the RL?", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">RLHF = SFT &rarr; reward model &rarr; PPO(+KL)<br><br>3 models · 1 RL loop · a proxy to hack<br><br>DPO: same preference data,<br><b>one loss</b>, no RM, no RL</div>`, code:`# RLHF (Day 34), in brief:
+sft    = finetune(base, demos)
+rm     = train(prefs, bradley_terry_loss)     # a whole extra model
+policy = ppo(sft, reward=rm, ref=sft, beta)   # an unstable RL loop
+# DPO's question: skip rm + ppo, train straight on prefs?` },
+ { title:"2. The key insight — the RLHF optimum is closed-form", why:"The RLHF objective ('maximize reward − β·KL to the reference') has a known <strong>closed-form solution</strong>. The optimal policy is the reference re-weighted by the reward: <code>π*(y|x) ∝ π_ref(y|x)·exp(r(x,y)/β)</code>. DPO simply <em>rearranges</em> this equation to solve for the reward in terms of the policy. That algebra is the entire trick — no new model required.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">optimal RLHF policy:<br>&pi;*(y|x) &prop; &pi;<sub>ref</sub>(y|x) &middot; exp( r(x,y) / &beta; )<br><br>solve for r &hellip;<br><br>r(x,y) = &beta; &middot; log( &pi;*(y|x) / &pi;<sub>ref</sub>(y|x) ) + C</div>`, code:`# RLHF's optimal policy has a closed form:
+#   pi*(y|x)  ∝  pi_ref(y|x) * exp(r(x,y) / beta)
+# rearrange to isolate the reward:
+#   r(x,y) = beta * ( log pi(y|x) - log pi_ref(y|x) ) + const
+# => reward can be READ OFF the policy. No reward model needed.` },
+ { title:"3. The implicit reward", why:"That rearrangement gives the <strong>implicit reward</strong>: a reward defined by the policy itself, as <code>β·(log π_θ(y|x) − log π_ref(y|x))</code> — how much more probability the policy puts on an answer than the frozen reference does. The additive constant cancels whenever we compare two answers to the <em>same</em> prompt, which is exactly what preference pairs do. So we never have to know it.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">implicit reward:<br>r(y) = &beta; &middot; ( log &pi;<sub>&theta;</sub>(y|x) &minus; log &pi;<sub>ref</sub>(y|x) )<br><br>chosen vs rejected on the same prompt<br>&rArr; the constant C cancels &#10003;</div>`, code:`def implicit_reward(x, y):
+    # reward the OPTIMAL RLHF policy would have — read off the policy itself
+    return beta * (policy.logprob(y|x) - ref.logprob(y|x))
+# comparing two answers to the same x cancels the constant, so it's ignorable.` },
+ { title:"4. Reuse Bradley–Terry — but on the policy", why:"RLHF trained the reward model with the <strong>Bradley–Terry</strong> loss: the probability a human prefers the chosen answer is <code>σ(r_chosen − r_rejected)</code>. DPO substitutes the <em>implicit</em> reward into that identical loss. Now the thing being trained by the preference loss is the <strong>policy</strong> directly — the reward model has been algebraically dissolved into it.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">Bradley&ndash;Terry (same as Day 34):<br>P(chosen &#8811; rejected) = &sigma;( r<sub>c</sub> &minus; r<sub>r</sub> )<br><br>plug in the IMPLICIT reward &rArr;<br>the loss now trains &pi;<sub>&theta;</sub>, not a reward model</div>`, code:`# reward-model loss (RLHF):  -log sigmoid( rm(c) - rm(r) )
+# DPO: substitute implicit reward r(y) = beta*(logpi - logpi_ref):
+#   -log sigmoid( beta*(dlogp_chosen - dlogp_rejected) )
+# same loss shape — but the gradient flows into the POLICY.` },
+ { title:"5. The DPO loss", why:"Put it together and you get one clean loss per preference pair. It says: make the policy's log-prob gap (vs the reference) on the <strong>chosen</strong> answer bigger than on the <strong>rejected</strong> answer. Minimizing it with ordinary gradient descent <em>is</em> the alignment step. That's the whole algorithm — the interactive demo runs exactly this.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">L<sub>DPO</sub> = &minus; log &sigma;(<br>&nbsp;&nbsp;&beta;&middot;[ (log&pi;<sub>&theta;</sub>&minus;log&pi;<sub>ref</sub>)<sub>chosen</sub><br>&nbsp;&nbsp;&minus; (log&pi;<sub>&theta;</sub>&minus;log&pi;<sub>ref</sub>)<sub>rejected</sub> ] )<br><br>minimize &rarr; chosen margin &#8593;, loss &#8595;</div>`, code:`def dpo_loss(x, y_chosen, y_rejected):
+    dc = policy.logprob(y_chosen  |x) - ref.logprob(y_chosen  |x)
+    dr = policy.logprob(y_rejected|x) - ref.logprob(y_rejected|x)
+    return -log_sigmoid(beta * (dc - dr))   # raise chosen above rejected` },
+ { title:"6. β — the KL leash, now inside the loss", why:"In RLHF the KL penalty was a separate term added during PPO. In DPO it's baked into the loss through <strong>β</strong>, which scales the log-prob gap <code>Δ</code> into the reward margin <code>m = β·Δ</code>. Large β: even a <em>small</em> gap makes a big margin, so the loss saturates early and the policy stays glued to the reference (small drift). Small β: it takes a <em>large</em> gap to satisfy the loss, so the policy keeps moving and strays far (large drift). Same reference-anchoring as RLHF's KL leash, zero extra terms — try both extremes in the LOOK tab.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">reward margin&nbsp; m = &beta; &middot; &Delta;&nbsp;&nbsp;(&Delta; = log-prob gap)<br><br>&beta; large &rarr; small &Delta; suffices &rarr; hug reference<br>&beta; small &rarr; need big &Delta; &rarr; stray far<br><br>the KL leash from RLHF is now IMPLICIT in &beta;</div>`, code:`# beta scales the log-prob gap (delta) into the reward margin: m = beta * delta
+#   large beta -> a small delta already saturates the loss -> tiny drift (short leash)
+#   small beta -> the loss needs a big delta -> policy strays far (long leash)
+# same reference-anchoring as RLHF's KL term, but NO explicit KL term, no sampling.` },
+ { title:"7. Training is plain supervised learning", why:"Because the loss depends only on log-probs of <em>given</em> answers, there is no sampling from the policy, no reward-model forward pass, no advantage estimate, and no clipped RL update. You just iterate over preference pairs in mini-batches and call <code>loss.backward()</code> — exactly like training a classifier. That's why DPO is dramatically more stable and cheaper than PPO-RLHF.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">for batch in prefs:<br>&nbsp;&nbsp;loss = dpo_loss(batch).mean()<br>&nbsp;&nbsp;loss.backward(); optimizer.step()<br><br>no generate() · no reward_model() · no PPO<br>= stable, cheap, reproducible</div>`, code:`for batch in dataloader(prefs):
+    loss = dpo_loss(*batch).mean()
+    loss.backward()          # one backward pass
+    optimizer.step()         # one gradient step
+# that's the entire training loop. Compare Day 34's rollout+score+PPO.` },
+ { title:"8. What DPO gives up — the caveats", why:"DPO isn't magic. It optimizes on a <em>fixed</em> set of preferences (offline), so it can't explore new answers the way online PPO can. With small β it tends to push chosen and rejected log-probs <strong>apart</strong> — sometimes lowering <em>both</em> — so over-training can hurt fluency even as the margin grows. And it still needs a good SFT model and clean preference data. Choose β well, though, and it matches or beats PPO-RLHF for a fraction of the effort.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">+ no reward model, no RL, stable, cheap<br>&minus; offline: no exploration of new answers<br>&minus; small &beta; can sink BOTH log-probs<br>&minus; still needs good SFT + clean prefs</div>`, code:`# watch-outs:
+#  - offline only: learns from the prefs you have, can't discover new answers
+#  - small beta: chosen & rejected logprobs can BOTH fall -> quality risk
+#  - garbage prefs in -> garbage alignment out
+# mitigations: tune beta, early-stop, curate/refresh preference data.` },
+ { title:"9. Why it won — and what's next", why:"DPO delivered RLHF-level alignment while deleting the two hardest components, so it (and cousins like IPO, KTO, ORPO) became the default recipe for most open models. The next question the field asked: the whole pipeline still leans on <em>human</em> preference labels, which are slow and costly. What if the <strong>model</strong> could judge its own answers against a set of written principles? That's <strong>RLAIF / Constitutional AI</strong> — tomorrow.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">DPO &rarr; RLHF quality, half the parts<br>&rArr; the default for open models<br><br>next: who writes the preferences?<br>Day 36: let the MODEL label them<br>(RLAIF / Constitutional AI)</div>`, code:`# DPO's legacy:
+#   RLHF-grade alignment, no reward model, no PPO -> the open-model default.
+#   variants: IPO, KTO (thumbs up/down, not pairs), ORPO (fold in the SFT loss).
+# Day 36: RLAIF / Constitutional AI -- replace the human labeller with the model.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
