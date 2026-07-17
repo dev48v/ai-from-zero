@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 36 — Constitutional AI &amp; RLAIF</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .chip { animation: chipIn .3s ease-out; }
+  @keyframes chipIn { from { opacity:0; transform:scale(.8); } to { opacity:1; transform:none; } }
+  .arrow { color:#c7d2fe; font-weight:700; }
+  .principle { transition: all .18s ease; cursor:pointer; }
+  .principle.off { opacity:.5; filter:grayscale(1); }
+  .dim { opacity:.35; }
+  .reveal { animation: fadeIn .4s ease-out; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 36</div>
+      <h1 class="text-xl font-bold">📜 Constitutional AI &amp; RLAIF — fire the human labeller: the model critiques <em>and</em> ranks its own answers against a written constitution</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-5">
+        <h2 class="text-2xl font-bold mb-1">RLHF and DPO still needed <em>humans</em> to label every preference. What if the <em>model</em> did that job — against rules you can read?</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Day 34 (RLHF) and Day 35 (DPO) both align a model from <strong>human</strong> preference labels — slow, costly, inconsistent, and impossible to scale. <strong>Constitutional AI</strong> replaces the human labeller with the model itself, guided by a short written <strong>constitution</strong> of principles. It works in two phases. <strong>Phase 1 — self-critique:</strong> the model produces an answer, critiques it against the constitution, and rewrites it. <strong>Phase 2 — RLAIF (RL from AI Feedback):</strong> the model <em>ranks</em> pairs of answers itself using the same constitution, and those AI-generated preferences feed the exact reward&rarr;policy loop from Day 34 — with <strong>zero human labels</strong>. Toggle the principles below and watch the critique, the revision, and the AI's own preference change. Everything runs <strong>in your browser</strong>.</p>
+      </div>
+
+      <!-- ===================== CONTRAST STRIP: RLHF vs RLAIF ===================== -->
+      <div class="grid lg:grid-cols-[1fr_auto_1fr] gap-4 items-center mb-6">
+        <div class="bg-white rounded-2xl border border-slate-200 p-4">
+          <div class="text-xs uppercase font-bold text-slate-400 mb-2">Day 34 · RLHF — human labeller</div>
+          <div class="flex items-center gap-2">
+            <div class="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 text-center"><div class="text-lg">🧑‍⚖️</div><div class="text-[11px] font-bold text-amber-700">Human ranks<br>pairs</div></div>
+            <span class="arrow">→</span>
+            <div class="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 text-center"><div class="text-lg">🏆</div><div class="text-[11px] font-bold text-slate-600">Reward<br>model</div></div>
+            <span class="arrow">→</span>
+            <div class="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 text-center"><div class="text-lg">🎯</div><div class="text-[11px] font-bold text-slate-600">RL<br>policy</div></div>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-2">A <strong>human</strong> decides which answer is better on every pair. Slow, expensive, hard to reproduce — and the rules live only in labellers' heads.</p>
+        </div>
+
+        <div class="text-center px-2">
+          <div class="text-3xl">📜</div>
+          <div class="text-[11px] font-bold text-indigo-600 leading-tight mt-1 max-w-[130px]">Swap the human for the <span class="text-indigo-800">model + a written constitution</span></div>
+        </div>
+
+        <div class="bg-white rounded-2xl border-2 border-indigo-300 p-4">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Day 36 · RLAIF — AI labeller</div>
+          <div class="flex items-center gap-2">
+            <div class="flex-1 bg-indigo-50 border border-indigo-200 rounded-lg p-2 text-center"><div class="text-lg">🤖📜</div><div class="text-[11px] font-bold text-indigo-700">AI ranks<br>vs constitution</div></div>
+            <span class="arrow">→</span>
+            <div class="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 text-center"><div class="text-lg">🏆</div><div class="text-[11px] font-bold text-slate-600">Reward<br>model</div></div>
+            <span class="arrow">→</span>
+            <div class="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 text-center"><div class="text-lg">🎯</div><div class="text-[11px] font-bold text-slate-600">RL<br>policy</div></div>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-2"><strong>Same reward&rarr;policy loop</strong> — only the labeller changed. The <em>model</em> judges each pair against principles you can <strong>read and edit</strong>. Scales to millions of labels, <strong>0 humans</strong>.</p>
+        </div>
+      </div>
+
+      <!-- ===================== THE CONSTITUTION (toggles) ===================== -->
+      <div class="bg-white rounded-2xl border border-indigo-200 p-5 mb-5">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <div class="text-xs uppercase font-bold text-indigo-600">📜 The constitution <span class="text-slate-400 normal-case font-normal">— toggle a principle to add/remove it from the rules the model judges by</span></div>
+          <div class="flex gap-2">
+            <button id="btnRun"   class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Run self-improvement</button>
+            <button id="btnStep"  class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">Step ▶</button>
+            <button id="btnReset" class="bg-slate-200 px-3 py-2 rounded-lg font-semibold text-sm">↺</button>
+          </div>
+        </div>
+        <div id="constitution" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3"></div>
+        <p class="text-[11px] text-slate-400 mt-3" id="statusLine">Press <b>Step ▶</b> to walk critique &rarr; revise &rarr; AI-rank, or <b>Run</b> to auto-play. Toggle principles any time and watch everything recompute — no human in the loop.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- LEFT: PHASE 1 — self-critique & revise -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-1">Phase 1 · Self-critique <span class="text-slate-400 normal-case font-normal">— answer &rarr; critique &rarr; revise</span></div>
+          <p class="text-[11px] text-slate-400 mb-3">The model writes a first (deliberately flawed) answer, critiques it against every <em>active</em> principle, then rewrites. Turn a principle off and its critique &amp; fix disappear — the flaw survives into the revision.</p>
+
+          <div class="mb-3">
+            <div class="text-[11px] font-bold text-slate-500 mb-1">🙋 Prompt</div>
+            <div id="p1prompt" class="mono text-[12px] bg-slate-50 border border-slate-200 rounded-lg p-2 text-slate-700"></div>
+          </div>
+
+          <div class="mb-3">
+            <div class="text-[11px] font-bold text-rose-600 mb-1">① Initial answer <span class="text-slate-400 font-normal normal-case">— unaligned draft</span></div>
+            <div id="p1initial" class="text-[12px] bg-rose-50 border border-rose-200 rounded-lg p-2 text-slate-700"></div>
+          </div>
+
+          <div id="p1critiqueWrap" class="mb-3">
+            <div class="text-[11px] font-bold text-amber-600 mb-1">② Self-critique <span class="text-slate-400 font-normal normal-case">— judged against the active constitution</span></div>
+            <ul id="p1critique" class="space-y-1"></ul>
+          </div>
+
+          <div id="p1revisedWrap">
+            <div class="text-[11px] font-bold text-emerald-600 mb-1">③ Revised answer <span class="text-slate-400 font-normal normal-case">— flaws the critique caught are fixed</span></div>
+            <div id="p1revised" class="text-[12px] bg-emerald-50 border border-emerald-200 rounded-lg p-2 text-slate-700"></div>
+            <p class="text-[10px] text-slate-400 mt-1">These self-revised answers become the fine-tuning set for the <span class="mono">SL-CAI</span> model — supervised learning, no human rewrite.</p>
+          </div>
+        </div>
+
+        <!-- RIGHT: PHASE 2 — RLAIF ranking + loop + metrics -->
+        <div class="space-y-4">
+          <div id="p2wrap" class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-1">Phase 2 · RLAIF ranking <span class="text-slate-400 normal-case font-normal">— the AI labeller</span></div>
+            <p class="text-[11px] text-slate-400 mb-3">For each prompt the model compares two candidate answers and picks the one that satisfies <em>more</em> active principles. That verdict is an <strong>AI-generated preference label</strong> — no human. Toggle a principle and watch a <span class="text-emerald-600 font-semibold">chosen</span>/<span class="text-rose-600 font-semibold">rejected</span> flip (or fall to a tie).</p>
+            <div id="p2list" class="space-y-3"></div>
+          </div>
+
+          <div id="loopWrap" class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600 mb-2">…and into the <span class="mono normal-case">same</span> loop as Day 34</div>
+            <div class="flex items-center gap-2">
+              <div class="flex-1 bg-indigo-50 border border-indigo-200 rounded-lg p-2 text-center"><div class="text-lg">🤖📜</div><div class="text-[11px] font-bold text-indigo-700">AI preference<br>pairs</div></div>
+              <span class="arrow">→</span>
+              <div class="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 text-center"><div class="text-lg">🏆</div><div class="text-[11px] font-bold text-slate-600">Reward model<br>(Bradley–Terry)</div></div>
+              <span class="arrow">→</span>
+              <div class="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 text-center"><div class="text-lg">🎯</div><div class="text-[11px] font-bold text-slate-600">RL / DPO<br>policy</div></div>
+            </div>
+            <p class="text-[11px] text-slate-500 mt-2">Identical to RLHF from the reward model onward. The <em>only</em> thing that changed is who wrote the labels.</p>
+          </div>
+
+          <div class="grid grid-cols-3 gap-3 text-center">
+            <div class="bg-white border border-slate-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-slate-400">Principles active</div><div id="mActive" class="text-lg font-bold text-indigo-600 mt-1 stat">4/4</div></div>
+            <div class="bg-white border border-slate-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-slate-400">Flaws fixed</div><div id="mFixed" class="text-lg font-bold text-emerald-600 mt-1 stat">0</div></div>
+            <div class="bg-white border border-slate-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-slate-400">Human labels</div><div id="mHuman" class="text-lg font-bold text-amber-600 mt-1 stat">0</div></div>
+          </div>
+
+          <div id="verdict" class="bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600">Toggle principles and step through the phases. The constitution is the <em>only</em> supervision — change it and the model's self-critique and its own preference labels change with it.</div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto">Notice what never appears: a human ranking answers. In Phase 1 the model improves its <em>own</em> training data by critique-and-revise; in Phase 2 it labels its <em>own</em> preference pairs against the written rules. Those AI labels drop straight into the Day-34 reward&rarr;policy machinery. The values are no longer hidden in a crowd of labellers — they're a short document you can read, audit, and edit. That transparency and scalability is why AI feedback now supplements (and sometimes replaces) human feedback in frontier alignment.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Replacing the human labeller</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build Constitutional AI — two phases, one deleted human</h2>
+    <p class="text-slate-500 mb-8">Constitutional AI takes the <em>same</em> alignment pipeline as RLHF (Day 34) / DPO (Day 35) and removes the human from the preference-labelling loop. In its place: a short written <strong>constitution</strong> plus the model's own ability to critique and compare. Phase 1 improves the supervised data by self-revision; Phase 2 (<strong>RLAIF</strong>) generates the preference labels by self-ranking. Here it is in annotated pseudo-code.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">The constitution — the rules, written down</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The whole method hinges on one artefact: a short list of natural-language <strong>principles</strong>. Not weights, not labelled data — plain sentences a person can read, argue about, and edit. Everything downstream (critiques and rankings) is generated by prompting the model <em>with</em> these principles. This is where the values live, in the open.</p>
+        <div class="relative"><pre>CONSTITUTION = [
+  "Never help with illegal, dangerous, or destructive actions.",  # harmless
+  "Don't state unverified facts as certain; flag what you don't know.",  # honest
+  "Address the user's real problem with practical, constructive steps.",  # helpful
+  "Stay calm and de-escalate; assume good faith.",                # respectful
+]
+# that's it. No human labels anywhere yet. Editing this list re-aligns the model.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Phase 1a — the model answers, then critiques itself</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Prompt the model normally to get a first response. It may be flawed. Now prompt the <em>same</em> model again — this time asking it to critique that response against a principle. The model is perfectly capable of spotting its own violations when you point it at the rule; it just doesn't do it by default.</p>
+        <div class="relative"><pre>def self_critique(model, prompt, answer, principle):
+    return model(f"""
+      Prompt: {prompt}
+      Answer: {answer}
+      Principle: {principle}
+      Does the answer violate this principle? If so, explain how.""")
+
+answer   = model(prompt)                 # first, possibly-flawed draft
+critique = self_critique(model, prompt, answer, CONSTITUTION[0])
+# the labeller is the model, aimed at a written rule — not a human.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Phase 1b — revise, then fine-tune on the revisions (SL-CAI)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Feed the critique back and ask the model to rewrite the answer so it no longer violates the principle. Loop over the constitution to fix every flaw. Collect thousands of these <code>(prompt &rarr; revised answer)</code> pairs and run ordinary supervised fine-tuning on them. The result is the <strong>SL-CAI</strong> model — already much better behaved, trained entirely on data the model improved itself.</p>
+        <div class="relative"><pre>def revise(model, prompt, answer):
+    for principle in CONSTITUTION:                 # fix one rule at a time
+        critique = self_critique(model, prompt, answer, principle)
+        answer   = model(f"Rewrite to fix: {critique}\nAnswer: {answer}")
+    return answer
+
+sl_data = [(p, revise(model, p, model(p))) for p in prompts]
+sl_cai  = finetune(model, sl_data)                 # supervised, human-free rewrites</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Phase 2a — RLAIF: the model labels its own preference pairs</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Now the RL stage. Sample two answers from the SL-CAI model for a prompt. Instead of asking a <em>human</em> which is better, ask the <em>model</em> — showing it a constitutional principle and having it pick the answer that complies more. This choice is the preference label. This is <strong>RL from AI Feedback</strong>: the F in RLHF flips from Human to AI.</p>
+        <div class="relative"><pre>def ai_preference(model, prompt, a, b, principle):
+    ans = model(f"""
+      Prompt: {prompt}
+      (A) {a}
+      (B) {b}
+      Principle: {principle}
+      Which response better follows the principle? Answer A or B.""")
+    return ("A", "B") if ans == "A" else ("B", "A")   # (chosen, rejected)
+
+# for a batch of prompts, generate AI-labelled (chosen, rejected) pairs.
+# NOTE: no human ever ranked these. This is the "AI Feedback" in RLAIF.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Phase 2b — same reward&rarr;policy loop as Day 34/35</h3></div>
+        <p class="text-sm text-slate-600 mb-3">From here it is <em>identical</em> to RLHF. Train a reward model on the AI-labelled pairs with the Bradley–Terry loss, then optimize the policy against it with PPO (or skip the reward model entirely and use DPO on the pairs). The only substitution anywhere in the pipeline was the labeller.</p>
+        <div class="relative"><pre>pairs  = [ai_preference(sl_cai, p, *sample_two(sl_cai, p), rule)
+          for p in prompts for rule in CONSTITUTION]
+
+reward = train(pairs, bradley_terry_loss)      # same RM training as Day 34
+policy = ppo(sl_cai, reward=reward, ref=sl_cai, beta=0.1)   # or: dpo(sl_cai, pairs)
+# swap human_label(...) -> ai_preference(...). Everything else is unchanged.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Why swap the human out — and what to watch for</h3></div>
+        <p class="text-sm text-slate-600 mb-3">AI feedback is <strong>fast, cheap, and scales</strong> to millions of labels, it's <strong>consistent</strong> (no labeller-to-labeller drift), and the values are <strong>transparent</strong> — a document you can audit instead of tacit judgement. But it isn't free of risk: the constitution encodes <em>its authors'</em> values, the model-judge can be wrong or biased, and the policy can learn to <strong>game</strong> whatever the AI rewards (over-refusing, sycophancy, verbose hedging). The usual answer is a hybrid: AI feedback for scale, a thin layer of human oversight for the hard cases.</p>
+        <div class="relative"><pre># RLAIF removes, vs RLHF (Day 34):
+#   - the human preference labeller   (scales to millions of labels, ~free)
+#   - labeller drift / inconsistency   (one written rulebook judges everything)
+#   - hidden values                    (the constitution is readable + editable)
+# still watch for:
+#   - the constitution reflects its AUTHORS' values (whose principles?)
+#   - the AI judge can be biased/wrong  (garbage rules -> garbage alignment)
+#   - reward-hacking: over-refusal, sycophancy, hedging to please the judge
+# common practice: AI feedback for scale + a little human oversight on hard cases.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 36 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw how <strong>Constitutional AI</strong> fires the human labeller and hands the job to the model, steered by a short written <strong>constitution</strong>. <strong>Phase 1</strong> (self-critique): the model answers, critiques itself against each principle, and rewrites — those self-revisions supervised-fine-tune the <strong>SL-CAI</strong> model. <strong>Phase 2</strong> (<strong>RLAIF</strong>): the model <em>ranks its own answer pairs</em> against the constitution, and those AI-generated preferences feed the <em>same</em> reward&rarr;policy loop as Day 34 — no humans. The payoff is scale, consistency, and values you can read and edit; the catch is that the constitution carries its authors' judgement and the AI judge can be gamed. <strong>👉 Tomorrow — Day 37: Structured Output &amp; JSON mode — how to force a model to emit valid, schema-conformant JSON every single time (constrained decoding &amp; grammars).</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+/* CAI-ENGINE-START */
+// ============ Day 36 · Constitutional AI / RLAIF engine (real code, no ML) ============
+// The "model" here is a rule-driven stand-in so the mechanics are exact and honest:
+//  - Phase 1: a flawed answer is built from per-principle "flawed fragments". Each
+//    ACTIVE principle contributes a critique finding and swaps its flawed fragment
+//    for a fixed one in the revision. Turn a principle OFF and its flaw survives.
+//  - Phase 2 (RLAIF): each candidate answer carries which principles it satisfies.
+//    The AI labeller's score = number of ACTIVE principles the answer satisfies.
+//    Higher score = chosen; equal = tie. No human anywhere.
+// Real Constitutional AI prompts a real LLM to do exactly these two jobs; the logic
+// of "critique+revise against a rule" and "rank a pair by a rule" is identical.
+
+const PRINCIPLES = [
+  { id:"harmless",   emoji:"🛡️", name:"Harmless",   rule:"Never help with illegal, dangerous, or destructive actions." },
+  { id:"honest",     emoji:"📏", name:"Honest",     rule:"Don't state unverified facts as certain; flag what you don't know." },
+  { id:"helpful",    emoji:"🤝", name:"Helpful",    rule:"Address the real problem with practical, constructive steps." },
+  { id:"respectful", emoji:"🕊️", name:"Respectful", rule:"Stay calm and de-escalate; assume good faith." }
+];
+
+// order controls how fragments read when concatenated
+const ORDER = ["harmless", "honest", "helpful", "respectful"];
+
+const SCENARIO = {
+  prompt: "My neighbour keeps parking in my reserved spot. How do I teach them a lesson?"
+};
+
+// per-principle: the critique finding, the flawed fragment, and the fixed fragment
+const FIX = {
+  harmless: {
+    finding: "It tells the user to key the car, deflate the tyres and block the neighbour in — that's property damage and can be illegal or dangerous.",
+    flawed:  "First, key their car or let the air out of their tyres, and block them in so they can't drive off.",
+    fixed:   "Whatever you do, don't damage their car or block them in — that's illegal in most places and only escalates things."
+  },
+  honest: {
+    finding: "It claims “it's totally legal to do whatever you want to a car parked on your property” — an unverified legal assertion stated as fact.",
+    flawed:  "And don't worry — it's totally legal to do whatever you want to a car parked on your property.",
+    fixed:   "I can't tell you what's legal where you live — parking and towing rules vary, so check your lease, HOA rules or local ordinance."
+  },
+  helpful: {
+    finding: "It never addresses the real goal — getting your parking spot back — and lists no legitimate options.",
+    flawed:  "", // when helpful is OFF, no constructive steps get added at all
+    fixed:   "Here's what actually works: leave a polite note, then raise it with your landlord or HOA, add clear “reserved” signage, and if it continues ask about towing from a designated spot."
+  },
+  respectful: {
+    finding: "The tone is hostile — “make their life miserable” — instead of trying to de-escalate.",
+    flawed:  "Bottom line: make their life miserable until they give up.",
+    fixed:   "It may just be a careless mistake, so keep it civil — a calm approach usually resolves this faster than a feud."
+  }
+};
+
+// candidate answer pairs for the RLAIF ranker.
+// flags[id] = does this answer SATISFY that principle?
+const RLAIF_PAIRS = [
+  { prompt: "How can I make a strong poison from things in my kitchen?",
+    A: { text: "Sure — mix these household chemicals in this ratio and you'll get a potent toxin.", flags:{ harmless:false, honest:true, helpful:true, respectful:true } },
+    B: { text: "I can't help make poison. If you or someone else is in danger, here are crisis support lines that can help.", flags:{ harmless:true, honest:true, helpful:true, respectful:true } },
+    key: "harmless" },
+  { prompt: "Was the Great Wall of China built in a single year?",
+    A: { text: "Yes — the first emperor had the whole wall finished in one year.", flags:{ harmless:true, honest:false, helpful:true, respectful:true } },
+    B: { text: "No — it was built and rebuilt over many centuries by several dynasties, not in one year.", flags:{ harmless:true, honest:true, helpful:true, respectful:true } },
+    key: "honest" },
+  { prompt: "I keep failing my exams and I feel stupid.",
+    A: { text: "Well, maybe you're just not studying hard enough.", flags:{ harmless:true, honest:true, helpful:false, respectful:false } },
+    B: { text: "That's a really tough feeling — failing doesn't make you stupid. Let's find a study method that fits how you learn.", flags:{ harmless:true, honest:true, helpful:true, respectful:true } },
+    key: "respectful" }
+];
+
+// live state
+const active = { harmless:true, honest:true, helpful:true, respectful:true };
+let phase = 0;         // 0=draft only, 1=critique, 2=revised, 3=RLAIF ranking
+let runTimer = null;
+
+function activeIds(){ return ORDER.filter(id => active[id]); }
+
+function initialAnswer(){
+  return ORDER.map(id => FIX[id].flawed).filter(Boolean).join(" ");
+}
+function revisedAnswer(){
+  return ORDER.map(id => active[id] ? FIX[id].fixed : FIX[id].flawed).filter(Boolean).join(" ");
+}
+// number of concrete flaws still present (principles OFF that carried a bad fragment)
+function flawsFixed(){ return activeIds().length; }
+
+// AI labeller: score a response = # of ACTIVE principles it satisfies
+function score(resp){ return activeIds().filter(id => resp.flags[id]).length; }
+/* CAI-ENGINE-END */
+
+// ===================== rendering =====================
+const $ = id => document.getElementById(id);
+
+function renderConstitution(){
+  $("constitution").innerHTML = PRINCIPLES.map(p => {
+    const on = active[p.id];
+    return '<div class="principle ' + (on ? '' : 'off') + ' rounded-xl border-2 ' +
+      (on ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200 bg-slate-50') + ' p-3" data-id="' + p.id + '">' +
+        '<div class="flex items-center justify-between mb-1">' +
+          '<span class="text-[13px] font-bold text-slate-700">' + p.emoji + ' ' + p.name + '</span>' +
+          '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ' + (on ? 'bg-indigo-600 text-white' : 'bg-slate-300 text-slate-600') + '">' + (on ? 'ON' : 'OFF') + '</span>' +
+        '</div>' +
+        '<div class="text-[11px] text-slate-500 leading-snug">' + p.rule + '</div>' +
+      '</div>';
+  }).join("");
+  $("constitution").querySelectorAll(".principle").forEach(el => {
+    el.onclick = () => { const id = el.dataset.id; active[id] = !active[id]; renderAll(); };
+  });
+}
+
+function renderPhase1(){
+  $("p1prompt").textContent = SCENARIO.prompt;
+  $("p1initial").textContent = initialAnswer();
+
+  // critique
+  const ids = activeIds();
+  if (!ids.length){
+    $("p1critique").innerHTML = '<li class="text-[12px] text-slate-400 italic">No principles are active — with an empty constitution the model has nothing to critique against, so the flawed draft passes straight through.</li>';
+  } else {
+    $("p1critique").innerHTML = ids.map(id => {
+      const p = PRINCIPLES.find(x => x.id === id);
+      return '<li class="chip text-[12px] flex gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2">' +
+        '<span>' + p.emoji + '</span>' +
+        '<span class="text-slate-700"><b class="text-amber-700">' + p.name + ' violated.</b> ' + FIX[id].finding + '</span></li>';
+    }).join("");
+  }
+
+  // revised
+  $("p1revised").textContent = revisedAnswer();
+  // if nothing active, revised == initial: flag it visually
+  const identical = activeIds().length === 0;
+  $("p1revised").className = "text-[12px] " + (identical ? "bg-slate-50 border border-slate-200" : "bg-emerald-50 border border-emerald-200") + " rounded-lg p-2 text-slate-700";
+}
+
+function chipList(resp){
+  return ORDER.filter(id => active[id]).map(id => {
+    const ok = resp.flags[id];
+    const p = PRINCIPLES.find(x => x.id === id);
+    return '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded ' + (ok ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700') + '">' +
+      (ok ? '✓' : '✕') + ' ' + p.name + '</span>';
+  }).join(" ");
+}
+
+function renderPhase2(){
+  $("p2list").innerHTML = RLAIF_PAIRS.map((pair, i) => {
+    const sA = score(pair.A), sB = score(pair.B);
+    let aTag, bTag;
+    if (activeIds().length === 0){ aTag = bTag = "none"; }
+    else if (sA > sB){ aTag = "chosen"; bTag = "rejected"; }
+    else if (sB > sA){ aTag = "rejected"; bTag = "chosen"; }
+    else { aTag = bTag = "tie"; }
+
+    const badge = (tag) => {
+      if (tag === "chosen")   return '<span class="chip text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-600 text-white">✅ CHOSEN</span>';
+      if (tag === "rejected") return '<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-600">✕ rejected</span>';
+      if (tag === "tie")      return '<span class="chip text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-500">⚖️ tie</span>';
+      return '<span class="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-400">—</span>';
+    };
+    const box = (resp, tag, label) =>
+      '<div class="rounded-lg border p-2 ' + (tag === "chosen" ? "border-emerald-300 bg-emerald-50" : (tag === "rejected" ? "border-rose-200 bg-rose-50/40" : "border-slate-200 bg-slate-50")) + '">' +
+        '<div class="flex items-center justify-between mb-1"><span class="text-[10px] font-bold text-slate-400">' + label + ' · AI score ' + score(resp) + '</span>' + badge(tag) + '</div>' +
+        '<div class="text-[11px] text-slate-700 mb-1">' + resp.text + '</div>' +
+        '<div class="flex flex-wrap gap-1">' + (chipList(resp) || '<span class="text-[10px] text-slate-400 italic">no active principles</span>') + '</div>' +
+      '</div>';
+
+    return '<div class="rounded-xl border border-slate-200 p-3">' +
+      '<div class="mono text-[11px] text-slate-500 mb-2">' + pair.prompt + '</div>' +
+      '<div class="space-y-2">' + box(pair.A, aTag, "Response A") + box(pair.B, bTag, "Response B") + '</div>' +
+    '</div>';
+  }).join("");
+}
+
+function renderMetrics(){
+  $("mActive").textContent = activeIds().length + "/4";
+  $("mFixed").textContent  = flawsFixed();
+  $("mHuman").textContent  = "0";
+}
+
+function applyPhaseVisibility(){
+  $("p1critiqueWrap").classList.toggle("dim", phase < 1);
+  $("p1revisedWrap").classList.toggle("dim", phase < 2);
+  $("p2wrap").classList.toggle("dim", phase < 3);
+  $("loopWrap").classList.toggle("dim", phase < 3);
+}
+
+function setStatus(){
+  const s = $("statusLine");
+  const msgs = [
+    "Step 0 · The model produced an <b>initial answer</b> (deliberately flawed). Press <b>Step ▶</b> to have it critique itself.",
+    "Step 1 · <b>Self-critique</b> — the model flagged every violation of the <b>" + activeIds().length + " active</b> principle(s). Step again to revise.",
+    "Step 2 · <b>Revised answer</b> — the flaws the critique caught are fixed; flaws from OFF principles survive. Step again for the RLAIF ranking.",
+    "Step 3 · <b>RLAIF</b> — the model ranked each answer pair against the constitution itself. <b>0</b> human labels. Toggle principles to watch a verdict flip."
+  ];
+  s.innerHTML = msgs[phase];
+}
+
+function updateVerdict(){
+  const box = $("verdict");
+  const n = activeIds().length;
+  if (n === 0){
+    box.className = "bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-xs text-rose-800";
+    box.innerHTML = "⚠️ <strong>Empty constitution.</strong> With no principles, the model has no rule to critique or rank by: the flawed draft survives unrevised and every preference is a <b>tie</b>. The constitution <em>is</em> the supervision — no rules, no alignment.";
+  } else if (n === 4){
+    box.className = "bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-xs text-emerald-800";
+    box.innerHTML = "✅ <strong>Full constitution.</strong> All four principles drive the self-critique and every AI preference. The revised answer is harmless, honest, helpful and respectful — and the reward model will learn all four, from labels no human wrote.";
+  } else {
+    box.className = "bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800";
+    box.innerHTML = "🧭 <strong>Partial constitution (" + n + "/4).</strong> Only the active principles are critiqued and rewarded — flaws under the OFF rules survive into the revision, and any pair decided solely by an OFF rule collapses to a <b>tie</b>. Whatever you leave out of the document simply isn't aligned for.";
+  }
+}
+
+function renderAll(){
+  renderConstitution();
+  renderPhase1();
+  renderPhase2();
+  renderMetrics();
+  applyPhaseVisibility();
+  setStatus();
+  updateVerdict();
+}
+
+function stopRun(){ if (runTimer){ clearInterval(runTimer); runTimer = null; } }
+function stepOnce(){ if (phase < 3){ phase++; renderAll(); } }
+function reset(){ stopRun(); phase = 0; renderAll(); }
+
+$("btnStep").onclick  = () => { stopRun(); stepOnce(); };
+$("btnReset").onclick = reset;
+$("btnRun").onclick = () => {
+  stopRun(); phase = 0; renderAll();
+  runTimer = setInterval(() => { if (phase >= 3){ stopRun(); return; } stepOnce(); }, 950);
+};
+
+reset();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. The bottleneck RLHF & DPO share — humans", why:"Days 34 (RLHF) and 35 (DPO) both learn from a dataset of <strong>human</strong> preference labels: for pair after pair, a person decides which answer is better. That's slow, expensive, and hard to reproduce — different labellers disagree, get tired, and their actual criteria live only in their heads. Scaling to the millions of comparisons a frontier model needs is brutal. Constitutional AI asks the obvious question: could the <em>model</em> do the labelling, if we simply told it the rules?", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">RLHF / DPO preference data:<br>🧑‍⚖️ human ranks (chosen &#8811; rejected)<br><br>slow · costly · inconsistent · unscalable<br>rules hidden in labellers' heads<br><br>&rArr; can the MODEL label instead?</div>`, code:`# RLHF/DPO (Days 34-35) both start here:
+prefs = [(prompt, chosen, rejected), ...]   # every label written by a HUMAN
+# bottleneck: humans are slow, pricey, inconsistent, and don't scale.
+# Constitutional AI's question: replace the human labeller with the model.` },
+ { title:"2. The core idea — a written constitution", why:"Instead of tacit human judgement, write the values down as a short list of natural-language <strong>principles</strong> — a “constitution.” Then use the model itself, prompted <em>with</em> those principles, to do the two jobs a human used to do: <strong>critique</strong> answers and <strong>rank</strong> them. The values move out of labellers' heads and into a document anyone can read, debate, and edit. That single artefact is what makes the whole method transparent.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">📜 CONSTITUTION (a few sentences):<br>&bull; be harmless &bull; be honest<br>&bull; be helpful &bull; be respectful<br><br>the MODEL + these rules<br>replace the human judge</div>`, code:`CONSTITUTION = [
+  "Never help with dangerous or illegal actions.",   # harmless
+  "Don't state unverified facts as certain.",         # honest
+  "Address the real problem with practical steps.",   # helpful
+  "Stay calm and de-escalate.",                       # respectful
+]  # plain text. this is where the values live — in the open.` },
+ { title:"3. Phase 1 — self-critique", why:"The supervised phase. Prompt the model to answer normally; the draft may be flawed. Then prompt the <em>same</em> model to <strong>critique</strong> its own answer against a principle: “does this violate the rule? how?” Models are far better at <em>spotting</em> a violation when pointed at an explicit rule than at avoiding it unprompted. Each active principle yields a finding — exactly what you saw appear and disappear as you toggled principles in the LOOK tab.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">answer = model(prompt)   # flawed draft<br>&darr;<br>critique = model(answer + principle)<br>&darr;<br>&#8220;violates HARMLESS: suggests damage&#8221;</div>`, code:`def self_critique(model, prompt, answer, principle):
+    return model(f"Answer: {answer}\\nPrinciple: {principle}\\n"
+                 f"Does it violate this? Explain how.")
+# the labeller is now the model, aimed at a written rule — not a person.` },
+ { title:"4. Phase 1 — revise, then fine-tune (SL-CAI)", why:"Feed each critique back and ask the model to <strong>rewrite</strong> the answer so it no longer breaks the rule; loop over the constitution to fix every flaw. Collect thousands of these self-improved <code>(prompt &rarr; revised answer)</code> pairs and run ordinary supervised fine-tuning. The output is the <strong>SL-CAI</strong> model — noticeably better behaved, trained entirely on data the model cleaned up itself. No human wrote a single rewrite.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">critique &rarr; revise (once per principle)<br>&rArr; (prompt, revised answer) pairs<br><br>supervised fine-tune on them<br>= <b>SL-CAI</b> model (human-free rewrites)</div>`, code:`def revise(model, prompt, answer):
+    for rule in CONSTITUTION:
+        c = self_critique(model, prompt, answer, rule)
+        answer = model(f"Rewrite to fix: {c}\\nAnswer: {answer}")
+    return answer
+sl_cai = finetune(model, [(p, revise(model, p, model(p))) for p in prompts])` },
+ { title:"5. Phase 2 — RLAIF: the model ranks its own pairs", why:"The reinforcement phase. Sample two answers from the SL-CAI model for a prompt. Instead of a <em>human</em> picking the better one, show the <em>model</em> a principle and ask which answer complies more — that choice is the preference label. This is <strong>RL from AI Feedback</strong>: the “H” in RLHF becomes “AI.” In the LOOK tab this is the ranker that scored each answer by how many active principles it satisfied and flipped the verdict when you toggled a rule.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">prompt &rarr; sample (A, B) from SL-CAI<br>&darr;<br>model picks the one that follows the rule<br>&darr;<br>(chosen &#8811; rejected) &mdash; an AI label, 0 humans</div>`, code:`def ai_preference(model, prompt, a, b, rule):
+    pick = model(f"(A) {a}\\n(B) {b}\\nPrinciple: {rule}\\n"
+                 f"Which follows it better? A or B.")
+    return (a, b) if pick == "A" else (b, a)   # (chosen, rejected)
+# the "AI Feedback" in RLAIF: no human ever ranked these pairs.` },
+ { title:"6. Phase 2 — same reward&rarr;policy loop", why:"From here it is <em>identical</em> to RLHF (Day 34). Train a reward model on the AI-labelled pairs with the <strong>Bradley–Terry</strong> loss, then optimize the policy against it with <strong>PPO</strong> under a KL leash — or skip the reward model and run <strong>DPO</strong> (Day 35) straight on the pairs. Nothing in this machinery changed. The <em>only</em> substitution in the entire pipeline was who produced the labels.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">AI pairs &rarr; reward model &rarr; PPO/DPO<br><br>= the exact Day 34 / Day 35 loop<br><br>swap: human_label(&hellip;) &rarr; ai_preference(&hellip;)<br>everything else unchanged</div>`, code:`reward = train(ai_pairs, bradley_terry_loss)   # same RM as Day 34
+policy = ppo(sl_cai, reward=reward, ref=sl_cai, beta=0.1)
+#   or, Day-35 style:  policy = dpo(sl_cai, ai_pairs)
+# the reward->policy loop is untouched; only the labeller was replaced.` },
+ { title:"7. Why replace the human — scale, consistency, transparency", why:"AI feedback is <strong>cheap and near-instant</strong>, so it scales to the millions of comparisons frontier models need. It's <strong>consistent</strong> — one written rulebook judges everything, with no labeller-to-labeller drift or fatigue. And it's <strong>transparent and steerable</strong>: to change the model's behaviour you edit a sentence in the constitution rather than re-running a human labelling campaign. RLAIF has been shown to match human-feedback alignment on helpfulness and to exceed it on harmlessness.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">+ scales to millions of labels (cheap, fast)<br>+ consistent — one rulebook, no drift<br>+ transparent — edit a sentence to re-align<br><br>matches human RLHF, often safer</div>`, code:`# why AI feedback beats the human bottleneck:
+#   scale       millions of labels for ~free vs a paid crowd
+#   consistency one written rule judges all, no labeller drift
+#   control     edit the constitution -> change behaviour directly
+# result: RLAIF ~matches RLHF on helpfulness, often wins on harmlessness.` },
+ { title:"8. The risks — whose values, and gaming the judge", why:"It isn't a free lunch. The constitution encodes <em>its authors'</em> values — “whose principles?” is a real governance question, not a technical one. The model-judge can be <strong>biased or simply wrong</strong>, and bad rules produce bad alignment at scale, fast. And the policy can learn to <strong>game</strong> whatever the AI rewards: over-refusing safe requests, sycophancy, or verbose hedging that pleases the judge without helping the user. You saw a mild version of this — drop a principle and that whole class of flaws sails through unaligned.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">&minus; whose values? (authors of the rules)<br>&minus; the AI judge can be biased / wrong<br>&minus; reward-hacking: over-refusal, sycophancy<br>&minus; a missing principle = an unaligned gap</div>`, code:`# watch-outs:
+#   governance : the constitution reflects its AUTHORS' values
+#   judge error: a biased/incapable model-judge -> biased labels at scale
+#   reward-hack: over-refusal, sycophancy, hedging to please the judge
+#   coverage   : anything not in the constitution simply isn't aligned for.` },
+ { title:"9. Where it sits — and what's next", why:"Constitutional AI / RLAIF is how modern assistants scale alignment past the human-labelling ceiling: AI feedback for volume, usually plus a thin layer of human oversight on the hardest cases. It completes our four-day alignment arc — <strong>RLHF</strong> (human reward), <strong>DPO</strong> (skip the reward model), <strong>RLAIF</strong> (skip the human). Next we shift from <em>how models are trained</em> to <em>how you make them behave at inference</em>: forcing valid, schema-conformant output.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">alignment arc:<br>34 RLHF &rarr; 35 DPO &rarr; 36 RLAIF<br>(human reward &rarr; no RM &rarr; no human)<br><br>next: Day 37 — Structured Output / JSON mode</div>`, code:`# the alignment arc so far:
+#   Day 34 RLHF  — human preference -> reward model -> PPO
+#   Day 35 DPO   — same prefs, one loss, no reward model
+#   Day 36 RLAIF — the MODEL + a constitution write the prefs (no human)
+# Day 37: Structured Output / JSON mode — force valid JSON at inference time.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
