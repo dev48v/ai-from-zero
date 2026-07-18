@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 37 — Long-Context Tricks</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .tok { transition: all .15s ease; }
+  input[type=range]{ accent-color:#6366f1; }
+  .seg { transition: all .15s ease; cursor:pointer; }
+  canvas { image-rendering:auto; }
+  .pulse-line { animation: fadeIn .3s ease-out; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 37</div>
+      <h1 class="text-xl font-bold">🧵 Long-Context Tricks — attention costs <em>n²</em>, so how do models read a whole book? Windows, sparsity, sinks, RoPE scaling &amp; the "lost in the middle" catch</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Self-attention makes every token look at every other token. That's <em>n²</em> work — and it explodes.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Double the context and you <strong>quadruple</strong> the compute and memory. That single fact is why a 200k-token window is hard. The whole long-context playbook is a set of tricks to dodge that wall: only attend <strong>locally</strong> (sliding window), attend <strong>sparsely</strong> with a few global hops, keep a handful of <strong>attention sinks</strong> so streaming stays stable, <strong>interpolate positions</strong> (RoPE scaling) to stretch past the trained length — and then live with the fact that models get <strong>lost in the middle</strong> of a long prompt. Drag the sliders below and watch each trick bite. Everything runs <strong>in your browser</strong>, no model calls.</p>
+      </div>
+
+      <!-- ===================== CARD A · quadratic wall + windows ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <div class="text-xs uppercase font-bold text-indigo-600">① The quadratic wall <span class="text-slate-400 normal-case font-normal">— which token pairs actually get an attention score?</span></div>
+          <div id="modeBtns" class="flex gap-1 bg-slate-100 rounded-lg p-1 text-[12px] font-semibold">
+            <button data-mode="full"   class="seg px-3 py-1.5 rounded-md">Full · O(n²)</button>
+            <button data-mode="window" class="seg px-3 py-1.5 rounded-md">Sliding window · O(n·w)</button>
+            <button data-mode="sparse" class="seg px-3 py-1.5 rounded-md">Sparse + sinks · O(n·w)</button>
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-start">
+          <!-- LEFT: attention grid -->
+          <div>
+            <div class="flex items-center justify-center">
+              <canvas id="attnGrid" width="380" height="380" style="width:100%;max-width:380px;height:auto;" class="rounded-lg border border-slate-200"></canvas>
+            </div>
+            <div class="flex items-center justify-center gap-4 mt-2 text-[11px] text-slate-500">
+              <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#6366f1"></span> computed</span>
+              <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#f59e0b"></span> global sink</span>
+              <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#e2e8f0"></span> skipped (saved)</span>
+              <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#f8fafc;border:1px solid #e2e8f0"></span> future (masked)</span>
+            </div>
+            <p class="text-[11px] text-slate-400 text-center mt-1">Rows = a query token asking "who should I read?" · columns = the key tokens it could read. Causal: no peeking at the future (upper-right stays blank).</p>
+          </div>
+
+          <!-- RIGHT: sliders + cost -->
+          <div class="space-y-4">
+            <div>
+              <label class="text-[12px] font-bold text-slate-600 flex justify-between">Sequence length <span class="text-slate-400">n</span> <span id="nVal" class="text-indigo-600 stat">24</span></label>
+              <input id="nRange" type="range" min="8" max="40" value="24" class="w-full">
+            </div>
+            <div id="wRow">
+              <label class="text-[12px] font-bold text-slate-600 flex justify-between">Window width <span class="text-slate-400">w</span> <span id="wVal" class="text-indigo-600 stat">6</span></label>
+              <input id="wRange" type="range" min="2" max="20" value="6" class="w-full">
+              <p class="text-[10px] text-slate-400">Only the last <b>w</b> keys are read. Ignored in Full mode.</p>
+            </div>
+            <div id="sinkRow">
+              <label class="text-[12px] font-bold text-slate-600 flex justify-between">Global sink columns <span class="text-slate-400">S</span> <span id="sinkVal" class="text-amber-600 stat">4</span></label>
+              <input id="sinkRange" type="range" min="0" max="8" value="4" class="w-full">
+              <p class="text-[10px] text-slate-400">First <b>S</b> tokens stay visible to everyone (Sparse mode).</p>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 text-center">
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-slate-400">Full: n²/2 scores</div><div id="costFull" class="text-lg font-bold text-slate-700 mt-1 stat">300</div></div>
+              <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-indigo-500">This mode</div><div id="costWin" class="text-lg font-bold text-indigo-600 mt-1 stat">300</div></div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-emerald-500">Saved</div><div id="costCut" class="text-lg font-bold text-emerald-600 mt-1 stat">0%</div></div>
+            </div>
+
+            <div>
+              <div class="text-[11px] font-bold text-slate-500 mb-1">Compute vs context length</div>
+              <canvas id="costCurve" width="380" height="180" style="width:100%;height:auto;" class="rounded-lg border border-slate-200 bg-white"></canvas>
+            </div>
+            <p id="costText" class="text-[12px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- ===================== CARD B · attention sinks / StreamingLLM ===================== -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-1">② Attention sinks · StreamingLLM <span class="text-slate-400 normal-case font-normal">— can a fixed window stream forever?</span></div>
+          <p class="text-[11px] text-slate-400 mb-3">A rolling window seems perfect for endless chat — just drop old tokens. But softmax has to put its probability <em>somewhere</em>, and the very first tokens quietly become an "<strong>attention sink</strong>". Evict them and the scores blow up → perplexity explodes. Keep ~4 sink tokens and streaming stays stable forever.</p>
+
+          <div class="flex items-center gap-2 mb-3 flex-wrap">
+            <button id="keepSink" class="px-3 py-2 rounded-lg font-semibold text-[12px] bg-emerald-600 text-white">🔒 Keep 4 sinks: ON</button>
+            <button id="streamPlay" class="px-3 py-2 rounded-lg font-semibold text-[12px] bg-slate-200">▶ Stream</button>
+          </div>
+
+          <div class="mb-2">
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Tokens streamed <span id="streamVal" class="text-indigo-600 stat">44</span></label>
+            <input id="streamRange" type="range" min="8" max="60" value="44" class="w-full">
+          </div>
+          <div class="mb-3">
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Window size <span id="streamWVal" class="text-indigo-600 stat">8</span></label>
+            <input id="streamWRange" type="range" min="4" max="16" value="8" class="w-full">
+          </div>
+
+          <div id="streamStrip" class="flex flex-wrap gap-1 mb-2"></div>
+          <div class="flex items-center justify-center gap-4 mb-3 text-[11px] text-slate-500">
+            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#f59e0b"></span> sink (kept)</span>
+            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#6366f1"></span> in window</span>
+            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#e2e8f0"></span> evicted</span>
+          </div>
+
+          <canvas id="pplCurve" width="380" height="150" style="width:100%;height:auto;" class="rounded-lg border border-slate-200 bg-white mb-2"></canvas>
+          <div id="pplBox" class="rounded-lg px-3 py-2 text-[12px]"></div>
+        </div>
+
+        <!-- ===================== CARD C · lost in the middle ===================== -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5">
+          <div class="text-xs uppercase font-bold text-indigo-600 mb-1">③ Lost in the middle <span class="text-slate-400 normal-case font-normal">— a long window ≠ a well-used window</span></div>
+          <p class="text-[11px] text-slate-400 mb-3">Even when a fact <em>fits</em> in the context, models retrieve it far better when it's near the <strong>start</strong> (primacy) or the <strong>end</strong> (recency). Bury the "needle" in the <strong>middle</strong> and accuracy sags into a U-shape — and it sags deeper as the context grows. Drag the needle and watch retrieval dip.</p>
+
+          <div class="mb-2">
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Documents in context <span id="ctxVal" class="text-indigo-600 stat">22</span></label>
+            <input id="ctxRange" type="range" min="5" max="40" value="22" class="w-full">
+          </div>
+          <div class="mb-3">
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Needle position <span id="needleVal" class="text-indigo-600 stat">50%</span></label>
+            <input id="needleRange" type="range" min="0" max="100" value="50" class="w-full">
+          </div>
+
+          <div id="laStrip" class="flex flex-wrap gap-1 mb-3"></div>
+
+          <div class="grid grid-cols-[auto_1fr] gap-3 items-center mb-3">
+            <div class="text-center">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Retrieval acc.</div>
+              <div id="laAccText" class="text-2xl font-bold text-indigo-600 stat">—</div>
+            </div>
+            <canvas id="laCurve" width="380" height="120" style="width:100%;height:auto;" class="rounded-lg border border-slate-200 bg-white"></canvas>
+          </div>
+          <div id="laVerdict" class="rounded-lg px-3 py-2 text-[12px]"></div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto">These tricks compose. Real long-context models mix <strong>local windows</strong> for cheap detail, a few <strong>global/sink tokens</strong> for stability and long-range glue, <strong>position interpolation</strong> to stretch the trained length, and hardware kernels like FlashAttention (Day 25) to never materialise the full n×n matrix. What they <em>can't</em> fully fix is "lost in the middle" — so retrieval systems still put the most important evidence at the edges of the prompt.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Beating the n² wall</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a sliding-window attention mask</h2>
+    <p class="text-slate-500 mb-8">The single most important long-context trick is turning the dense <em>n×n</em> attention mask into a thin <strong>band</strong>. Here it is in annotated pseudo-code — starting from the quadratic problem, adding the window, then sinks, sparsity, RoPE scaling, and a fix for lost-in-the-middle.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">The problem — full attention is n×n</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Every query token scores <em>every</em> past key token. The scores form an <code>n×n</code> matrix, so compute and memory grow with <strong>n²</strong>. Double the context and you 4× the cost. That is the quadratic wall the rest of this page dismantles.</p>
+        <div class="relative"><pre>scores = Q @ K.T                     # shape (n, n)  &lt;-- the n&times;n blowup
+scores = scores.masked_fill(~causal, -inf)   # no peeking at the future
+attn   = softmax(scores, dim=-1) @ V # cost &amp; memory ~ O(n&sup2;)
+# context 4k -&gt; 16M scores. context 128k -&gt; 16.8B scores. it doesn't scale.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Sliding-window (local) attention — O(n·w)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Let each token attend only to the last <code>w</code> keys — a diagonal <strong>band</strong> instead of a full triangle. Cost drops from <code>O(n²)</code> to <code>O(n·w)</code>, which is <em>linear</em> in context. Information still travels far because layers stack: with <code>L</code> window layers the effective receptive field is about <code>L·w</code>.</p>
+        <div class="relative"><pre>def sliding_window_mask(n, w):
+    mask = zeros(n, n, dtype=bool)
+    for i in range(n):
+        lo = max(0, i - w + 1)
+        mask[i, lo : i + 1] = True   # causal AND within the window
+    return mask                      # ~ n*w True cells, not n&sup2;
+# receptive field grows with DEPTH: L stacked window layers -&gt; reach ~ L*w.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Attention sinks — make streaming stable (StreamingLLM)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A pure rolling window breaks for endless streaming: once it slides past the first tokens, the model destabilises and perplexity explodes. The fix is tiny — always keep the first few tokens as global "<strong>attention sinks</strong>." Softmax needs somewhere to dump leftover probability; those early tokens are it.</p>
+        <div class="relative"><pre>def streaming_mask(n, w, sink=4):
+    mask = sliding_window_mask(n, w)
+    mask[:, :sink] = True    # first `sink` keys stay visible to everyone
+    return mask
+# WHY: softmax must sum to 1; early tokens absorb the "spare" attention.
+# evict them -&gt; scores blow up. keep ~4 -&gt; stream millions of tokens, stably.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Sparse / dilated attention — cheap long range</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Local windows miss distant tokens. Add a few <strong>strided (dilated)</strong> hops plus a handful of <strong>global</strong> tokens so information can jump across the sequence — while the pattern stays <code>~O(n·w)</code>. This is the Longformer / BigBird recipe: local + global + random/strided.</p>
+        <div class="relative"><pre>def sparse_mask(n, w, stride=64, globals=(0,1,2,3)):
+    mask = sliding_window_mask(n, w)         # local detail
+    for i in range(n):
+        for j in range(0, i + 1, stride):    # dilated long-range hops
+            mask[i, j] = True
+    mask[:, list(globals)] = True            # a few always-visible tokens
+    return mask                              # still ~O(n*w), not O(n&sup2;)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">RoPE scaling — stretch past the trained length</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A model trained at 4k tokens breaks if you feed it position 30,000 — it never saw those rotary angles. Don't <em>extrapolate</em>; <strong>interpolate</strong>. Squeeze the new positions back into the range the model already knows (Position Interpolation). NTK-aware scaling and YaRN refine this; a little fine-tuning recovers quality.</p>
+        <div class="relative"><pre># trained at 4k, want 32k?  scale positions into the known range.
+scale = train_len / target_len       # e.g. 4096 / 32768 = 1/8
+pos   = arange(target_len) * scale   # positions now live in [0, 4096)
+q, k  = apply_rope(q, k, pos)        # rotary embeddings on scaled positions
+# extrapolation breaks; interpolation (PI / NTK / YaRN) holds. fine-tune a bit.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Mitigate "lost in the middle"</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A big window doesn't guarantee the model <em>uses</em> the middle of it. Accuracy is U-shaped: strong at the start and end, weak in between. So <strong>place the most important evidence at the edges</strong>, retrieve fewer chunks (tighter top-k), and re-rank so the needle sits first or last.</p>
+        <div class="relative"><pre># accuracy is U-shaped in position -&gt; exploit primacy &amp; recency:
+ordered = [most_relevant] + middling_chunks + [second_most_relevant]
+#          ^ start (primacy)                        ^ end (recency)
+# also: smaller top-k (less to get lost in) + re-rank the needle to an edge.
+# "long context" is a capacity, not a guarantee that every token is read.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 37 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw why attention is <strong>O(n²)</strong> and the tricks that fight it: <strong>sliding-window</strong> attention makes cost linear (<code>O(n·w)</code>), <strong>sparse/dilated</strong> patterns add cheap long-range hops, <strong>attention sinks</strong> keep streaming stable, and <strong>RoPE scaling</strong> stretches a model past its trained length. And you met the stubborn catch — models get <strong>lost in the middle</strong>, so we still put the key evidence at the edges. <strong>👉 Tomorrow — Day 38: Evals &amp; LLM-as-a-Judge — how we actually measure whether a model is good, why a model can grade another model, and the biases that sneak in (position, verbosity, self-preference).</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+  if (t.dataset.tab === "look") renderAll();   // canvases need a visible layout
+});
+
+const $ = id => document.getElementById(id);
+
+/* LONGCTX-ENGINE-START */
+// ===== Day 37 · Long-Context Tricks — client-side simulation (no ML) =====
+// Everything here is exact arithmetic on attention *patterns* and simple,
+// literature-shaped curves. No weights, no inference — just the mechanics:
+//  A) which (query,key) pairs get an attention score, and what that costs;
+//  B) StreamingLLM: keep the first few "sink" tokens or perplexity explodes;
+//  C) lost-in-the-middle: retrieval accuracy is U-shaped in needle position.
+const SINK_KEEP = 4;   // StreamingLLM keeps this many initial tokens
+
+const S = {
+  mode: "full", n: 24, w: 6, sink: 4,          // card A
+  streamT: 44, streamW: 8, keepSink: true,     // card B
+  ctx: 22, needle: 0.5                          // card C
+};
+
+// does query i attend to key j under the current mode? (causal enforced by caller)
+function attends(i, j){
+  const inWin  = (i - j) < S.w;
+  const inSink = j < S.sink;
+  if (S.mode === "full")   return { on:true,  sink:false };
+  if (S.mode === "window") return { on:inWin, sink:false };
+  /* sparse */             return { on:(inWin || inSink), sink:(inSink && !inWin) };
+}
+
+// count computed scores under current mode (causal)
+function activeScores(){
+  let c = 0;
+  for (let i=0;i<S.n;i++) for (let j=0;j<=i;j++) if (attends(i,j).on) c++;
+  return c;
+}
+
+// lost-in-the-middle accuracy: U-shape, deeper dip for bigger context.
+function laAcc(p, ctx){
+  const dip  = 0.12 + (ctx-5)/35 * 0.42;         // deeper as context grows
+  const peak = 0.95;
+  let a = peak - dip * (1 - Math.pow(2*p-1, 2));  // parabola: high at edges
+  a += 0.045 * p;                                 // recency slightly > primacy
+  return Math.max(0.15, Math.min(0.98, a));
+}
+
+// StreamingLLM perplexity: flat if sinks kept, else explodes once window
+// slides past the start (first tokens evicted).
+function pplAt(t, keep){
+  const w = S.streamW;
+  if (keep) return 8.2;                           // stable forever
+  if (t <= w) return 8.2;                          // window still covers start
+  return Math.min(260, 8.2 + (t - w) * 4.4);       // sinks evicted -> blow up
+}
+/* LONGCTX-ENGINE-END */
+
+// ===================== CARD A rendering =====================
+function drawGrid(){
+  const cv = $("attnGrid"); if (!cv) return;
+  const g = cv.getContext("2d");
+  const px = cv.width, N = S.n, cell = px / N;
+  g.clearRect(0,0,px,px);
+  for (let i=0;i<N;i++){          // query row
+    for (let j=0;j<N;j++){        // key col
+      let col;
+      if (j > i){ col = "#f8fafc"; }                 // future (masked)
+      else {
+        const a = attends(i,j);
+        if (a.sink)      col = "#f59e0b";            // global sink
+        else if (a.on)   col = "#6366f1";            // computed
+        else             col = "#e2e8f0";            // skipped (saved)
+      }
+      g.fillStyle = col;
+      g.fillRect(j*cell, i*cell, cell-0.5, cell-0.5);
+    }
+  }
+}
+
+function drawCostCurve(){
+  const cv = $("costCurve"); if (!cv) return;
+  const g = cv.getContext("2d");
+  const W = cv.width, H = cv.height, pad = 24;
+  g.clearRect(0,0,W,H);
+  const NMAX = 40;
+  const yMax = NMAX*NMAX;                            // full at n=40
+  const X = n => pad + (n/NMAX)*(W-pad-6);
+  const Y = v => H-18 - (v/yMax)*(H-30);
+  // axes
+  g.strokeStyle = "#e2e8f0"; g.lineWidth=1;
+  g.beginPath(); g.moveTo(pad,8); g.lineTo(pad,H-18); g.lineTo(W-4,H-18); g.stroke();
+  // full O(n^2)
+  g.strokeStyle = "#94a3b8"; g.lineWidth=2; g.beginPath();
+  for (let n=0;n<=NMAX;n++){ const x=X(n),y=Y(n*n); n?g.lineTo(x,y):g.moveTo(x,y); }
+  g.stroke();
+  // window O(n*w) with current w
+  g.strokeStyle = "#6366f1"; g.lineWidth=2.5; g.beginPath();
+  for (let n=0;n<=NMAX;n++){ const c=Math.min(n*n, n*S.w); const x=X(n),y=Y(c); n?g.lineTo(x,y):g.moveTo(x,y); }
+  g.stroke();
+  // current n marker
+  const cx = X(S.n);
+  g.strokeStyle = "#0f172a"; g.setLineDash([3,3]); g.lineWidth=1;
+  g.beginPath(); g.moveTo(cx,8); g.lineTo(cx,H-18); g.stroke(); g.setLineDash([]);
+  // dots
+  g.fillStyle="#94a3b8"; g.beginPath(); g.arc(cx, Y(S.n*S.n), 3.5, 0, 7); g.fill();
+  g.fillStyle="#6366f1"; g.beginPath(); g.arc(cx, Y(Math.min(S.n*S.n,S.n*S.w)), 3.5, 0, 7); g.fill();
+  // labels
+  g.fillStyle="#94a3b8"; g.font="10px ui-monospace, monospace";
+  g.fillText("full n²", W-52, Y(NMAX*NMAX)+12);
+  g.fillStyle="#6366f1"; g.fillText("window n·w", pad+4, Y(NMAX*S.w)-4);
+  g.fillStyle="#64748b"; g.fillText("context length →", W-98, H-4);
+}
+
+function renderCardA(){
+  $("nVal").textContent = S.n;
+  $("wVal").textContent = S.w;
+  $("sinkVal").textContent = S.sink;
+  // segmented control active state
+  document.querySelectorAll("#modeBtns .seg").forEach(b => {
+    const on = b.dataset.mode === S.mode;
+    b.classList.toggle("bg-white", on); b.classList.toggle("shadow-sm", on);
+    b.classList.toggle("text-indigo-600", on); b.classList.toggle("text-slate-500", !on);
+  });
+  // relevance of rows
+  $("wRow").style.opacity   = (S.mode === "full") ? .4 : 1;
+  $("sinkRow").style.opacity = (S.mode === "sparse") ? 1 : .4;
+
+  drawGrid(); drawCostCurve();
+
+  const full = S.n*(S.n+1)/2;
+  const cur  = activeScores();
+  const cut  = Math.round((1 - cur/full)*100);
+  $("costFull").textContent = full;
+  $("costWin").textContent  = cur;
+  $("costCut").textContent  = cut + "%";
+
+  let msg;
+  if (S.mode === "full"){
+    msg = "Full attention: all "+full+" causal pairs get a score. The grey curve is n² — at n="+S.n+" it's "+ (S.n*S.n) +" raw scores. Push n higher and it explodes. This is the wall.";
+  } else if (S.mode === "window"){
+    msg = "Sliding window (w="+S.w+"): only a diagonal band is computed — "+cur+" scores instead of "+full+", <b>"+cut+"% saved</b>. Cost is now O(n·w), the flat indigo line. Distant tokens are reached across stacked layers.";
+  } else {
+    msg = "Sparse + sinks: a local band <span style='color:#6366f1'>▉</span> plus "+S.sink+" always-visible <span style='color:#f59e0b'>▉</span> sink columns for long-range glue — "+cur+" scores, <b>"+cut+"% saved</b>, still ~O(n·w).";
+  }
+  $("costText").innerHTML = msg;
+}
+
+// ===================== CARD B rendering =====================
+function drawPplCurve(){
+  const cv = $("pplCurve"); if (!cv) return;
+  const g = cv.getContext("2d");
+  const W = cv.width, H = cv.height, pad=22, TMAX=60, yMax=260;
+  g.clearRect(0,0,W,H);
+  const X = t => pad + (t/TMAX)*(W-pad-6);
+  const Y = v => H-16 - (v/yMax)*(H-26);
+  g.strokeStyle="#e2e8f0"; g.beginPath(); g.moveTo(pad,6); g.lineTo(pad,H-16); g.lineTo(W-4,H-16); g.stroke();
+  // without sinks (red) — depends on current window
+  g.strokeStyle="#ef4444"; g.lineWidth=2.5; g.beginPath();
+  for (let t=0;t<=TMAX;t++){ const x=X(t),y=Y(pplAt(t,false)); t?g.lineTo(x,y):g.moveTo(x,y); }
+  g.stroke();
+  // with sinks (green)
+  g.strokeStyle="#10b981"; g.lineWidth=2.5; g.beginPath();
+  for (let t=0;t<=TMAX;t++){ const x=X(t),y=Y(pplAt(t,true)); t?g.lineTo(x,y):g.moveTo(x,y); }
+  g.stroke();
+  // current t marker
+  const cx=X(S.streamT);
+  g.strokeStyle="#0f172a"; g.setLineDash([3,3]); g.lineWidth=1;
+  g.beginPath(); g.moveTo(cx,6); g.lineTo(cx,H-16); g.stroke(); g.setLineDash([]);
+  g.fillStyle = S.keepSink ? "#10b981" : "#ef4444";
+  g.beginPath(); g.arc(cx, Y(pplAt(S.streamT, S.keepSink)), 4, 0, 7); g.fill();
+  // labels
+  g.font="10px ui-monospace, monospace";
+  g.fillStyle="#10b981"; g.fillText("with sinks", pad+4, Y(8.2)-4);
+  g.fillStyle="#ef4444"; g.fillText("no sinks", W-58, Y(pplAt(TMAX,false))+3);
+  g.fillStyle="#64748b"; g.fillText("perplexity ↑", pad+4, 14);
+  g.fillText("tokens streamed →", W-108, H-3);
+}
+
+function renderCardB(){
+  $("streamVal").textContent  = S.streamT;
+  $("streamWVal").textContent = S.streamW;
+  const kb = $("keepSink");
+  kb.textContent = S.keepSink ? "🔒 Keep 4 sinks: ON" : "🔓 Keep 4 sinks: OFF";
+  kb.className = "px-3 py-2 rounded-lg font-semibold text-[12px] " + (S.keepSink ? "bg-emerald-600 text-white" : "bg-rose-600 text-white");
+
+  // token strip
+  const strip = $("streamStrip"); strip.innerHTML = "";
+  for (let idx=0; idx<S.streamT; idx++){
+    const isSink   = S.keepSink && idx < SINK_KEEP;
+    const inWindow = idx >= S.streamT - S.streamW;
+    let bg;
+    if (isSink) bg = "#f59e0b"; else if (inWindow) bg = "#6366f1"; else bg = "#e2e8f0";
+    const d = document.createElement("div");
+    d.className = "tok rounded-sm";
+    d.style.cssText = "width:13px;height:13px;background:"+bg+";";
+    d.title = "token "+idx+(isSink?" · sink (kept)":inWindow?" · in window":" · evicted");
+    strip.appendChild(d);
+  }
+
+  drawPplCurve();
+
+  const ppl = pplAt(S.streamT, S.keepSink);
+  const box = $("pplBox");
+  const evicted = !S.keepSink && S.streamT > S.streamW;
+  if (S.keepSink){
+    box.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    box.innerHTML = "✅ <b>Stable.</b> The first "+SINK_KEEP+" tokens are pinned as attention sinks, so softmax always has somewhere to dump spare probability. Perplexity holds at ≈"+ppl.toFixed(1)+" no matter how long you stream.";
+  } else if (evicted){
+    box.className = "rounded-lg px-3 py-2 text-[12px] bg-rose-50 border border-rose-200 text-rose-800";
+    box.innerHTML = "💥 <b>Collapsing.</b> The window slid past the first tokens and evicted the sinks — perplexity has shot up to ≈"+ppl.toFixed(0)+". The model is effectively babbling. Turn sinks back ON to fix it.";
+  } else {
+    box.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    box.innerHTML = "⚠️ <b>Fine — for now.</b> The window (w="+S.streamW+") still covers the very first tokens, so it's stable at ≈"+ppl.toFixed(1)+". Stream past "+S.streamW+" tokens with sinks OFF and watch it blow up.";
+  }
+}
+
+// ===================== CARD C rendering =====================
+function drawLaCurve(){
+  const cv = $("laCurve"); if (!cv) return;
+  const g = cv.getContext("2d");
+  const W = cv.width, H = cv.height, pad=20;
+  g.clearRect(0,0,W,H);
+  const X = p => pad + p*(W-pad-6);
+  const Y = a => H-14 - a*(H-24);
+  g.strokeStyle="#e2e8f0"; g.beginPath(); g.moveTo(pad,6); g.lineTo(pad,H-14); g.lineTo(W-4,H-14); g.stroke();
+  // accuracy curve
+  g.strokeStyle="#6366f1"; g.lineWidth=2.5; g.beginPath();
+  for (let k=0;k<=100;k++){ const p=k/100, x=X(p), y=Y(laAcc(p,S.ctx)); k?g.lineTo(x,y):g.moveTo(x,y); }
+  g.stroke();
+  // marker
+  const p=S.needle, cx=X(p), cy=Y(laAcc(p,S.ctx));
+  g.strokeStyle="#0f172a"; g.setLineDash([3,3]); g.lineWidth=1;
+  g.beginPath(); g.moveTo(cx,6); g.lineTo(cx,H-14); g.stroke(); g.setLineDash([]);
+  g.fillStyle="#f59e0b"; g.beginPath(); g.arc(cx,cy,4.5,0,7); g.fill();
+  g.font="10px ui-monospace, monospace";
+  g.fillStyle="#94a3b8"; g.fillText("start", pad, H-3); g.fillText("middle", W/2-14, H-3); g.fillText("end", W-24, H-3);
+  g.fillStyle="#64748b"; g.fillText("acc ↑", pad+2, 13);
+}
+
+function renderCardC(){
+  $("ctxVal").textContent = S.ctx;
+  $("needleVal").textContent = Math.round(S.needle*100) + "%";
+  const idx = Math.round(S.needle*(S.ctx-1));
+  // strip
+  const strip = $("laStrip"); strip.innerHTML = "";
+  for (let i=0;i<S.ctx;i++){
+    const d = document.createElement("div");
+    const isNeedle = i === idx;
+    d.className = "tok rounded flex items-center justify-center";
+    d.style.cssText = "width:16px;height:20px;background:"+(isNeedle?"#f59e0b":"#e2e8f0")+";";
+    d.title = isNeedle ? "📌 needle fact (doc "+i+")" : "filler doc "+i;
+    if (isNeedle) d.textContent = "📌", d.style.fontSize="10px";
+    strip.appendChild(d);
+  }
+  drawLaCurve();
+  const acc = laAcc(S.needle, S.ctx);
+  $("laAccText").textContent = Math.round(acc*100) + "%";
+  const v = $("laVerdict");
+  if (acc >= 0.8){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = "✅ <b>Reliably found.</b> The needle sits near an edge (primacy/recency), where models attend most. Retrieval is strong here.";
+  } else if (acc >= 0.6){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = "⚠️ <b>Flaky.</b> The fact is drifting toward the middle. It <i>fits</i> in context but the model often skims past it — accuracy is wobbling.";
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-rose-50 border border-rose-200 text-rose-800";
+    v.innerHTML = "❌ <b>Often missed.</b> Buried in the middle of "+S.ctx+" docs, the needle is frequently ignored despite being present — the classic \"lost in the middle\" dip. Move it to an edge, or retrieve fewer docs.";
+  }
+}
+
+function renderAll(){ renderCardA(); renderCardB(); renderCardC(); }
+
+// ===================== wiring =====================
+document.querySelectorAll("#modeBtns .seg").forEach(b => b.onclick = () => { S.mode = b.dataset.mode; renderCardA(); });
+$("nRange").oninput   = e => { S.n = +e.target.value; if (S.w > S.n) { S.w = S.n; $("wRange").value = S.w; } $("wRange").max = S.n; renderCardA(); };
+$("wRange").oninput   = e => { S.w = +e.target.value; renderCardA(); };
+$("sinkRange").oninput= e => { S.sink = +e.target.value; renderCardA(); };
+
+$("streamRange").oninput  = e => { S.streamT = +e.target.value; renderCardB(); };
+$("streamWRange").oninput = e => { S.streamW = +e.target.value; renderCardB(); };
+$("keepSink").onclick = () => { S.keepSink = !S.keepSink; renderCardB(); };
+let streamTimer = null;
+$("streamPlay").onclick = () => {
+  if (streamTimer){ clearInterval(streamTimer); streamTimer=null; $("streamPlay").textContent="▶ Stream"; return; }
+  $("streamPlay").textContent="⏸ Pause"; S.streamT = 8; $("streamRange").value = 8;
+  streamTimer = setInterval(() => {
+    S.streamT += 1; $("streamRange").value = S.streamT; renderCardB();
+    if (S.streamT >= 60){ clearInterval(streamTimer); streamTimer=null; $("streamPlay").textContent="▶ Replay"; }
+  }, 130);
+};
+
+$("ctxRange").oninput    = e => { S.ctx = +e.target.value; renderCardC(); };
+$("needleRange").oninput = e => { S.needle = +e.target.value/100; renderCardC(); };
+
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Why attention costs n²", why:"Self-attention lets every token compute a compatibility score with every other token — so for <code>n</code> tokens you get an <code>n×n</code> matrix of scores. Compute and memory both grow with <strong>n²</strong>. Go from 4k to 8k tokens and it isn't 2× the work, it's <strong>4×</strong>. That quadratic scaling is the single reason long context is hard, and it's what every trick on this page is trying to dodge.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">n tokens &rarr; n&times;n attention scores<br><br>4k &rarr; 16,000,000<br>8k &rarr; 64,000,000 (4&times;)<br>128k &rarr; 16,800,000,000<br><br>compute &amp; memory ~ O(n²)</div>`, code:`scores = Q @ K.T          # (n, n)  -> the quadratic blowup
+attn   = softmax(scores) @ V
+# double n  ->  4x the scores, 4x the memory.
+# THIS is the wall. Everything below is a way around it.` },
+ { title:"2. Sliding-window (local) attention", why:"The cheapest fix: don't let a token read the whole past — only the last <code>w</code> keys. The dense triangle becomes a thin <strong>diagonal band</strong>, dropping cost from <code>O(n²)</code> to <code>O(n·w)</code>, i.e. <em>linear</em> in context. \"But then it can't see far!\" — it can, through <strong>depth</strong>: each layer shifts the window a bit, so after <code>L</code> layers a token's effective reach is about <code>L·w</code>. Mistral and Longformer use exactly this.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">full triangle  &rarr;  thin band (width w)<br><br>cost: O(n²) &rarr; O(n·w)  (linear!)<br><br>reach far via DEPTH:<br>L window layers &rarr; effective ~ L·w</div>`, code:`for i in range(n):
+    lo = max(0, i - w + 1)
+    mask[i, lo:i+1] = True     # attend only to the last w keys
+# O(n*w) instead of O(n²). info still flows far across stacked layers.` },
+ { title:"3. Sparse & dilated attention", why:"A pure local window is blind to distant-but-important tokens. <strong>Sparse attention</strong> keeps the cheap local band and adds a few extra links: <strong>global</strong> tokens everyone can see, <strong>strided/dilated</strong> hops that skip across the sequence, and sometimes random links. BigBird and Longformer show this local+global+strided mix keeps cost near <code>O(n·w)</code> while letting information travel across the whole context.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">local band  +  global tokens<br>+  dilated (strided) hops<br><br>= cover long range cheaply<br>still ~O(n·w), not O(n²)<br><br>(Longformer · BigBird)</div>`, code:`mask = sliding_window_mask(n, w)      # local detail
+for i in range(n):
+    for j in range(0, i+1, stride):   # dilated long-range hops
+        mask[i, j] = True
+mask[:, globals] = True               # a few always-visible tokens` },
+ { title:"4. Attention sinks · StreamingLLM", why:"For endless chat you'd love to just slide a fixed window and forget old tokens. It fails: once the window passes the <em>very first</em> tokens, quality collapses and perplexity explodes. Why? Softmax must sum to 1, so it dumps leftover attention onto the earliest tokens — they act as a <strong>sink</strong>. StreamingLLM's fix is almost free: always keep ~4 initial tokens. With those pinned, you can stream millions of tokens stably. You watched this blow up in the LOOK tab.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">rolling window alone &rarr; 💥 perplexity<br>(first tokens evicted = sink lost)<br><br>keep first ~4 tokens (sinks)<br>&rarr; stable to millions of tokens ✅</div>`, code:`mask = sliding_window_mask(n, w)
+mask[:, :4] = True     # keep 4 "attention sink" tokens, always visible
+# softmax needs somewhere to put spare probability; those tokens are it.
+# evict them -> scores explode. keep them -> infinite stable streaming.` },
+ { title:"5. RoPE scaling / position interpolation", why:"Windows change <em>where</em> a token looks; this changes how far its <em>position</em> can stretch. Rotary embeddings (RoPE) encode position as a rotation angle. Feed a position far beyond training and the model sees angles it never learned — it breaks (extrapolation). The fix is <strong>interpolation</strong>: squeeze new positions back into the trained range (Position Interpolation). <strong>NTK-aware</strong> scaling and <strong>YaRN</strong> refine it; a little fine-tuning restores quality. This is how a 4k model becomes a 32k+ model.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">trained 4k, want 32k?<br><br>extrapolate positions &rarr; 💥 breaks<br>INTERPOLATE &rarr; squeeze into [0,4k) ✅<br><br>scale = 4096 / 32768 = 1/8<br>(PI · NTK-aware · YaRN)</div>`, code:`scale = train_len / target_len    # 4096/32768 = 1/8
+pos   = arange(target_len) * scale # positions land inside the known range
+q, k  = apply_rope(q, k, pos)      # rotary on INTERPOLATED positions
+# extrapolation breaks; interpolation holds. fine-tune a little to recover.` },
+ { title:"6. Lost in the middle", why:"Fitting a fact in the window is not the same as the model <em>using</em> it. Empirically, retrieval accuracy is <strong>U-shaped</strong> in position: strong when the needle is near the <strong>start</strong> (primacy) or <strong>end</strong> (recency), weak in the <strong>middle</strong> — and the dip deepens as the context grows. It's a genuine limitation, not a bug you can patch away. You saw the U-curve in the LOOK tab as you dragged the needle.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">accuracy vs needle position:<br><br>high ┐&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;┌ high<br>&nbsp;&nbsp;&nbsp;&nbsp;└──dip──┘<br>start&nbsp;&nbsp;middle&nbsp;&nbsp;end<br><br>bigger context &rarr; deeper dip</div>`, code:`# retrieval accuracy is U-shaped in position (primacy + recency).
+# a long window is a CAPACITY, not a guarantee every token is read.
+# measured with "needle in a haystack" tests across positions.` },
+ { title:"7. The long-context toolkit — and what's next", why:"No single trick wins; real systems <strong>compose</strong> them: local <strong>windows</strong> for cheap detail, a few <strong>global/sink</strong> tokens for stability and long-range glue, <strong>RoPE scaling</strong> to stretch the trained length, and IO-aware kernels like <strong>FlashAttention</strong> (Day 25) so the n×n matrix is never even stored. Then, because of <strong>lost-in-the-middle</strong>, retrieval pipelines still place the key evidence at the edges. Next we ask a different question: once you <em>have</em> a capable model, how do you measure that it's actually good?", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">windows + sinks + sparsity<br>+ RoPE scaling + FlashAttention<br>+ edge-placed retrieval<br><br>= practical long context<br><br>next: Day 38 — Evals &amp; LLM-as-a-Judge</div>`, code:`# the toolkit, combined:
+#   sliding window     -> O(n*w) cheap local detail
+#   sinks + global     -> stability + long-range glue
+#   sparse / dilated   -> reach across the sequence cheaply
+#   RoPE interpolation -> stretch past the trained length
+#   FlashAttention     -> never materialise the n×n matrix (Day 25)
+#   edge-placed evidence -> beat lost-in-the-middle
+# Day 38: how do we EVALUATE if the model is any good?` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
