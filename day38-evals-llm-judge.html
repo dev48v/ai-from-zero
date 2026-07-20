@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 38 — Evals &amp; LLM-as-a-Judge</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  input[type=range]{ accent-color:#6366f1; }
+  .seg-btn{ font-size:12px; font-weight:600; padding:6px 12px; border-radius:8px; background:#f1f5f9; color:#475569; cursor:pointer; transition:all .12s; border:1px solid #e2e8f0; }
+  .seg-btn:hover{ filter:brightness(.97); }
+  .seg-btn.on-bias{ background:#e11d48; color:#fff; border-color:#e11d48; }
+  .seg-btn.on-fix{ background:#059669; color:#fff; border-color:#059669; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 38</div>
+      <h1 class="text-xl font-bold">⚖️ Evals &amp; LLM-as-a-Judge — a <em>benchmark</em> gives one number for a leaderboard; a <em>task eval</em> tells you it works for <em>you</em>. And a model can grade another model — if you cancel the biases: <strong>position, verbosity, self-preference</strong></h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">You built a smart model. Now — <em>is it actually good?</em> And can another model be the judge?</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Human grading is the gold standard, but it's slow and expensive. So we ask a strong model to grade — an <strong>LLM-as-a-judge</strong>. It agrees with human preference about as often as two humans agree with each other, at API speed and near-zero cost. The catch: the judge inherits biases a tick-box test never had. It quietly prefers the answer shown <strong>first</strong> (position), the <strong>longer</strong> answer (verbosity), and text from its <strong>own model family</strong> (self-preference). Below, Answer&nbsp;A is genuinely the better answer — flip a bias and watch the judge change its mind for the wrong reason, then switch on a mitigation and watch it recover. Everything runs <strong>in your browser</strong>, no model calls.</p>
+      </div>
+
+      <!-- ===================== CARD A · pairwise judge + biases ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">① Pairwise — an LLM judges Answer A vs Answer B <span class="text-slate-400 normal-case font-normal">— same two answers, watch the verdict flip when a bias sneaks in</span></div>
+        <p class="text-[11px] text-slate-400 mb-3">Answer <b>A</b> has the higher <em>true quality</em> (7.0 vs 6.6), so a perfect judge always picks <b>A</b>. Each red toggle injects one real bias; each green toggle is the standard fix for it.</p>
+
+        <div class="flex flex-wrap items-center gap-2 mb-4">
+          <span class="text-[10px] uppercase font-bold text-rose-500 mr-1">Inject bias:</span>
+          <button id="tSwap" class="seg-btn">↔ Swap order</button>
+          <button id="tPad"  class="seg-btn">📏 Pad B with fluff</button>
+          <button id="tSelf" class="seg-btn">🪞 B = judge's family</button>
+          <span class="w-px h-6 bg-slate-200 mx-1"></span>
+          <span class="text-[10px] uppercase font-bold text-emerald-600 mr-1">Mitigate:</span>
+          <button id="mSwapAvg" class="seg-btn">🔁 Swap &amp; average</button>
+          <button id="mRubric"  class="seg-btn">📋 Rubric anchoring</button>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-start">
+          <div>
+            <div id="pairPanels" class="grid grid-cols-2 gap-3 mb-3"></div>
+            <div id="pairVerdict" class="rounded-lg px-3 py-3 text-[13px]"></div>
+          </div>
+          <div class="space-y-3">
+            <div class="text-[11px] font-bold text-slate-500">Where each answer's judge-score comes from</div>
+            <div id="pairBreak" class="space-y-2 text-[12px]"></div>
+            <div class="text-[11px] font-bold text-slate-500 pt-1">Bias status</div>
+            <div id="biasStatus" class="space-y-1.5 text-[12px]"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD B · pointwise eval suite ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">② Pointwise eval suite <span class="text-slate-400 normal-case font-normal">— N real tasks → a rubric score each → one aggregate you can trust</span></div>
+        <p class="text-[11px] text-slate-400 mb-3">The other half of evals: not "A vs B" but "does the answer clear the bar?" Each case gets a 0–5 rubric score from the judge; a case <b>passes</b> if it's ≥ the pass bar. The aggregate is <b>reproducible</b> — the same inputs give the same number every run, so it catches regressions a vibe-check would miss.</p>
+
+        <div class="grid md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Model capability <span id="capVal" class="text-indigo-600 stat">60</span></label>
+            <input id="capRange" type="range" min="0" max="100" value="60" class="w-full">
+          </div>
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Pass bar (rubric ≥) <span id="barVal" class="text-indigo-600 stat">3.0</span></label>
+            <input id="barRange" type="range" min="1" max="5" step="0.5" value="3" class="w-full">
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6">
+          <div id="caseList" class="space-y-1.5"></div>
+          <div>
+            <div class="grid grid-cols-3 gap-2 text-center mb-3">
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-slate-400">Passed</div><div id="evPassed" class="text-lg font-bold text-slate-700 mt-1 stat">—</div></div>
+              <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-indigo-500">Pass rate</div><div id="evRate" class="text-lg font-bold text-indigo-600 mt-1 stat">—</div></div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3"><div class="text-[10px] uppercase font-bold text-emerald-500">Mean score</div><div id="evMean" class="text-lg font-bold text-emerald-600 mt-1 stat">—</div></div>
+            </div>
+            <div id="evVerdict" class="rounded-lg px-3 py-2 text-[12px]"></div>
+            <p class="text-[11px] text-slate-400 mt-3">Drag <b>capability</b> to simulate a stronger/weaker model, and <b>pass bar</b> to make the rubric stricter. Notice the number only moves when you change something — no randomness, so a drop between runs means a <em>real</em> regression.</p>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto">Both halves matter. <strong>Pairwise</strong> tells you which of two models people prefer (with the order-, length- and family-biases carefully cancelled); <strong>pointwise</strong> gives a stable, reproducible score you can gate a release on. Neither replaces a small <strong>human-labelled anchor set</strong> that you keep the judge honest against.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Measuring "good" — and trusting the judge</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a de-biased LLM-judge harness</h2>
+    <p class="text-slate-500 mb-8">An eval you can gate a release on is more than "ask a model which is better." Here it is in annotated pseudo-code — a reproducible pointwise suite, a rubric-anchored judge prompt, a pairwise call, then the three de-biasing moves (swap-and-average, rubric/length control, blind + diverse panel), and finally calibrating the judge against humans.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">The pointwise eval loop — a reproducible score</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Start with <em>your</em> tasks, not a public benchmark. Run each case, score the answer against a rubric, and pass if it clears a bar. Because it's deterministic, the same inputs give the same number every run — so a drop is a real <strong>regression</strong>, not noise.</p>
+        <div class="relative"><pre>def run_eval(model, cases, judge, pass_bar=3.0):
+    results = []
+    for c in cases:                                  # YOUR real inputs
+        answer = model(c.input)
+        score  = judge_pointwise(judge, c.input, answer, c.rubric)  # 0..5
+        results.append(score &gt;= pass_bar)            # PASS / FAIL
+    return mean(results)                             # one aggregate number
+# same inputs -&gt; same number. a drop between runs = a real regression.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Write the judge prompt — a rubric + a parseable verdict</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A vague "which is better?" invites every bias. Anchor the judge on <strong>explicit criteria</strong>, tell it to ignore length and confidence, and force a <strong>structured output</strong> you can parse. A rubric + a fixed schema turns a vibe into a number.</p>
+        <div class="relative"><pre>JUDGE_PROMPT = """
+You are grading an answer. Score 0-5 on THESE criteria ONLY:
+  - correctness  (is it factually right?)        # anchor on substance,
+  - relevance    (does it answer the question?)  # NOT length or style
+  - instructions (did it follow the format?)
+Ignore how long or confident the answer sounds.
+Question: {q}
+Answer:   {a}
+Reply as JSON: {"reasoning": "...", "score": &lt;0-5&gt;}   # force a parseable verdict
+"""</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Pairwise — comparing is more reliable than absolute scoring</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Judges (and humans) are far more consistent at <em>comparing</em> two answers than at giving an absolute 0–5. So for head-to-heads, show both answers and ask which wins. But this opens the door to the one bias absolute scoring doesn't have: the <strong>order</strong> of [1] and [2].</p>
+        <div class="relative"><pre>def judge_pairwise(judge, q, ans1, ans2):
+    prompt = f"Question: {q}\n[1] {ans1}\n[2] {ans2}\n" \
+             "Which answer is better? Reply 1 or 2. Judge on the rubric, not length."
+    return judge(prompt)          # -&gt; "1" or "2"
+# more reliable than absolute scores... but sensitive to the ORDER of [1]/[2].</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Swap-and-average — kill position bias</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Many judges systematically favour whichever answer sits in <strong>position 1</strong>. So judge <em>both</em> orders and only count a win if the same answer wins both ways. The order-dependent bonus lands on slot 1 in each run, so it <strong>cancels</strong> — exactly the "🔁 Swap &amp; average" toggle you flipped in LOOK.</p>
+        <div class="relative"><pre>def debiased_pairwise(judge, q, a, b):
+    first  = judge_pairwise(judge, q, a, b)   # A in slot 1
+    second = judge_pairwise(judge, q, b, a)   # B in slot 1  (swapped!)
+    if first == "1" and second == "2":  return "A"    # A won BOTH orders
+    if first == "2" and second == "1":  return "B"    # B won both orders
+    return "TIE"                                        # order flipped it -&gt; tie
+# the slot-1 bonus appears in both runs, so it CANCELS out of the comparison.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Rubric + blind + panel — kill verbosity &amp; self-preference</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Swap-and-average fixes <em>order</em>, not <em>length</em> or <em>family</em>. For <strong>verbosity</strong>, anchor on the rubric and tell the judge not to reward length. For <strong>self-preference</strong>, keep the judge <strong>blind</strong> to who wrote each answer and average a <strong>panel</strong> of different-family judges.</p>
+        <div class="relative"><pre># verbosity: anchor on a rubric, forbid rewarding length
+prompt += "Do NOT reward longer answers. Judge correctness &amp; relevance only."
+
+# self-preference: blind the judge + use a PANEL of different families
+answers = shuffle_and_strip_model_names([a, b])   # judge can't see who wrote what
+judges  = [judge_vega, judge_nova, judge_atlas]    # different model families
+verdict = majority(debiased_pairwise(J, q, a, b) for J in judges)
+# never let a model be the sole judge of its own contest.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Calibrate against humans, then gate the release</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Is the judge trustworthy? Compare it to a small <strong>human-labelled anchor set</strong> and measure agreement (and <strong>Cohen's κ</strong>, which corrects for lucky agreement). Only once the judge tracks humans do you let it block a release when quality regresses.</p>
+        <div class="relative"><pre># is the judge trustworthy? check it against HUMAN labels.
+agree = mean(judge_label[i] == human_label[i] for i in anchor_set)
+kappa = cohens_kappa(judge_labels, human_labels)   # chance-corrected agreement
+assert agree &gt; 0.8 and kappa &gt; 0.6, "judge not reliable enough to gate on"
+
+# only NOW gate the release on the eval suite:
+if run_eval(candidate) &lt; run_eval(current) - 0.02:
+    block_release("quality regressed on the eval suite")</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 38 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">You saw how we actually measure "good": <strong>benchmarks</strong> give a comparable leaderboard number, <strong>task evals</strong> tell you it works for <em>your</em> job. You can grade with <strong>pointwise</strong> rubric scores (reproducible, great for regressions) or <strong>pairwise</strong> A-vs-B (more consistent, but order-sensitive). And a model can be the <strong>judge</strong> — if you cancel its biases: <strong>swap-and-average</strong> for position, <strong>rubric anchoring + length control</strong> for verbosity, and <strong>blind + diverse panels</strong> for self-preference — all kept honest by a human anchor set. <strong>👉 Tomorrow — Day 39: Synthetic Data &amp; the Self-Improvement Loop — once you can <em>measure</em> quality cheaply, you can <em>generate</em> training data and let a model filter its own outputs to get better.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+  if (t.dataset.tab === "look") renderAll();
+});
+
+const $ = id => document.getElementById(id);
+
+/* EVAL-ENGINE-START */
+// ===== Day 38 · Evals & LLM-as-a-Judge — client-side simulation (no ML) =====
+// No model is called. We model a judge as: perceived score = true quality
+// + a set of well-documented BIAS bonuses. A perfect judge would use true
+// quality only. The demos show each bias flipping the verdict, and each
+// standard mitigation cancelling it:
+//   position    -> swap-and-average  (the order bonus cancels across both runs)
+//   verbosity   -> rubric anchoring  (stop rewarding length)
+//   self-pref   -> rubric/blind panel (don't favour your own family)
+const TRUE_A = 7.0, TRUE_B = 6.6;   // A is genuinely the better answer
+const POS = 1.0;                    // slot-1 (shown first) bonus
+const VERB = 1.6;                   // bonus a padded/longer answer steals
+const SELF = 1.6;                   // bonus for being the judge's own family
+const RUBRIC_RESIDUAL = 0.10;       // rubric anchoring shrinks verb/self ~10x
+
+const S = {
+  // Card A — pairwise
+  swap:false, padB:false, selfB:false, swapAvg:false, rubric:false,
+  // Card B — pointwise suite
+  cap:60, bar:3.0
+};
+
+// perceived judge scores for A and B under the current toggles
+function pairScores(){
+  const rf = S.rubric ? RUBRIC_RESIDUAL : 1.0;
+  const vB = S.padB  ? VERB * rf : 0;     // verbosity only inflates B (the padded one)
+  const sB = S.selfB ? SELF * rf : 0;     // self-preference only helps B
+  let posA, posB;
+  if (S.swapAvg)      { posA = POS/2; posB = POS/2; }  // judged both orders -> cancels
+  else if (S.swap)    { posA = 0;     posB = POS;   }  // B shown first
+  else                { posA = POS;   posB = 0;     }  // default: A shown first
+  const finalA = TRUE_A + posA;
+  const finalB = TRUE_B + posB + vB + sB;
+  return { posA, posB, vB, sB, finalA, finalB,
+           winner: finalA >= finalB ? "A" : "B" };
+}
+
+// pointwise suite: fixed cases, deterministic scores (reproducible on purpose)
+const CASES = [
+  { name:"Factual QA · capital cities",  base:4.6 },
+  { name:"Summarize a 2-page memo",      base:4.1 },
+  { name:"Extract JSON from an email",   base:3.6 },
+  { name:"Multi-step word problem",      base:2.4 },
+  { name:"Refuse an unsafe request",     base:4.8 },
+  { name:"Follow a strict output format",base:3.1 },
+  { name:"Reason over a wide table",     base:1.9 },
+  { name:"Rewrite in a friendly tone",   base:4.3 }
+];
+function caseScore(base){
+  const delta = (S.cap - 60) / 18;                 // capability shifts every score
+  return Math.max(0, Math.min(5, base + delta));
+}
+/* EVAL-ENGINE-END */
+
+// ===================== CARD A rendering =====================
+function chip(label, val, color){
+  return val > 0.001
+    ? `<span style="background:${color}" class="text-white text-[10px] px-1.5 py-0.5 rounded mr-1 whitespace-nowrap">${label} +${val.toFixed(1)}</span>`
+    : "";
+}
+
+function renderPair(){
+  // toggle button styling
+  $("tSwap").className    = "seg-btn" + (S.swap    ? " on-bias" : "");
+  $("tPad").className     = "seg-btn" + (S.padB    ? " on-bias" : "");
+  $("tSelf").className    = "seg-btn" + (S.selfB   ? " on-bias" : "");
+  $("mSwapAvg").className = "seg-btn" + (S.swapAvg ? " on-fix"  : "");
+  $("mRubric").className  = "seg-btn" + (S.rubric  ? " on-fix"  : "");
+
+  const r = pairScores();
+  const lenA = 62, lenB = S.padB ? 185 : 66;
+
+  const panelA = { id:"A", fam:"Nova", len:lenA, final:r.finalA };
+  const panelB = { id:"B", fam:(S.selfB ? "Vega — same as judge" : "Nova"), len:lenB, final:r.finalB };
+
+  let order, slotLabels;
+  if (S.swapAvg){ order = [panelA, panelB]; slotLabels = ["both orders","both orders"]; }
+  else if (S.swap){ order = [panelB, panelA]; slotLabels = ["shown 1st","shown 2nd"]; }
+  else { order = [panelA, panelB]; slotLabels = ["shown 1st","shown 2nd"]; }
+
+  $("pairPanels").innerHTML = order.map((p, k) => {
+    const win = p.id === r.winner;
+    return `<div class="border rounded-xl p-3 ${win ? "ring-2 ring-indigo-500 border-indigo-300 bg-indigo-50/40" : "border-slate-200"}">
+      <div class="flex justify-between items-center mb-1">
+        <span class="font-bold text-sm">Answer ${p.id}</span>
+        <span class="text-[9px] uppercase font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-500">${slotLabels[k]}</span>
+      </div>
+      <div class="text-[10px] text-slate-400 mb-2">family: ${p.fam}</div>
+      <div class="text-[10px] text-slate-500 mb-1 flex justify-between"><span>length</span><span>${p.len} tok</span></div>
+      <div class="h-2 bg-slate-100 rounded mb-2"><div class="h-2 rounded" style="width:${(p.len/185*100).toFixed(0)}%;background:${p.id==="B"&&S.padB?"#f59e0b":"#6366f1"}"></div></div>
+      <div class="text-[10px] uppercase text-slate-400 font-bold">judge score</div>
+      <div class="text-2xl font-bold ${win ? "text-indigo-600" : "text-slate-400"}">${p.final.toFixed(1)}</div>
+    </div>`;
+  }).join("");
+
+  // score decomposition
+  $("pairBreak").innerHTML =
+    `<div class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5">Answer A &nbsp;<b>${r.finalA.toFixed(1)}</b> = base ${TRUE_A.toFixed(1)} ${chip("pos",r.posA,"#0ea5e9")}</div>
+     <div class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 leading-6">Answer B &nbsp;<b>${r.finalB.toFixed(1)}</b> = base ${TRUE_B.toFixed(1)} ${chip("pos",r.posB,"#0ea5e9")}${chip("verbosity",r.vB,"#f59e0b")}${chip("self",r.sB,"#a855f7")}</div>`;
+
+  // bias status rows
+  const posTxt   = S.swapAvg ? "🟢 cancelled — judged both orders &amp; averaged"
+                   : (S.swap ? "🔴 live — B rides the slot-1 bonus" : "🟡 present — order currently favours A");
+  const verbTxt  = !S.padB ? "⚪ not triggered"
+                   : (S.rubric ? "🟢 reduced — rubric ignores length" : "🔴 live — B wins on length, not merit");
+  const selfTxt  = !S.selfB ? "⚪ not triggered"
+                   : (S.rubric ? "🟢 reduced — blind rubric grading" : "🔴 live — judge favours its own family");
+  $("biasStatus").innerHTML =
+    `<div><b>Position:</b> ${posTxt}</div>
+     <div><b>Verbosity:</b> ${verbTxt}</div>
+     <div><b>Self-preference:</b> ${selfTxt}</div>`;
+
+  // verdict banner
+  const v = $("pairVerdict");
+  const anyBias = S.swap || S.padB || S.selfB;
+  const anyFix  = S.swapAvg || S.rubric;
+  if (r.winner === "A"){
+    v.className = "rounded-lg px-3 py-3 text-[13px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    if (!anyBias){
+      v.innerHTML = "✅ <b>Judge picks A — correct.</b> With a clean setup the judge agrees with the true ranking (A's true quality 7.0 &gt; B's 6.6). Note there's <em>still</em> a hidden position bonus on A here — it just happens to help the right answer.";
+    } else if (anyFix){
+      v.innerHTML = "✅ <b>Judge picks A — recovered.</b> A bias was switched on, but the mitigation cancelled it and the judge is back on the genuinely better answer. This is the whole game: keep the verdict tracking <em>true quality</em>, not artefacts.";
+    } else {
+      v.innerHTML = "✅ <b>Judge picks A — correct</b> (the bias you added didn't out-weigh A's real edge yet). Add another, or swap the order, to tip it over.";
+    }
+  } else {
+    const bad = [];
+    if (S.swap && !S.swapAvg) bad.push("<b>position bias</b> (B is shown first)");
+    if (S.padB && !S.rubric)  bad.push("<b>verbosity bias</b> (B is longer, not better)");
+    if (S.selfB && !S.rubric) bad.push("<b>self-preference</b> (B is the judge's own family)");
+    v.className = "rounded-lg px-3 py-3 text-[13px] bg-rose-50 border border-rose-200 text-rose-800";
+    v.innerHTML = "❌ <b>Judge picks B — but A is genuinely better.</b> The verdict was hijacked by: " + bad.join(", ") +
+      ". Nothing about B actually improved — flip on the matching green mitigation to fix it.";
+  }
+}
+
+// ===================== CARD B rendering =====================
+function renderEval(){
+  $("capVal").textContent = S.cap;
+  $("barVal").textContent = S.bar.toFixed(1);
+
+  let passed = 0, sum = 0;
+  const rows = CASES.map(c => {
+    const sc = caseScore(c.base);
+    const pass = sc >= S.bar;
+    if (pass) passed++;
+    sum += sc;
+    return `<div class="flex items-center gap-2 text-[11px]">
+      <span class="w-40 shrink-0 truncate text-slate-600" title="${c.name}">${c.name}</span>
+      <div class="flex-1 h-2 bg-slate-100 rounded overflow-hidden"><div class="h-2 rounded" style="width:${(sc/5*100).toFixed(0)}%;background:${pass ? "#10b981" : "#f43f5e"}"></div></div>
+      <span class="w-7 text-right stat text-slate-500">${sc.toFixed(1)}</span>
+      <span class="w-11 text-center text-[9px] font-bold px-1 py-0.5 rounded ${pass ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}">${pass ? "PASS" : "FAIL"}</span>
+    </div>`;
+  }).join("");
+  $("caseList").innerHTML = rows;
+
+  const n = CASES.length;
+  const rate = Math.round(passed / n * 100);
+  const mean = sum / n;
+  $("evPassed").textContent = passed + "/" + n;
+  $("evRate").textContent   = rate + "%";
+  $("evMean").textContent   = mean.toFixed(2) + "/5";
+
+  const ev = $("evVerdict");
+  if (rate >= 80){
+    ev.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    ev.innerHTML = "✅ <b>Passing the suite.</b> "+rate+"% of cases clear the bar (mean "+mean.toFixed(2)+"/5). This is a number you could gate a release on — as long as the judge is calibrated against humans first.";
+  } else if (rate >= 50){
+    ev.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    ev.innerHTML = "⚠️ <b>Mixed.</b> Only "+rate+"% pass. Reasoning-heavy cases are dragging the aggregate down — exactly the kind of weakness a public benchmark average would hide.";
+  } else {
+    ev.className = "rounded-lg px-3 py-2 text-[12px] bg-rose-50 border border-rose-200 text-rose-800";
+    ev.innerHTML = "❌ <b>Below bar.</b> Just "+rate+"% pass (mean "+mean.toFixed(2)+"/5). On a real product this blocks the release. Raise capability or lower the bar and watch the aggregate respond — deterministically.";
+  }
+}
+
+function renderAll(){ renderPair(); renderEval(); }
+
+// ===================== wiring =====================
+$("tSwap").onclick    = () => { S.swap    = !S.swap;    renderPair(); };
+$("tPad").onclick     = () => { S.padB    = !S.padB;    renderPair(); };
+$("tSelf").onclick    = () => { S.selfB   = !S.selfB;   renderPair(); };
+$("mSwapAvg").onclick = () => { S.swapAvg = !S.swapAvg; renderPair(); };
+$("mRubric").onclick  = () => { S.rubric  = !S.rubric;  renderPair(); };
+
+$("capRange").oninput = e => { S.cap = +e.target.value; renderEval(); };
+$("barRange").oninput = e => { S.bar = +e.target.value; renderEval(); };
+
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Benchmarks vs task evals", why:"A <strong>benchmark</strong> (MMLU, GSM8K, HumanEval, MT-Bench…) is a fixed, public test that yields one comparable number across models — perfect for a leaderboard, weak for <em>your</em> product. A <strong>task eval</strong> is a small suite of <em>your</em> real inputs with <em>your</em> pass criteria. Benchmarks say the model is generally smart; task evals say it does <em>your</em> job. They also rot differently: public benchmarks leak into training data (<strong>contamination</strong>), your private eval set doesn't.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">BENCHMARK (public)<br>one number, many models<br>&rarr; leaderboard · but leaks &amp; generic<br><br>TASK EVAL (private)<br>your inputs · your pass/fail<br>&rarr; "does it do MY job?"</div>`, code:`# benchmark: broad, public, comparable... and contaminate-able
+mmlu_score = run(model, public_mmlu)      # 1 number for the leaderboard
+# task eval: narrow, private, decision-grade
+ship = run_eval(model, MY_real_cases) > bar   # answers "good for US?"` },
+ { title:"2. Pointwise vs pairwise", why:"Two ways to grade. <strong>Pointwise</strong>: score one answer on an absolute rubric (0–5, or pass/fail). It's cheap, reproducible, and ideal for a <em>regression</em> suite — but 'is this a 3 or a 4?' is noisy. <strong>Pairwise</strong>: show the judge two answers and ask which is better. Judges (and humans) are far more consistent at <em>comparing</em> than at absolute scoring — which is why preference data (Day 34/35) is pairwise. The cost: pairwise adds an <em>order</em> effect.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">POINTWISE:  answer &rarr; score 0-5<br>reproducible · noisy on "3 vs 4"<br><br>PAIRWISE:   A vs B &rarr; winner<br>consistent... but ORDER matters<br><br>use both: pointwise=regressions,<br>pairwise=head-to-heads</div>`, code:`# pointwise: absolute, reproducible, great for regressions
+score = judge_pointwise(judge, q, answer, rubric)   # 0..5
+# pairwise: relative, more consistent, order-sensitive
+winner = judge_pairwise(judge, q, ans_a, ans_b)     # "1" or "2"` },
+ { title:"3. Why a model can be the judge", why:"Human grading is the gold standard but slow and expensive. A strong LLM, asked to grade with a clear rubric, agrees with human preference roughly <strong>~80%</strong> of the time on chat quality (MT-Bench / Chatbot Arena) — about the same rate at which two humans agree with each other. So you get human-ish judgement at <strong>API speed and scale</strong>, cheap enough to run on every commit. The price: the judge inherits biases a tick-box test never had — which the rest of these steps fix.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">humans: gold, but slow &amp; $$$<br>&darr;<br>LLM judge + rubric<br>~80% agree w/ humans<br>(≈ human-human agreement)<br>&rarr; fast · cheap · every commit<br><br>catch: inherits biases</div>`, code:`# human-ish judgement, at API speed, on every PR:
+verdict = judge(rubric_prompt(q, answer))
+# ~80% agreement with human preference on chat quality (MT-Bench).
+# BUT: it drags in position / verbosity / self-preference biases -->` },
+ { title:"4. Position bias → swap-and-average", why:"Give a judge the <em>same</em> two answers in the opposite order and it often changes its mind — many judges systematically favour the answer in <strong>position&nbsp;1</strong> (some favour the last). So a 'win' can be an artefact of ordering. Fix: <strong>swap-and-average</strong> — judge (A,B) <em>and</em> (B,A), and only count a win if the same answer wins both ways (or average the two scores). The order-dependent part lands on slot&nbsp;1 in both runs, so it cancels. You watched this in the LOOK tab.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">judge(A,B) &rarr; likes slot 1<br>judge(B,A) &rarr; likes slot 1<br>&darr; average the two<br>slot-1 bonus CANCELS<br>&rarr; verdict = true quality ✅</div>`, code:`first  = judge(q, a, b)       # A in slot 1
+second = judge(q, b, a)       # B in slot 1 (swapped)
+win_A  = (first=="1" and second=="2")   # A wins BOTH orders
+# the slot-1 bonus is in both runs -> it cancels out of the comparison.` },
+ { title:"5. Verbosity bias → rubric anchoring", why:"Judges reward <strong>length</strong>: a longer, more elaborate answer <em>looks</em> more thorough even when it's padded with fluff or is actually wrong. Note that swap-and-average does <em>not</em> fix this — length isn't order-dependent. Mitigate by <strong>anchoring the judge on an explicit rubric</strong> (correctness, relevance, instruction-following) instead of a vague 'which is better', explicitly telling it to ignore length, and/or normalising for length. Anchor on substance and padding stops earning points.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">short + correct   vs   long + fluffy<br>naive judge &rarr; picks the LONG one ❌<br><br>+ rubric: "ignore length,<br>score correctness &amp; relevance"<br>&rarr; picks the CORRECT one ✅</div>`, code:`# vague prompt -> length wins. anchor on a rubric instead:
+prompt = '''Score 0-5 on correctness, relevance, instructions.
+Do NOT reward longer or more confident answers.'''
+# swap-and-average won't help here: length isn't about ORDER.` },
+ { title:"6. Self-preference bias → blind + diverse panel", why:"A judge tends to rate text from its <strong>own model family</strong> higher — it recognises its own style and 'likes' it. If a GPT judges a GPT-vs-Claude match, that's a thumb on the scale. Mitigations: keep the judge <strong>blind</strong> to which model produced which answer, use a <strong>panel of diverse judges</strong> (different families) and take the majority, and periodically <strong>anchor to human labels</strong> to detect drift. Never let a model be the sole judge of its own contest.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">judge = family Vega<br>answer B = family Vega &rarr; +bias ❌<br><br>fix: strip model names (blind)<br>+ panel [Vega, Nova, Atlas] &rarr; vote<br>+ human anchor set to catch drift</div>`, code:`answers = strip_model_names(shuffle([a, b]))   # judge can't tell who's who
+panel   = [judge_vega, judge_nova, judge_atlas] # different families
+verdict = majority(debiased_pairwise(J, q, a, b) for J in panel)
+# and never let a model be the sole judge of its OWN outputs.` },
+ { title:"7. A trustworthy harness — and what's next", why:"Put it together: a small <strong>private</strong> eval set of real tasks, <strong>pointwise</strong> rubric scores for regressions + <strong>pairwise</strong> for head-to-heads, <strong>swap-and-average</strong> against order, <strong>rubric anchoring + length control</strong> against verbosity, <strong>blind + diverse judges</strong> against self-preference, and a <strong>human-labelled anchor set</strong> to calibrate the judge (measure agreement / Cohen's κ). Only then is the number trustworthy enough to gate a release. Next: once you can <em>measure</em> quality cheaply, you can <em>generate and filter</em> data with it.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">private eval set (your tasks)<br>+ pointwise &amp; pairwise<br>+ swap-avg + rubric + blind panel<br>+ human anchor (κ, agreement)<br>= a number you can GATE on<br><br>next: Day 39 — Synthetic Data</div>`, code:`# the eval stack, combined:
+#   task eval set      -> your real inputs, private (no leakage)
+#   pointwise + pairwise -> regressions + head-to-heads
+#   swap-and-average   -> kill position bias
+#   rubric + length ctl -> kill verbosity bias
+#   blind + panel      -> kill self-preference
+#   human anchor + kappa -> is the judge even trustworthy?
+# Day 39: use the judge to FILTER synthetic data -> self-improvement.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>

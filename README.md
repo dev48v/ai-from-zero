@@ -44,6 +44,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 35 — DPO](https://dev48v.infy.uk/ai/days/day35-dpo.html) — `day35-dpo.html`
 - [AIFromZero · Day 36 — Constitutional AI & RLAIF](https://dev48v.infy.uk/ai/days/day36-constitutional-ai.html) — `day36-constitutional-ai.html`
 - [AIFromZero · Day 37 — Long-Context Tricks](https://dev48v.infy.uk/ai/days/day37-long-context-tricks.html) — `day37-long-context-tricks.html`
+- [AIFromZero · Day 38 — Evals & LLM-as-a-Judge](https://dev48v.infy.uk/ai/days/day38-evals-llm-judge.html) — `day38-evals-llm-judge.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
