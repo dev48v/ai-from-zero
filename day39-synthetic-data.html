@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 39 — Synthetic Data &amp; the Self-Improvement Loop</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  input[type=range]{ accent-color:#6366f1; }
+  .bar-grow { transition: height .35s ease-out; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 39</div>
+      <h1 class="text-xl font-bold">♻️ Synthetic Data &amp; the Self-Improvement Loop — once you can cheaply <em>verify</em> quality, a model can <em>generate</em> its own training data, <em>filter</em> it, and retrain to get better each round. Skip the filter and it eats its own tail: <strong>model collapse</strong>.</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">You ran out of human data. So the model makes its own — then <em>grades and retrains on it</em>. Does that actually work?</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">The trick is an asymmetry: for many tasks <strong>verifying</strong> an answer is far cheaper than <strong>generating</strong> one (checking a proof, running unit tests, matching a known answer). So a mediocre model can spray out many candidates, a cheap verifier keeps only the good ones, and the model retrains on that <em>cleaner-than-average</em> set — a bit better each round. That's <strong>STaR / self-training / distillation</strong>. But the <strong>filter is the whole game</strong>: retrain on <em>unfiltered</em> output and quality stalls — worse, if a model learns generation after generation only from its <em>own</em> samples, the distribution narrows until it <strong>collapses</strong> to a single note. Both demos below run <strong>entirely in your browser</strong>, no model calls, fully deterministic.</p>
+      </div>
+
+      <!-- ===================== CARD A · self-improvement loop ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">① The self-improvement loop <span class="text-slate-400 normal-case font-normal">— generate candidates → verify/filter → retrain → repeat, and watch quality tick up</span></div>
+        <p class="text-[11px] text-slate-400 mb-4">Each round the model generates <b id="nCand">12</b> candidate answers; a verifier keeps the ones it can confirm are correct; the next generation trains on that kept set. The <b>next model's quality moves toward the <em>purity</em> of the kept set</b> — so a good filter lifts it, and no filter goes nowhere. Drag the filter to <b>0%</b> and the loop flat-lines: garbage in, garbage out.</p>
+
+        <div class="grid md:grid-cols-3 gap-4 items-end mb-4">
+          <div class="md:col-span-2">
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Verifier / filter strength <span id="filterVal" class="text-indigo-600 stat">70%</span></label>
+            <input id="filterRange" type="range" min="0" max="100" value="70" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>0% = keep everything (no filter)</span><span>100% = keep only verified-correct</span></div>
+          </div>
+          <button id="runLoop" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Run the loop</button>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-start">
+          <div>
+            <div class="text-[11px] font-bold text-slate-500 mb-2">Model quality after each retrain</div>
+            <div id="loopBars" class="flex items-end gap-2"></div>
+          </div>
+          <div>
+            <div class="text-[11px] font-bold text-slate-500 mb-2">What the verifier kept each round <span class="text-slate-400 normal-case font-normal">(green = purity of the training set)</span></div>
+            <div id="loopRows" class="space-y-1.5 mb-3"></div>
+            <div class="grid grid-cols-3 gap-2 text-center mb-3">
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">Start</div><div id="loopStart" class="text-lg font-bold text-slate-700 mt-1 stat">—</div></div>
+              <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-indigo-500">Final</div><div id="loopFinal" class="text-lg font-bold text-indigo-600 mt-1 stat">—</div></div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-emerald-500">Gain</div><div id="loopGain" class="text-lg font-bold text-emerald-600 mt-1 stat">—</div></div>
+            </div>
+            <div id="loopVerdict" class="rounded-lg px-3 py-2 text-[12px]"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD B · model collapse ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">② Model collapse <span class="text-slate-400 normal-case font-normal">— train a model on its own <b>unfiltered</b> output, generation after generation</span></div>
+        <p class="text-[11px] text-slate-400 mb-4">Here there's <em>no</em> verifier — each generation simply learns from samples of the previous one. Sampling over-weights the peak and drops the rare tails, so the distribution keeps narrowing. With <b>0%</b> real data it collapses to a single spike (diversity gone). Slide in some <b>real/human data</b> and it re-anchors the tails and stays healthy.</p>
+
+        <div class="grid md:grid-cols-3 gap-4 items-end mb-4">
+          <div class="md:col-span-2">
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Real / human data mixed back in each generation <span id="mixVal" class="text-indigo-600 stat">0%</span></label>
+            <input id="mixRange" type="range" min="0" max="50" value="0" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>0% = pure gen-on-gen (autophagy)</span><span>50% = heavily anchored to reality</span></div>
+          </div>
+          <button id="runGen" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Run generations</button>
+        </div>
+
+        <div class="text-[11px] font-bold text-slate-500 mb-2">Output distribution across 9 modes, generation by generation <span class="text-slate-400 normal-case font-normal">(each mini-chart is one generation; number = effective modes still alive)</span></div>
+        <div id="genHist" class="flex flex-wrap items-start gap-4 mb-4"></div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-start">
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">Gen 0 modes</div><div id="divStart" class="text-lg font-bold text-slate-700 mt-1 stat">—</div></div>
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">Final modes</div><div id="divFinal" class="text-lg font-bold text-slate-700 mt-1 stat">—</div></div>
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">Peak share</div><div id="peakFinal" class="text-lg font-bold text-slate-700 mt-1 stat">—</div></div>
+          </div>
+          <div id="collapseVerdict" class="rounded-lg px-3 py-2 text-[12px]"></div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto">Same engine, opposite outcomes. Card&nbsp;① adds a <strong>verifier</strong> so each generation trains on a <em>cleaner</em> set than it produced — quality climbs. Card&nbsp;② removes it, so each generation trains on its <em>own average</em> — diversity leaks away until the model collapses. The lesson: <strong>synthetic data is only as good as the filter in front of it, and you must keep real data in the loop.</strong></p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Making data, and not poisoning yourself</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a self-improvement (STaR) loop — with a collapse guard</h2>
+    <p class="text-slate-500 mb-8">Turn a model plus a verifier into a data factory. Generate many candidates, keep only the ones a verifier confirms, fine-tune on the kept set, and repeat — the loop from LOOK ①. Then the distillation variant (a strong teacher makes data for a small student) and the guardrails that stop LOOK ② — mixing in real data and watching diversity so the model never eats its own tail.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Generate candidates — sample k tries per prompt</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Data is the bottleneck, so make your own. For each prompt, sample <strong>several</strong> answers with temperature &gt; 0 so they differ. One try might be wrong; among <em>k</em> tries, some are usually right — that's the raw material the filter will sift.</p>
+        <div class="relative"><pre>def generate(model, prompts, k=8, temp=0.8):
+    pool = []
+    for p in prompts:                       # YOUR prompts / questions
+        for _ in range(k):                  # k diverse attempts each
+            pool.append((p, model.sample(p, temperature=temp)))
+    return pool                             # many candidates, quality varies
+# one shot is unreliable; k shots almost always contain a good one.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Verify &amp; filter — the step that makes it all work</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The whole idea rests on <strong>verification being cheaper than generation</strong>. Prefer a <strong>ground-truth</strong> checker (unit tests, a math answer key, a compiler) over an LLM judge, and an LLM judge (Day&nbsp;38) over nothing. Keep only what passes — the kept set is <em>purer</em> than the model's average output.</p>
+        <div class="relative"><pre>def keep_good(pool, verify):
+    kept = []
+    for (prompt, answer) in pool:
+        if verify(prompt, answer):          # tests pass? matches key? judge says OK?
+            kept.append((prompt, answer))
+    return kept
+# verify() is the filter. ground-truth &gt; LLM-judge &gt; nothing.
+# no verify() -&gt; you retrain on your own average -&gt; NO improvement.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Retrain on the kept set (STaR / rejection sampling)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Fine-tune the model on its <em>own verified-correct</em> answers — including the reasoning that led there. This is <strong>STaR</strong> (Self-Taught Reasoner) / rejection-sampling fine-tuning: the model bootstraps from the good samples it can already occasionally produce.</p>
+        <div class="relative"><pre>def retrain(model, kept):
+    # supervised fine-tune on VERIFIED (prompt, answer) pairs
+    return finetune(model, dataset=kept)    # keep the winning reasoning too
+# the model learns from the best of its OWN attempts -&gt; it improves
+# at producing them on the first try next time.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">The loop — repeat, quality ticks up each round</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Chain the three steps and iterate. As the model gets better, more of its candidates pass the filter, so the kept set grows and improves — the virtuous cycle you drove with the filter slider in LOOK. It plateaus when the model saturates what the verifier can confirm.</p>
+        <div class="relative"><pre>def self_improve(model, prompts, verify, rounds=5):
+    for r in range(rounds):
+        pool  = generate(model, prompts, k=8)
+        kept  = keep_good(pool, verify)          # &lt;-- the filter is everything
+        model = retrain(model, kept)
+        log(r, eval_quality(model))              # should rise each round
+    return model
+# filter ON  -&gt; quality climbs.   filter OFF -&gt; it flat-lines.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Distillation variant — a teacher makes data for a student</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Same "generate data to train" family, different roles: a <strong>strong teacher</strong> produces high-quality answers (still verified/filtered), and a <strong>small cheap student</strong> trains on them. You bottle a big model's skill into a model you can actually afford to serve (Day&nbsp;23).</p>
+        <div class="relative"><pre># self-improvement: teacher == student (learns from itself)
+# distillation:     teacher  &gt;  student (student mimics the teacher)
+data    = keep_good(generate(teacher, prompts, k=4), verify)
+student = finetune(small_student, dataset=data)      # cheap to serve
+# synthetic data flows from a model that CAN do it -&gt; one that will.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Guard against collapse — keep real data, watch diversity</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The failure mode from LOOK ②: train gen-on-gen on <em>unfiltered</em> synthetic and the distribution narrows until it collapses (a.k.a. <strong>model autophagy / MAD</strong>). Defences: always <strong>mix in real/human data</strong> to anchor the tails, filter hard, cap the number of self-training generations, and <strong>track a diversity metric</strong> — stop if it drops.</p>
+        <div class="relative"><pre># NEVER train purely on your own unfiltered output.
+train_set = mix(real_data, synthetic_kept, real_frac=0.3)   # anchor tails
+model     = finetune(model, train_set)
+
+div = effective_modes(model.sample_many())   # diversity / entropy
+assert div &gt; MIN_DIVERSITY, "distribution collapsing — inject real data!"
+# filter + real data + a diversity tripwire = a loop that doesn't rot.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 39 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">When human data runs out, a model can make its own — because <strong>verifying is cheaper than generating</strong>. Generate many candidates, <strong>filter</strong> to the verified-good ones, and retrain: that's <strong>STaR / self-training</strong>, and <strong>distillation</strong> when a teacher feeds a student. The <strong>filter is the whole game</strong> — without it quality stalls, and training gen-on-gen on unfiltered output causes <strong>model collapse</strong> as diversity leaks away. Keep real data in the mix, verify hard, and watch a diversity tripwire. <strong>👉 Tomorrow — Day 40: Scaling Laws — why loss falls in a smooth, predictable power law as you add compute, data and parameters, and the Chinchilla-optimal balance between them.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+  if (t.dataset.tab === "look") renderAll();
+});
+
+const $ = id => document.getElementById(id);
+
+/* SYNTH-ENGINE-START */
+// ===== Day 39 · Synthetic Data & the Self-Improvement Loop — client-side sim (no ML) =====
+// No model is called. Two deterministic toy dynamics show the two outcomes:
+//
+//  ① SELF-IMPROVEMENT: each round the model makes N candidates; a verifier of
+//     strength f keeps candidates (rejecting a fraction f of the wrong ones).
+//     The next model's quality moves toward the PURITY of the kept set:
+//        kept   = correct + (1-f)*wrong           # weak filter keeps junk
+//        purity = correct / kept                  # cleaner set if f is high
+//        q'     = q + LR*(purity - q)             # learn toward that purity
+//     f = 0  -> purity = q -> q' = q  -> STALLS (garbage in, garbage out)
+//     f high -> purity > q -> quality climbs each round.
+//
+//  ② MODEL COLLAPSE: no verifier. Each generation learns from samples of the
+//     last, which over-weights the peak and drops the tails -> sharpen(p).
+//     Mixing real data back in re-anchors the tails and prevents collapse:
+//        p' = normalize( (1-mix)*sharpen(p) + mix*real )
+//     mix = 0 -> narrows to a single spike (diversity -> 1 effective mode).
+const N = 12;            // candidates generated per round
+const ROUNDS = 6;        // self-training rounds
+const LR = 0.55;         // how fast quality tracks the kept-set purity
+const Q0 = 0.30;         // starting model quality (fraction of correct answers)
+
+const REAL = normalize([1,3,6,10,12,10,6,3,1]);  // healthy 9-mode distribution
+const GENS = 6;          // collapse generations
+const ALPHA = 1.6;       // sampling sharpening: peak grows, tails fade
+
+const S = { filter: 70, mix: 0 };
+
+function normalize(a){ const s = a.reduce((x,y)=>x+y,0); return a.map(x=>x/s); }
+
+// ① self-improvement trajectory
+function loopTraj(){
+  const f = S.filter/100;
+  let q = Q0;
+  const t = [{ round:0, q }];
+  for (let r=1; r<=ROUNDS; r++){
+    const correct = N*q, wrong = N-correct;
+    const kept   = correct + (1-f)*wrong;   // verifier rejects fraction f of wrong
+    const purity = correct/kept;            // f=0 -> q ; f=1 -> 1.0
+    q = Math.min(0.99, q + LR*(purity - q));
+    t.push({ round:r, q, correct, kept, purity });
+  }
+  return t;
+}
+
+// ② collapse trajectory
+function sharpen(p){ return normalize(p.map(x=>Math.pow(x, ALPHA))); }
+function genTraj(){
+  const m = S.mix/100;
+  let p = REAL.slice();
+  const g = [p.slice()];
+  for (let i=1; i<=GENS; i++){
+    const s = sharpen(p);
+    p = normalize(s.map((x,j)=> (1-m)*x + m*REAL[j]));
+    g.push(p.slice());
+  }
+  return g;
+}
+function effModes(p){ let h=0; p.forEach(x=>{ if(x>1e-9) h -= x*Math.log(x); }); return Math.exp(h); }
+/* SYNTH-ENGINE-END */
+
+// ===================== CARD A rendering =====================
+function renderLoop(){
+  $("filterVal").textContent = S.filter + "%";
+  const t = loopTraj();
+
+  $("loopBars").innerHTML = t.map(x => {
+    const h = (x.q*100).toFixed(0);
+    return `<div class="flex flex-col items-center gap-1" style="flex:1">
+      <div class="w-full flex items-end justify-center" style="height:130px">
+        <div class="bar-grow rounded-t" style="width:26px;height:${h}%;background:linear-gradient(180deg,#6366f1,#a5b4fc)"></div>
+      </div>
+      <div class="stat text-[11px] font-bold text-slate-600">${h}%</div>
+      <div class="text-[9px] text-slate-400">gen ${x.round}</div>
+    </div>`;
+  }).join("");
+
+  $("loopRows").innerHTML = t.slice(1).map(x => {
+    const pur = (x.purity*100).toFixed(0);
+    return `<div class="flex items-center gap-2 text-[11px]">
+      <span class="w-10 shrink-0 text-slate-500">gen ${x.round}</span>
+      <span class="w-24 shrink-0 text-slate-400">kept ${x.kept.toFixed(1)}/${N}</span>
+      <div class="flex-1 h-2 bg-slate-100 rounded overflow-hidden"><div class="h-2 rounded" style="width:${pur}%;background:#10b981"></div></div>
+      <span class="w-16 text-right stat text-slate-500">purity ${pur}%</span>
+    </div>`;
+  }).join("");
+
+  const fin = t[t.length-1].q, gain = fin - Q0;
+  $("loopStart").textContent = (Q0*100).toFixed(0)+"%";
+  $("loopFinal").textContent = (fin*100).toFixed(0)+"%";
+  $("loopGain").textContent  = "+"+(gain*100).toFixed(0)+" pts";
+
+  const v = $("loopVerdict");
+  if (S.filter <= 4){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-rose-50 border border-rose-200 text-rose-800";
+    v.innerHTML = "❌ <b>No filter → no improvement.</b> With every candidate kept, the training set is exactly as good as the model already is (purity = quality), so retraining goes nowhere. This is <em>garbage in, garbage out</em> — the flat line above.";
+  } else if (S.filter < 35){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = "⚠️ <b>Weak filter → quality crawls.</b> A leaky verifier lets wrong answers into the training set, so each round is only a little cleaner than the last. Improvement is real but slow — a better verifier is worth more than more candidates.";
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = "✅ <b>Self-improvement.</b> The verifier keeps a set that's <em>purer</em> than the model's average output, so retraining lifts quality — and as the model improves, more candidates pass, compounding the gain each round until it plateaus.";
+  }
+}
+
+// ===================== CARD B rendering =====================
+function renderGen(){
+  $("mixVal").textContent = S.mix + "%";
+  const g = genTraj();
+
+  $("genHist").innerHTML = g.map((p, gi) => {
+    const mx = Math.max(...p);
+    const dv = effModes(p);
+    const c = dv > 4.5 ? "#6366f1" : dv > 3 ? "#818cf8" : dv > 2 ? "#f59e0b" : "#f43f5e";
+    const bars = p.map(x => `<div style="flex:1;height:${(x/mx*100).toFixed(0)}%;background:${c};border-radius:1px 1px 0 0"></div>`).join("");
+    return `<div class="flex flex-col items-center gap-1">
+      <div class="flex items-end gap-[2px] border-b border-slate-200" style="height:66px;width:64px">${bars}</div>
+      <div class="text-[9px] text-slate-400">gen ${gi}</div>
+      <div class="text-[9px] stat font-bold" style="color:${c}">${dv.toFixed(1)} modes</div>
+    </div>`;
+  }).join("");
+
+  const start = effModes(g[0]);
+  const last  = g[g.length-1];
+  const fin   = effModes(last);
+  $("divStart").textContent = start.toFixed(1);
+  $("divFinal").textContent = fin.toFixed(1);
+  $("peakFinal").textContent = (Math.max(...last)*100).toFixed(0)+"%";
+
+  const v = $("collapseVerdict");
+  if (S.mix === 0){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-rose-50 border border-rose-200 text-rose-800";
+    v.innerHTML = "❌ <b>Model collapse.</b> With zero real data, each generation learns only from the last one's samples — the tails vanish and the mass piles onto the peak, until the model outputs essentially <em>one</em> thing ("+fin.toFixed(1)+" effective modes). This is model autophagy / MAD.";
+  } else if (S.mix < 20){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = "⚠️ <b>Still thinning.</b> A little real data slows the narrowing but doesn't stop it — diversity is falling from "+start.toFixed(1)+" toward "+fin.toFixed(1)+" modes. Under a steady diet of its own output, the model keeps drifting toward the peak.";
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = "✅ <b>Healthy.</b> Enough real/human data flows back each generation to re-anchor the tails, so the distribution holds its spread ("+fin.toFixed(1)+" modes) instead of collapsing. Real data in the loop is the antidote to autophagy.";
+  }
+}
+
+function renderAll(){ renderLoop(); renderGen(); }
+
+// ===================== wiring =====================
+$("filterRange").oninput = e => { S.filter = +e.target.value; renderLoop(); };
+$("mixRange").oninput     = e => { S.mix    = +e.target.value; renderGen();  };
+$("runLoop").onclick = () => { renderLoop(); $("loopBars").classList.remove("fade-in"); void $("loopBars").offsetWidth; $("loopBars").classList.add("fade-in"); };
+$("runGen").onclick  = () => { renderGen();  $("genHist").classList.remove("fade-in");  void $("genHist").offsetWidth;  $("genHist").classList.add("fade-in"); };
+
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Why make synthetic data at all", why:"Modern models are trained on much of the public internet — and high-quality human text is <strong>running out</strong>. New data is expensive to collect and label. So the question becomes: can a model help make its <em>own</em> training data? For many tasks, yes — and it's already how frontier reasoning and coding models are bootstrapped. The catch is that naive self-training has a failure mode (collapse), so the <em>how</em> matters as much as the <em>whether</em>.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">human data: finite &amp; costly<br>&darr;<br>let the model GENERATE data<br>&rarr; filter it &rarr; retrain on it<br><br>done right: quality &uarr;<br>done wrong: model collapse</div>`, code:`# the data wall: high-quality human text is finite.
+# idea: model makes candidates -> we KEEP the good ones -> retrain.
+synthetic = keep_good(generate(model, prompts), verify)` },
+ { title:"2. The key asymmetry: verify ≪ generate", why:"Self-improvement works because for many tasks <strong>checking</strong> an answer is far cheaper and more reliable than <strong>producing</strong> one. Running unit tests is easier than writing correct code; checking a math result against a key is easier than deriving it; confirming a proof is easier than finding it. So even a mediocre model can generate lots of tries, and a cheap verifier keeps the ones that are actually right — the kept set is <em>better than the model's average output</em>, which is exactly what you need to train on.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">GENERATE a proof  = hard<br>VERIFY  a proof  = easy<br><br>weak model &rarr; many tries<br>cheap verifier &rarr; keep the good<br>&rarr; kept set &gt; model average ✅</div>`, code:`# generation is unreliable; verification is cheap & trustworthy:
+answers = [model.sample(q) for _ in range(k)]   # some wrong, some right
+good    = [a for a in answers if verify(q, a)]   # keep only verified
+# 'good' is a HIGHER-quality set than the model's own average.` },
+ { title:"3. STaR / self-training / rejection sampling", why:"The concrete recipe: for each prompt, <strong>sample several answers</strong>, keep the ones a verifier confirms (correct final answer, passing tests, judge approval), then <strong>fine-tune on those</strong> — including the reasoning that produced them — and repeat. This is <strong>STaR</strong> (Self-Taught Reasoner) and rejection-sampling fine-tuning. The model bootstraps: it can <em>occasionally</em> produce a great answer, and training on those great answers makes them the <em>norm</em>.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">for each prompt:<br>&nbsp;sample k answers<br>&nbsp;keep the verified-correct ones<br>fine-tune on the kept set<br>&nbsp; &loop; repeat<br>&rarr; first-try quality climbs</div>`, code:`for round in range(R):
+    pool = [(q, model.sample(q)) for q in prompts for _ in range(k)]
+    kept = [(q,a) for (q,a) in pool if verify(q,a)]   # rejection sampling
+    model = finetune(model, kept)                     # STaR step
+# learn from the best of your OWN outputs, over and over.` },
+ { title:"4. Distillation is synthetic data too", why:"A close cousin: instead of a model teaching <em>itself</em>, a <strong>strong teacher</strong> model generates high-quality answers that a <strong>smaller student</strong> trains on (Day&nbsp;23). Same 'generate data to train' pattern, but teacher &gt; student rather than teacher = student. It's how big-model capability gets compressed into small, cheap-to-serve models — and much 'open' instruction data is teacher-generated this way. You still verify/filter the teacher's output.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">SELF-IMPROVE: teacher == student<br>DISTILL:      teacher &gt; student<br><br>big teacher &rarr; makes data<br>small student &rarr; trains on it<br>&rarr; cheap model, big-model skill</div>`, code:`# distillation = synthetic data from a BETTER model:
+data    = keep_good(generate(teacher, prompts), verify)
+student = finetune(small_student, data)   # mimic the teacher, cheaply` },
+ { title:"5. The filter is the whole game", why:"Everything hinges on the verifier. Retrain on <strong>unfiltered</strong> output and the training set is only as good as the model already is — so it goes <strong>nowhere</strong> (you saw the flat line at filter&nbsp;0% in LOOK). A <em>weak</em> filter lets wrong answers leak in and improvement crawls; a <em>strong, ground-truth</em> filter (tests, answer keys, execution) drives fast gains. Rank your options: ground-truth checker &gt; LLM-judge &gt; heuristic &gt; nothing.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">no filter &rarr; purity = quality &rarr; STALL<br>weak filter &rarr; slow crawl<br>strong filter &rarr; fast climb<br><br>ground-truth &gt; LLM-judge &gt; nothing</div>`, code:`# next-model quality tracks the PURITY of the kept set:
+purity = correct / kept          # kept = correct + (1-f)*wrong
+q_next = q + lr*(purity - q)      # f=0 -> purity=q -> q_next=q (stall)
+# a better verifier beats more candidates. invest in verify().` },
+ { title:"6. Model collapse (autophagy / MAD)", why:"The danger: train a model <em>generation after generation</em> on its <strong>own unfiltered</strong> output. Sampling slightly over-represents the common (the peak) and under-represents the rare (the tails); retrain on those samples and the next model's tails are thinner still. Iterate and the distribution <strong>narrows until it collapses</strong> to a few modes — losing variance, then losing the mean's spread. This is <strong>model autophagy disorder (MAD)</strong>: the model literally eats its own tail. You watched it in LOOK ②.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">gen0: wide bell 🔔<br>gen1: sampling drops the tails<br>gen2: narrower...<br>genN: a single spike ▮<br>&rarr; diversity gone (1 mode) ❌</div>`, code:`# each generation trains ONLY on samples of the previous one:
+p_next = sharpen(p)      # peak grows, rare tails fade every round
+# repeat -> variance shrinks -> distribution collapses to one mode.
+# unfiltered gen-on-gen synthetic data is self-poisoning.` },
+ { title:"7. Avoiding collapse — and what's next", why:"The fixes are practical: always keep <strong>real/human data in the mix</strong> (it re-anchors the tails — you saw the healthy curve when you slid real data in), <strong>filter hard</strong> so only good samples train the next model, <strong>cap</strong> the number of self-training generations, and <strong>track a diversity metric</strong> as a tripwire. Put together — verify ≪ generate, a strong filter, real data in the loop, a diversity guard — synthetic data becomes a durable flywheel instead of a slow poison. Next: <strong>Day 40, Scaling Laws</strong>.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">keep REAL data in the mix<br>+ filter hard (verify)<br>+ cap self-train generations<br>+ diversity tripwire<br>= a flywheel, not a poison<br><br>next: Day 40 — Scaling Laws</div>`, code:`# the safe recipe, combined:
+train = mix(real_data, synthetic_kept, real_frac=0.3)  # anchor tails
+model = finetune(model, train)
+assert effective_modes(model) > MIN_DIV, "collapsing -> add real data"
+# Day 40: how loss falls as a power law in compute, data & params.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
