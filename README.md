@@ -46,6 +46,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 37 — Long-Context Tricks](https://dev48v.infy.uk/ai/days/day37-long-context-tricks.html) — `day37-long-context-tricks.html`
 - [AIFromZero · Day 38 — Evals & LLM-as-a-Judge](https://dev48v.infy.uk/ai/days/day38-evals-llm-judge.html) — `day38-evals-llm-judge.html`
 - [AIFromZero · Day 39 — Synthetic Data & the Self-Improvement Loop](https://dev48v.infy.uk/ai/days/day39-synthetic-data.html) — `day39-synthetic-data.html`
+- [AIFromZero · Day 40 — Scaling Laws](https://dev48v.infy.uk/ai/days/day40-scaling-laws.html) — `day40-scaling-laws.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

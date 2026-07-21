@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 40 — Scaling Laws</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  input[type=range]{ accent-color:#6366f1; }
+  .bar-grow { transition: height .35s ease-out; }
+  svg text { font-family:-apple-system,"Inter",sans-serif; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 40</div>
+      <h1 class="text-xl font-bold">📈 Scaling Laws — a model's loss falls in a smooth, <em>predictable</em> power law as you pour in more compute, data and parameters. The surprise isn't that bigger is better; it's that the curve is a <strong>straight line on a log-log plot</strong> — so you can forecast a giant run before you pay for it, and split your budget the <strong>Chinchilla-optimal</strong> way: ~<strong>20 tokens per parameter</strong>.</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Bigger models get better — but <em>how much</em> better, and where should the money go?</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Two of the most useful facts in modern AI. <strong>First:</strong> test loss drops as a clean <strong>power law</strong> in compute — a straight line on a log-log plot — down to an <strong>irreducible floor</strong> you can never cross. That means you can <em>extrapolate</em>: fit a few small runs, draw the line, and predict how a 100&times;-bigger model will do <em>before</em> training it. <strong>Second:</strong> for a fixed compute budget there's a <em>best</em> way to split it between model size (<b>N</b>&nbsp;parameters) and data (<b>D</b>&nbsp;tokens). Kaplan (2020) said pour it into parameters; <strong>Chinchilla</strong> (2022) showed you should grow both together — about <strong>20 tokens per parameter</strong> — which is why <strong>GPT-3 was badly undertrained</strong>. Both demos below compute the real curves <strong>in your browser</strong>, no model calls.</p>
+      </div>
+
+      <!-- ===================== CARD A · power law ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">① The power law of loss <span class="text-slate-400 normal-case font-normal">— L = L₀ + (C / C_c)<sup>−α</sup> · drag compute along the curve and watch loss fall in a straight log-log line toward the floor</span></div>
+        <p class="text-[11px] text-slate-400 mb-4">Loss has two parts: a <b>reducible</b> piece that shrinks as a power of compute (the dashed straight line), and an <b>irreducible</b> floor <b>L₀</b> — the entropy of language itself, which no amount of scale removes. Steeper <b>α</b> = you learn faster per FLOP. As compute grows the curve rides the power law, then <b>bends flat</b> onto the floor: that's diminishing returns and the limit of extrapolation.</p>
+
+        <div class="grid md:grid-cols-3 gap-4 items-end mb-4">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Scaling exponent α <span id="aVal" class="text-indigo-600 stat">0.060</span></label>
+            <input id="aRange" type="range" min="20" max="150" value="60" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>shallow</span><span>steep (more gain / FLOP)</span></div>
+          </div>
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Irreducible loss L₀ <span id="l0Val" class="text-indigo-600 stat">1.00</span></label>
+            <input id="l0Range" type="range" min="0" max="150" value="100" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>0 (no floor)</span><span>high floor</span></div>
+          </div>
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Training compute C <span id="cVal" class="text-indigo-600 stat">1e20</span></label>
+            <input id="cRange" type="range" min="1500" max="2700" value="2000" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>10¹⁵ FLOPs</span><span>10²⁷ FLOPs</span></div>
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-center">
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+            <svg id="curveSvg" viewBox="0 0 580 340" class="w-full"></svg>
+          </div>
+          <div>
+            <div class="grid grid-cols-3 gap-2 text-center mb-3">
+              <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-indigo-500">Loss here</div><div id="curLoss" class="text-lg font-bold text-indigo-600 mt-1 stat">—</div></div>
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">Reducible</div><div id="curRed" class="text-lg font-bold text-slate-700 mt-1 stat">—</div></div>
+              <div class="bg-amber-50 border border-amber-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-amber-500">Floor L₀</div><div id="curFloor" class="text-lg font-bold text-amber-600 mt-1 stat">—</div></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-center mb-3">
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">10× the compute →</div><div id="curNext" class="text-sm font-bold text-slate-700 mt-1 stat">—</div></div>
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">% above floor</div><div id="curPct" class="text-sm font-bold text-slate-700 mt-1 stat">—</div></div>
+            </div>
+            <div id="curveVerdict" class="rounded-lg px-3 py-2 text-[12px]"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD B · Chinchilla allocator ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">② The Chinchilla allocator <span class="text-slate-400 normal-case font-normal">— fixed compute C ≈ 6·N·D · slide the budget and the split, find the loss-minimising ~20 tokens/param</span></div>
+        <p class="text-[11px] text-slate-400 mb-4">A training run costs roughly <b>C = 6 · N · D</b> FLOPs (params × tokens). For a <em>fixed</em> C you trade model size against data: fewer params ⇒ more tokens, and vice-versa. Loss is <b>U-shaped</b> in that split — a clear minimum near <b>20 tokens per parameter</b>. Go left (too many params, too little data) and you're <b>undertrained</b> — a big model starved of data (that was Kaplan's regime, and <b>GPT-3</b>). Go right and you've spent on data a bigger model would have used better. <span class="text-slate-400 italic">(y-axis zoomed — the valley is gentle near the bottom, but veering far from it wastes real compute.)</span></p>
+
+        <div class="grid md:grid-cols-2 gap-4 items-end mb-3">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Compute budget C <span id="cbVal" class="text-indigo-600 stat">6e23</span></label>
+            <input id="cbRange" type="range" min="1800" max="2600" value="2378" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>10¹⁸ FLOPs</span><span>10²⁶ FLOPs</span></div>
+          </div>
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Allocation — tokens per parameter (D/N) <span id="rVal" class="text-indigo-600 stat">20.0</span></label>
+            <input id="rRange" type="range" min="-100" max="330" value="130" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>0.1 (huge model, tiny data)</span><span>2000 (tiny model, huge data)</span></div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-4">
+          <button data-preset="opt" class="preset bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-semibold text-xs">🎯 Chinchilla-optimal (20 : 1)</button>
+          <button data-preset="gpt3" class="preset bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg font-semibold text-xs">🦖 GPT-3 (175B / 300B → 1.7 : 1)</button>
+          <button data-preset="over" class="preset bg-slate-600 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg font-semibold text-xs">💧 Over-data (200 : 1)</button>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-center">
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+            <svg id="chinSvg" viewBox="0 0 580 340" class="w-full"></svg>
+          </div>
+          <div>
+            <div class="grid grid-cols-3 gap-2 text-center mb-3">
+              <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-indigo-500">Params N</div><div id="chN" class="text-base font-bold text-indigo-600 mt-1 stat">—</div></div>
+              <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-indigo-500">Tokens D</div><div id="chD" class="text-base font-bold text-indigo-600 mt-1 stat">—</div></div>
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">Loss</div><div id="chLoss" class="text-base font-bold text-slate-700 mt-1 stat">—</div></div>
+            </div>
+            <div class="grid grid-cols-3 gap-2 text-center mb-3">
+              <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-emerald-500">Optimal N*</div><div id="chNopt" class="text-base font-bold text-emerald-600 mt-1 stat">—</div></div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-emerald-500">Optimal D*</div><div id="chDopt" class="text-base font-bold text-emerald-600 mt-1 stat">—</div></div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-emerald-500">Best loss</div><div id="chLopt" class="text-base font-bold text-emerald-600 mt-1 stat">—</div></div>
+            </div>
+            <div id="chinVerdict" class="rounded-lg px-3 py-2 text-[12px] mb-3"></div>
+            <div class="rounded-lg px-3 py-2 text-[11px] bg-rose-50 border border-rose-200 text-rose-800">
+              🦖 <b>“GPT-3 was undertrained.”</b> 175B params but only ~300B tokens ≈ <b>1.7 tokens/param</b> — deep in the undertrained zone. Chinchilla later trained <b>70B on 1.4T tokens</b> (20 : 1) on the <em>same compute</em> and <b>beat</b> GPT-3 — a model 2.5× smaller and far cheaper to serve. Click 🦖 above to jump the marker there.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto">Two laws, one lesson. Card&nbsp;① says loss is a <strong>predictable power law</strong> — you can forecast a frontier run and know where the <strong>irreducible floor</strong> makes more compute pointless. Card&nbsp;② says a fixed budget has a <strong>compute-optimal split</strong> (~20 tokens/param): under-feed a big model and you waste it (Kaplan / GPT-3), over-feed a small one and you leave capability on the table. <strong>Scaling isn't just “make it bigger” — it's “grow N and D together, and know when the curve flattens.”</strong></p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Why loss is predictable — and how to spend a budget</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a scaling-law forecaster &amp; a Chinchilla budget planner</h2>
+    <p class="text-slate-500 mb-8">Turn a handful of small training runs into a forecast for a giant one, then split a compute budget the compute-optimal way. Fit a power law in log-log space, read off the exponent and the irreducible floor, and use <code>C = 6ND</code> to solve for the best N and D — the exact logic behind LOOK ① and ②.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Fit the power law — a straight line in log-log space</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Run a few <em>small</em> models at different compute budgets and record final loss. Subtract the irreducible floor, take logs of both axes, and fit a line: its <strong>slope is −α</strong>. The whole point of scaling laws is that these points really do fall on a line.</p>
+        <div class="relative"><pre>import numpy as np
+# small, cheap runs: (compute C in FLOPs, final test loss)
+C    = np.array([1e17, 3e17, 1e18, 3e18, 1e19])
+loss = np.array([3.10, 2.74, 2.45, 2.22, 2.04])
+
+L0   = 1.69                       # irreducible floor (fit or assume)
+y    = np.log(loss - L0)          # reducible loss, logged
+x    = np.log(C)
+alpha, logCc = np.polyfit(x, y, 1)   # straight-line fit
+alpha = -alpha                    # slope is -alpha
+# loss(C) = L0 + (C / Cc)^(-alpha)   <-- your fitted law</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Extrapolate — forecast a run you haven't paid for</h3></div>
+        <p class="text-sm text-slate-600 mb-3">With α, C_c and the floor L₀ you can predict the loss of a model <strong>100× or 1000× bigger</strong> — the trick GPT-4's team used to de-risk a nine-figure run. But respect the <strong>floor</strong>: as C grows the reducible term vanishes and predictions asymptote to L₀. Extrapolate too far and the law itself may break.</p>
+        <div class="relative"><pre>def predict_loss(C, L0, Cc, alpha):
+    return L0 + (C / Cc)**(-alpha)   # the fitted power law
+
+predict_loss(1e24, L0, Cc, alpha)    # forecast a frontier run
+# reducible part -> 0 as C grows, so loss -> L0 (the floor).
+# never predict BELOW L0, and treat far extrapolations with care.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">The Chinchilla loss surface — L(N, D)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Loss depends on <em>both</em> size and data. Chinchilla fit a surface: an irreducible term plus one power law in <strong>N</strong> (parameters) and one in <strong>D</strong> (tokens). Neither term alone wins — starve either and the loss climbs.</p>
+        <div class="relative"><pre># Hoffmann et al. 2022 (Chinchilla) parametric fit:
+#   L(N, D) = E + A / N^alpha + B / D^beta
+E, A, B      = 1.69, 406.4, 410.7
+alpha, beta  = 0.34, 0.28
+
+def loss(N, D):
+    return E + A / N**alpha + B / D**beta
+# E = irreducible. A/N^a shrinks with size; B/D^b shrinks with data.
+# BOTH terms must be small -> you must grow N and D together.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Solve the budget — the ~20 tokens/param rule</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Fix compute at <code>C = 6ND</code> and minimise the loss surface over the N/D split. The optimum grows N and D at nearly the same rate, so their <strong>ratio D/N stays roughly constant — about 20 tokens per parameter</strong>. That single number is the headline Chinchilla result (the demo's engine).</p>
+        <div class="relative"><pre>import numpy as np
+def optimal_split(C):
+    best = None
+    for r in np.logspace(-1, 3, 400):     # try many tokens/param ratios
+        N = np.sqrt(C / (6*r))            # since C = 6*N*D and r = D/N
+        D = np.sqrt(C * r / 6)
+        L = loss(N, D)
+        if best is None or L < best[0]:
+            best = (L, N, D, r)
+    return best                           # r* lands near ~20 : 1
+
+L, N, D, r = optimal_split(6e23)          # -> ~70B params, ~1.4T tokens</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Diagnose a run — Kaplan vs Chinchilla</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Given any real model, check its ratio. Far below 20 ⇒ <strong>undertrained</strong> (Kaplan's “make it bigger” era, and GPT-3). Far above ⇒ over-fed a model too small to use the data. Modern models (Llama-style) deliberately run <em>past</em> 20 because they optimise for cheap <em>inference</em>, not just training-optimal loss.</p>
+        <div class="relative"><pre>def diagnose(N, D):
+    r = D / N
+    if r &lt; 12:  return f"{r:.1f} tok/param — UNDERTRAINED (Kaplan/GPT-3)"
+    if r &gt; 32:  return f"{r:.1f} tok/param — data-heavy (inference-optimal)"
+    return       f"{r:.1f} tok/param — near Chinchilla-optimal"
+
+diagnose(175e9, 300e9)   # GPT-3  -> 1.7  tok/param, undertrained
+diagnose( 70e9, 1.4e12)  # Chinchilla -> 20 tok/param, optimal
+# Kaplan 2020: scale N.  Chinchilla 2022: scale N and D together.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Know the limits — floors, data walls, breakdowns</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Scaling laws are a forecast, not a guarantee. Loss can't go below the <strong>irreducible floor</strong>; the Chinchilla-optimal recipe eventually demands <strong>more tokens than exist</strong> (the data wall — Day 39's synthetic data is one answer); laws are fit for <em>loss</em>, not downstream skill; and the fit can bend or break far outside the range you measured.</p>
+        <div class="relative"><pre># guardrails when you trust a scaling law:
+assert predicted_loss &gt; L0, "cannot beat the irreducible floor"
+tokens_needed = 20 * N                     # Chinchilla appetite
+assert tokens_needed &lt; tokens_available, "you hit the DATA WALL"
+# also: loss != capability, and extrapolation can break far out.
+# fixes: better data / synthetic data (Day 39), or spend at
+# INFERENCE time instead of training (reasoning models, Day 27).</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 40 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">Test loss falls as a smooth <strong>power law</strong> in compute, data and parameters — a straight line on a log-log plot down to an <strong>irreducible floor</strong> — which lets you <strong>forecast a frontier run before paying for it</strong>. And for a fixed budget <code>C ≈ 6ND</code> there's a <strong>compute-optimal split</strong>: grow N and D together at about <strong>20 tokens per parameter</strong>. That's why <strong>Kaplan's</strong> “just make it bigger” gave way to <strong>Chinchilla</strong>, and why <strong>GPT-3 (1.7 tok/param) was undertrained</strong> — a smaller model on more data matched it. Mind the limits: the floor, the data wall, and loss ≠ capability. <strong>👉 Tomorrow — Day 41: Emergent Abilities — why some skills appear <em>suddenly</em> as models scale (and whether that jump is real or a mirage of how we measure it).</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+  if (t.dataset.tab === "look") renderAll();
+});
+
+const $ = id => document.getElementById(id);
+
+/* SCALE-ENGINE-START */
+// ===== Day 40 · Scaling Laws — client-side, no ML, fully deterministic =====
+//
+//  ① POWER LAW of loss vs compute:
+//        L(C) = L0 + (C / Cc)^(-alpha)
+//     - reducible part (C/Cc)^(-alpha) is a STRAIGHT line on a log-log plot,
+//     - it bends flat onto the irreducible floor L0 as C grows.
+//     Cc is the compute at which the reducible loss == 1.
+//
+//  ② CHINCHILLA allocation. A run costs  C = 6 * N * D  (params * tokens).
+//     Fix C, vary the split via r = D/N (tokens per parameter):
+//        N = sqrt(C / (6r)),   D = sqrt(C r / 6)
+//     Loss surface (Chinchilla form, exponents equalised so the optimum is
+//     a clean, compute-independent ~20 tokens/param):
+//        L(N,D) = E + A / N^p + B / D^p
+//     Minimising over r gives  r* = (B/A)^(1/p) = 20  -> the famous rule.
+//     r << 20  -> undertrained (Kaplan / GPT-3);  r >> 20 -> over-fed data.
+const Cc_LOG = 18;                 // reference compute (log10 FLOPs): reducible loss = 1 here
+const E = 1.7, Acoef = 100, Bcoef = 285.3, P = 0.35;   // r* = (B/A)^(1/P) ~ 20
+const R_STAR = Math.pow(Bcoef / Acoef, 1 / P);          // ~= 19.99
+
+const CA = { alpha: 0.060, L0: 1.00, logC: 20 };        // card ①: exponent, floor, compute marker
+const CB = { logC: 23.778, ratio: 20 };                 // card ②: budget (log10 FLOPs), tokens/param
+
+function reducible(logC, a){ return Math.pow(10, -a * (logC - Cc_LOG)); }  // (C/Cc)^(-alpha)
+function lossA(logC, a, L0){ return L0 + reducible(logC, a); }
+
+function ndFromCr(C, r){ return { N: Math.sqrt(C / (6 * r)), D: Math.sqrt(C * r / 6) }; }
+function lossB(C, r){ const { N, D } = ndFromCr(C, r); return E + Acoef / Math.pow(N, P) + Bcoef / Math.pow(D, P); }
+
+function fmtBig(x){
+  if (x >= 1e12) return (x/1e12).toFixed(2) + "T";
+  if (x >= 1e9)  return (x/1e9).toFixed(1)  + "B";
+  if (x >= 1e6)  return (x/1e6).toFixed(1)  + "M";
+  if (x >= 1e3)  return (x/1e3).toFixed(1)  + "K";
+  return x.toFixed(0);
+}
+function fmtC(logC){
+  const e = Math.floor(logC), m = Math.pow(10, logC - e);
+  return (m < 1.05 ? "1" : m.toFixed(1)) + "e" + e;
+}
+/* SCALE-ENGINE-END */
+
+// ===================== CARD A · power-law chart =====================
+function renderCurve(){
+  $("aVal").textContent  = CA.alpha.toFixed(3);
+  $("l0Val").textContent = CA.L0.toFixed(2);
+  $("cVal").textContent  = fmtC(CA.logC);
+
+  const W = 580, H = 340, mL = 54, mR = 18, mT = 16, mB = 42;
+  const x0 = mL, x1 = W - mR, y0 = mT, y1 = H - mB;
+  const xMin = 15, xMax = 27, yTop = 1.0, yBot = -1.5;   // y = log10(loss)
+  const xPx = lc => x0 + (lc - xMin) / (xMax - xMin) * (x1 - x0);
+  const yPx = yv => y0 + (yTop - yv) / (yTop - yBot) * (y1 - y0);
+  const clampY = yv => Math.max(yBot, Math.min(yTop, yv));
+
+  // grid + axis labels
+  let g = "";
+  [15,18,21,24,27].forEach(t => {
+    const px = xPx(t);
+    g += `<line x1="${px}" y1="${y0}" x2="${px}" y2="${y1}" stroke="#e2e8f0"/>`;
+    g += `<text x="${px}" y="${y1+15}" text-anchor="middle" font-size="10" fill="#94a3b8">1e${t}</text>`;
+  });
+  [{v:1,l:"10"},{v:0,l:"1"},{v:-1,l:"0.1"}].forEach(o => {
+    const py = yPx(o.v);
+    g += `<line x1="${x0}" y1="${py}" x2="${x1}" y2="${py}" stroke="#e2e8f0"/>`;
+    g += `<text x="${x0-6}" y="${py+3}" text-anchor="end" font-size="10" fill="#94a3b8">${o.l}</text>`;
+  });
+
+  // curves
+  let total = "", power = "";
+  for (let i = 0; i <= 120; i++){
+    const lc = xMin + (xMax - xMin) * i / 120;
+    const red = reducible(lc, CA.alpha);
+    total += (i ? " L" : "M") + xPx(lc).toFixed(1) + " " + yPx(clampY(Math.log10(CA.L0 + red))).toFixed(1);
+    power += (i ? " L" : "M") + xPx(lc).toFixed(1) + " " + yPx(clampY(Math.log10(red))).toFixed(1);
+  }
+  let floorLine = "";
+  if (CA.L0 > 0.032){
+    const fy = yPx(clampY(Math.log10(CA.L0)));
+    floorLine = `<line x1="${x0}" y1="${fy}" x2="${x1}" y2="${fy}" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 4"/>`
+      + `<text x="${x1-2}" y="${fy-4}" text-anchor="end" font-size="10" fill="#d97706">irreducible floor L₀</text>`;
+  }
+
+  // marker
+  const red = reducible(CA.logC, CA.alpha);
+  const Lv  = CA.L0 + red;
+  const mx  = xPx(CA.logC), my = yPx(clampY(Math.log10(Lv)));
+
+  $("curveSvg").innerHTML =
+    g +
+    `<path d="${power}" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>` +
+    floorLine +
+    `<path d="${total}" fill="none" stroke="#6366f1" stroke-width="2.5"/>` +
+    `<line x1="${mx}" y1="${y0}" x2="${mx}" y2="${y1}" stroke="#6366f1" stroke-width="1" stroke-dasharray="2 3" opacity="0.5"/>` +
+    `<circle cx="${mx}" cy="${my}" r="5" fill="#6366f1" stroke="#fff" stroke-width="2"/>` +
+    `<text x="${(x0+x1)/2}" y="${H-4}" text-anchor="middle" font-size="10.5" fill="#64748b">Training compute C (FLOPs, log scale) →</text>` +
+    `<text transform="translate(13 ${(y0+y1)/2}) rotate(-90)" text-anchor="middle" font-size="10.5" fill="#64748b">Test loss (log scale)</text>` +
+    `<text x="${x0+8}" y="${y0+14}" font-size="10" fill="#818cf8">dashed = pure power law · solid = total loss</text>`;
+
+  // stats
+  const next = CA.L0 + reducible(CA.logC + 1, CA.alpha);   // 10x compute
+  const pct  = CA.L0 > 0 ? (red / CA.L0 * 100) : Infinity;
+  $("curLoss").textContent  = Lv.toFixed(3);
+  $("curRed").textContent   = red.toFixed(3);
+  $("curFloor").textContent = CA.L0.toFixed(2);
+  $("curNext").textContent  = next.toFixed(3) + " loss";
+  $("curPct").textContent   = isFinite(pct) ? "+" + pct.toFixed(0) + "%" : "∞";
+
+  const v = $("curveVerdict");
+  const ratioToFloor = red / Math.max(CA.L0, 1e-6);
+  if (CA.L0 <= 0.032){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-slate-100 border border-slate-200 text-slate-700";
+    v.innerHTML = "🧮 <b>No floor (L₀≈0).</b> Loss is a <em>pure</em> power law — a perfectly straight log-log line that keeps falling as you add compute. Real models always have a floor (language has irreducible entropy); this is the idealised case.";
+  } else if (ratioToFloor > 2){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = "✅ <b>On the power-law slope.</b> The reducible loss still dominates the floor, so each 10× of compute buys a big, predictable drop — you're on the straight part of the line where extrapolation works.";
+  } else if (ratioToFloor > 0.35){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = "⚠️ <b>Approaching the floor.</b> The curve is bending toward L₀ — returns per FLOP are shrinking. You're leaving the clean line, so forecasts get shakier here.";
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-rose-50 border border-rose-200 text-rose-800";
+    v.innerHTML = "🛑 <b>Diminishing returns.</b> You're almost on the irreducible floor L₀ — more compute barely moves the loss. Scaling this axis further is wasted; you need better data or a different lever.";
+  }
+}
+
+// ===================== CARD B · Chinchilla allocator =====================
+function renderChin(){
+  const C = Math.pow(10, CB.logC), r = CB.ratio;
+  $("cbVal").textContent = fmtC(CB.logC);
+  $("rVal").textContent  = r < 10 ? r.toFixed(1) : r.toFixed(0);
+
+  const W = 580, H = 340, mL = 54, mR = 18, mT = 16, mB = 42;
+  const x0 = mL, x1 = W - mR, y0 = mT, y1 = H - mB;
+  const xMin = -1, xMax = 3.3;              // x = log10(tokens per param)
+  const xPx = lr => x0 + (lr - xMin) / (xMax - xMin) * (x1 - x0);
+
+  // sample the loss-vs-ratio curve
+  const pts = []; let lo = 1e9, hi = -1e9;
+  for (let i = 0; i <= 140; i++){
+    const lr = xMin + (xMax - xMin) * i / 140;
+    const L  = lossB(C, Math.pow(10, lr));
+    pts.push([lr, L]); if (L < lo) lo = L; if (L > hi) hi = L;
+  }
+  const pad = (hi - lo) * 0.12 || 0.01;
+  const yLo = lo - pad, yHi = hi + pad;
+  const yPx = v => y0 + (yHi - v) / (yHi - yLo) * (y1 - y0);
+
+  // grid
+  let g = "";
+  [{v:-1,l:"0.1"},{v:0,l:"1"},{v:1,l:"10"},{v:2,l:"100"},{v:3,l:"1000"}].forEach(o => {
+    const px = xPx(o.v);
+    g += `<line x1="${px}" y1="${y0}" x2="${px}" y2="${y1}" stroke="#e2e8f0"/>`;
+    g += `<text x="${px}" y="${y1+15}" text-anchor="middle" font-size="10" fill="#94a3b8">${o.l}</text>`;
+  });
+  for (let k = 0; k <= 3; k++){
+    const v = yLo + (yHi - yLo) * k / 3, py = yPx(v);
+    g += `<line x1="${x0}" y1="${py}" x2="${x1}" y2="${py}" stroke="#eef2f7"/>`;
+    g += `<text x="${x0-6}" y="${py+3}" text-anchor="end" font-size="10" fill="#94a3b8">${v.toFixed(3)}</text>`;
+  }
+
+  // curve
+  let path = "";
+  pts.forEach((p, i) => { path += (i ? " L" : "M") + xPx(p[0]).toFixed(1) + " " + yPx(p[1]).toFixed(1); });
+
+  // optimal marker (r* ~ 20)
+  const ox = xPx(Math.log10(R_STAR)), optL = lossB(C, R_STAR);
+  const opt = `<line x1="${ox}" y1="${y0}" x2="${ox}" y2="${y1}" stroke="#10b981" stroke-width="1.5" stroke-dasharray="5 4"/>`
+    + `<circle cx="${ox}" cy="${yPx(optL).toFixed(1)}" r="4.5" fill="#10b981" stroke="#fff" stroke-width="2"/>`
+    + `<text x="${ox}" y="${y0+12}" text-anchor="middle" font-size="10" fill="#059669">optimal ≈ 20 : 1</text>`;
+
+  // current marker
+  const cx = xPx(Math.log10(r)), cy = yPx(lossB(C, r));
+  const cur = `<line x1="${cx}" y1="${y0}" x2="${cx}" y2="${y1}" stroke="#6366f1" stroke-width="1" stroke-dasharray="2 3" opacity="0.5"/>`
+    + `<circle cx="${cx}" cy="${cy.toFixed(1)}" r="5" fill="#6366f1" stroke="#fff" stroke-width="2"/>`;
+
+  // undertrained / over-fed shading labels
+  const zone = `<text x="${x0+8}" y="${y1-8}" font-size="10" fill="#f43f5e">← undertrained (Kaplan/GPT-3)</text>`
+    + `<text x="${x1-8}" y="${y1-8}" text-anchor="end" font-size="10" fill="#64748b">over-fed data →</text>`;
+
+  $("chinSvg").innerHTML =
+    g + `<path d="${path}" fill="none" stroke="#6366f1" stroke-width="2.5"/>` + opt + cur + zone +
+    `<text x="${(x0+x1)/2}" y="${H-4}" text-anchor="middle" font-size="10.5" fill="#64748b">Allocation D/N — tokens per parameter (log scale)</text>` +
+    `<text transform="translate(13 ${(y0+y1)/2}) rotate(-90)" text-anchor="middle" font-size="10.5" fill="#64748b">Test loss (zoomed)</text>`;
+
+  // stats
+  const { N, D } = ndFromCr(C, r);
+  const opt2 = ndFromCr(C, R_STAR);
+  $("chN").textContent    = fmtBig(N);
+  $("chD").textContent    = fmtBig(D);
+  $("chLoss").textContent = lossB(C, r).toFixed(4);
+  $("chNopt").textContent = fmtBig(opt2.N);
+  $("chDopt").textContent = fmtBig(opt2.D);
+  $("chLopt").textContent = optL.toFixed(4);
+
+  const v = $("chinVerdict");
+  if (r < R_STAR / 1.6){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-rose-50 border border-rose-200 text-rose-800";
+    v.innerHTML = "🛑 <b>Undertrained.</b> At " + (r<10?r.toFixed(1):r.toFixed(0)) + " tokens/param you've built a <em>big</em> model and starved it of data — Kaplan's regime, and exactly where GPT-3 sat. The same compute spent at ~20 : 1 (" + fmtBig(opt2.N) + " params / " + fmtBig(opt2.D) + " tokens) reaches lower loss with a <b>smaller, cheaper</b> model.";
+  } else if (r > R_STAR * 1.6){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = "⚠️ <b>Over-fed data.</b> At " + r.toFixed(0) + " tokens/param the model is too small to fully use this much data — you're past the training-optimal point. (Note: real deployments <em>do</em> train past 20 : 1 on purpose, trading a little training-loss for far cheaper <b>inference</b>.)";
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = "✅ <b>Chinchilla-optimal.</b> Near <b>20 tokens per parameter</b>, N and D are balanced so both loss terms are small — this split gives the lowest loss for your compute (" + fmtBig(N) + " params / " + fmtBig(D) + " tokens).";
+  }
+}
+
+function renderAll(){ renderCurve(); renderChin(); }
+
+// ===================== wiring =====================
+$("aRange").oninput  = e => { CA.alpha = (+e.target.value) / 1000; renderCurve(); };
+$("l0Range").oninput = e => { CA.L0    = (+e.target.value) / 100;  renderCurve(); };
+$("cRange").oninput  = e => { CA.logC  = (+e.target.value) / 100;  renderCurve(); };
+
+$("cbRange").oninput = e => { CB.logC  = (+e.target.value) / 100;  renderChin(); };
+$("rRange").oninput  = e => { CB.ratio = Math.pow(10, (+e.target.value) / 100); renderChin(); };
+
+document.querySelectorAll(".preset").forEach(b => b.onclick = () => {
+  const p = b.dataset.preset;
+  if (p === "opt"){ CB.ratio = R_STAR; $("rRange").value = Math.round(Math.log10(R_STAR) * 100); }
+  if (p === "gpt3"){ CB.logC = Math.log10(6 * 175e9 * 300e9); CB.ratio = 300e9 / 175e9;
+                     $("cbRange").value = Math.round(CB.logC * 100); $("rRange").value = Math.round(Math.log10(CB.ratio) * 100); }
+  if (p === "over"){ CB.ratio = 200; $("rRange").value = Math.round(Math.log10(200) * 100); }
+  renderChin();
+  $("chinSvg").classList.remove("fade-in"); void $("chinSvg").offsetWidth; $("chinSvg").classList.add("fade-in");
+});
+
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. The empirical surprise: loss is predictable", why:"You'd expect training a bigger model to be a gamble. It isn't. Across many orders of magnitude, a model's test <strong>loss</strong> falls as a smooth <strong>power law</strong> in the compute you spend — plot loss against compute on log-log axes and the points fall on a <em>straight line</em>. This regularity (Kaplan et al. 2020) is why labs can plan billion-dollar runs: the curve tells you roughly what you'll get before you start.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">more compute → lower loss<br>and it's not random:<br><br>log(loss) vs log(compute)<br>= a STRAIGHT LINE 📏<br><br>→ you can forecast the future</div>`, code:`# the core empirical law (Kaplan 2020):
+loss ≈ (C / Cc) ** (-alpha)      # power law in compute C
+# on log-log axes this is a straight line of slope -alpha.
+# same shape holds for data D and parameters N.` },
+ { title:"2. The three knobs — N, D, C (and C ≈ 6ND)", why:"Three quantities drive everything: <strong>N</strong> = parameters (model size), <strong>D</strong> = training tokens (data), and <strong>C</strong> = compute (FLOPs). They're linked by a simple rule of thumb: a forward+backward pass over the whole dataset costs about <strong>C ≈ 6 · N · D</strong>. So compute is the product of size and data — and spending it means choosing how big a model to train on how much data.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">N = parameters (model size)<br>D = tokens (training data)<br>C = compute (FLOPs)<br><br><b>C ≈ 6 · N · D</b><br><br>pick two, the third follows</div>`, code:`# the compute identity used everywhere in scaling laws:
+C = 6 * N * D          # FLOPs ≈ 6 x params x tokens
+# a fixed budget C is a CURVE of (N, D) trade-offs:
+#   bigger model  -> fewer tokens you can afford
+#   more data     -> smaller model you can afford` },
+ { title:"3. Power law + an irreducible floor", why:"The full law has two parts: a <strong>reducible</strong> term that shrinks as a power of scale, plus an <strong>irreducible floor L₀</strong> you can never beat. That floor is the intrinsic entropy of language — even a perfect model can't predict the next token with certainty. So the log-log line is straight only while the reducible part dominates; as you approach L₀ the curve <em>bends flat</em>. You saw this in LOOK ①.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">L(C) = L₀ + (C / Cc)^(−α)<br><br>reducible ↓ with scale<br>L₀ = floor you can't cross<br><br>curve rides the line,<br>then flattens onto L₀</div>`, code:`def loss(C, L0, Cc, alpha):
+    return L0 + (C / Cc) ** (-alpha)
+# L0 = irreducible loss (entropy of the data itself).
+# as C -> infinity, the reducible term -> 0, loss -> L0.
+# you can NEVER predict below L0.` },
+ { title:"4. Kaplan (2020): scale the model", why:"The first scaling-laws paper (Kaplan et al., OpenAI) concluded that when you get more compute, you should spend most of it making the <strong>model bigger</strong>, growing data only modestly. This shaped the era of ever-larger models — <strong>GPT-3</strong> (175B params) is the poster child. The intuition felt right: parameters are where knowledge lives. But the data side was under-weighted, and that turned out to matter.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">Kaplan 2020:<br>“more compute? → bigger N”<br><br>data grows only a little<br>↓<br>huge models, modest data<br>(GPT-3: 175B / 300B tokens)</div>`, code:`# Kaplan-era heuristic (later shown to under-train models):
+#   spend most new compute on PARAMETERS (N), data grows slowly.
+# result: very large models trained on relatively few tokens
+#   -> D / N tiny  (GPT-3 ~ 1.7 tokens per parameter)` },
+ { title:"5. Chinchilla (2022): grow N and D together", why:"DeepMind's Chinchilla paper re-fit the surface <em>L(N, D) = E + A/Nᵃ + B/Dᵇ</em> and found Kaplan had under-trained everyone. For compute-optimal training you should scale <strong>parameters and data in roughly equal measure</strong> — which works out to about <strong>20 tokens per parameter</strong>. They proved it by training a 70B model (Chinchilla) on 1.4T tokens that <em>beat</em> the 280B Gopher on the same compute. This is the U-shaped curve in LOOK ②.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">L(N,D) = E + A/Nᵃ + B/Dᵇ<br><br>minimise at fixed C = 6ND<br>↓<br><b>D / N ≈ 20 tokens/param</b><br><br>grow model AND data together</div>`, code:`# Chinchilla: minimise loss surface at fixed compute C = 6ND
+# optimum grows N and D at ~equal rates  ->  D/N ~ constant ~ 20.
+#   70B params  x  1.4T tokens  = compute-optimal
+# beat Gopher (280B) on the SAME compute by being trained right.` },
+ { title:"6. Why “GPT-3 was undertrained”", why:"Put GPT-3 on the Chinchilla curve: 175B params but only ~300B tokens — about <strong>1.7 tokens per parameter</strong>, far left of the optimum. For its compute budget the loss-minimising choice was a <em>smaller</em> model on <em>far more</em> data. That's the precise sense of “undertrained”: not that GPT-3 was bad, but that the <em>same compute</em> could have bought a better (and cheaper-to-serve) model. Chinchilla demonstrated exactly that.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">GPT-3: 175B / 300B tok<br>= 1.7 tokens/param  ❌<br>(deep in undertrained zone)<br><br>same compute, done right:<br>≈ 50–70B / 1T+ tokens<br>→ lower loss, cheaper model</div>`, code:`# same compute C, two allocations:
+gpt3   = (175e9, 300e9)   # 1.7 tok/param  -> undertrained
+better = optimal_split(C = 6 * 175e9 * 300e9)  # ~20 tok/param
+# 'better' reaches LOWER loss with FEWER params
+#   -> also cheaper to run at inference time.` },
+ { title:"7. The limits — and what's next", why:"Scaling laws are powerful but bounded. Loss can't drop below the <strong>irreducible floor</strong>; the optimal recipe eventually wants <strong>more tokens than exist</strong> (the <em>data wall</em> — synthetic data from Day 39 is one answer); the laws predict <em>loss</em>, not downstream capability, which can jump in surprising ways; and any fit can break far outside its measured range. A modern twist: instead of scaling <em>training</em>, spend more at <em>inference</em> (reasoning models, Day 27). Next up — when does more scale cause abilities to appear <strong>suddenly</strong>?", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">limits of scaling laws:<br>• can't beat floor L₀<br>• data wall (tokens run out)<br>• loss ≠ capability<br>• extrapolation can break<br><br>next: Day 41 — Emergent Abilities</div>`, code:`assert predicted_loss > L0          # floor is real
+assert 20 * N < tokens_available    # else DATA WALL
+# escapes: better/synthetic data (Day 39),
+#          or spend at INFERENCE time (Day 27).
+# Day 41: why some skills appear SUDDENLY as models scale.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
