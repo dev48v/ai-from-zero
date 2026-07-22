@@ -47,6 +47,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 38 — Evals & LLM-as-a-Judge](https://dev48v.infy.uk/ai/days/day38-evals-llm-judge.html) — `day38-evals-llm-judge.html`
 - [AIFromZero · Day 39 — Synthetic Data & the Self-Improvement Loop](https://dev48v.infy.uk/ai/days/day39-synthetic-data.html) — `day39-synthetic-data.html`
 - [AIFromZero · Day 40 — Scaling Laws](https://dev48v.infy.uk/ai/days/day40-scaling-laws.html) — `day40-scaling-laws.html`
+- [AIFromZero · Day 41 — Emergent Abilities](https://dev48v.infy.uk/ai/days/day41-emergent-abilities.html) — `day41-emergent-abilities.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

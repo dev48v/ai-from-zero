@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 41 — Emergent Abilities</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  input[type=range]{ accent-color:#6366f1; }
+  svg text { font-family:-apple-system,"Inter",sans-serif; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 41</div>
+      <h1 class="text-xl font-bold">✨ Emergent Abilities — some skills sit near <strong>zero</strong> in small models, then appear <strong>abruptly</strong> once you cross a scale threshold: multi-digit arithmetic, multi-step reasoning, following instructions. The twist: much of that "sudden" jump is an <strong>artifact of a harsh, all-or-nothing metric</strong> (exact-match). Score the <em>same</em> model with a <strong>continuous</strong> metric and the very same capability rises <strong>smoothly</strong> — emergence is partly in the ruler, not the model (Schaeffer et al.).</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Abilities that "switch on" — real phase change, or a trick of how we measure?</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Day 40 showed <strong>loss</strong> falls as a smooth, forecastable power law. But <em>downstream skills</em> can behave differently: on many tasks a model scores essentially <strong>0%</strong> across a huge range of sizes, then — past some threshold — accuracy <strong>leaps</strong>. That's an <strong>emergent ability</strong> (Wei et al. 2022), and it's unsettling: you can't read the jump off the smooth loss curve, which matters for both <strong>forecasting</strong> and <strong>safety</strong>. Then came the counter-argument (Schaeffer et al. 2023, <em>"Are Emergent Abilities a Mirage?"</em>): the jump is largely manufactured by a <strong>discontinuous metric</strong> — exact-match, all-or-nothing. Both demos below compute their curves from <strong>one smooth latent-skill function</strong>, live in your browser, no model calls.</p>
+      </div>
+
+      <!-- ===================== CARD A · emergence curves ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">① The emergence curves <span class="text-slate-400 normal-case font-normal">— drag model scale; each task stays flat near 0, then jumps sharply at its <em>own</em> threshold</span></div>
+        <p class="text-[11px] text-slate-400 mb-4">Every task here is scored by <b>exact-match</b> (the whole answer must be right). Under the hood each task has a smooth per-step skill that rises gently with scale — but a task needs <b>all n steps</b> correct, so its measured accuracy stays pinned near zero, then accelerates into a <b>cliff</b>. Harder / longer tasks (bigger n, higher difficulty) emerge <b>later</b>. Toggle tasks on and off and slide the scale to watch abilities "switch on".</p>
+
+        <div class="grid md:grid-cols-2 gap-4 items-end mb-3">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Model scale (parameters) <span id="aScaleVal" class="text-indigo-600 stat">—</span></label>
+            <input id="aScale" type="range" min="600" max="1200" value="950" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>1M</span><span>1T params (log scale)</span></div>
+          </div>
+          <div>
+            <div class="text-[12px] font-bold text-slate-600 mb-1">Tasks (exact-match) — click to toggle</div>
+            <div id="taskToggles" class="flex flex-wrap gap-1.5"></div>
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-center">
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+            <svg id="emergeSvg" viewBox="0 0 580 340" class="w-full"></svg>
+          </div>
+          <div>
+            <div class="grid grid-cols-2 gap-2 text-center mb-3">
+              <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-indigo-500">Scale here</div><div id="aScaleBig" class="text-lg font-bold text-indigo-600 mt-1 stat">—</div></div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-emerald-500">Abilities emerged</div><div id="aEmerged" class="text-lg font-bold text-emerald-600 mt-1 stat">—</div></div>
+            </div>
+            <div id="taskStats" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1 mb-3"></div>
+            <div id="emergeVerdict" class="rounded-lg px-3 py-2 text-[12px]"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD B · metric artifact ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">② The mirage — one skill, two rulers <span class="text-slate-400 normal-case font-normal">— flip the metric: harsh exact-match = cliff · continuous metric = smooth, from the SAME latent skill</span></div>
+        <p class="text-[11px] text-slate-400 mb-4">Fix one multi-step task. Its <b>latent per-step skill s(x)</b> is a single smooth sigmoid — no cliff anywhere. <b>Exact-match</b> scores it as <b>s<sup>n</sup></b> (all n steps right): raising a number below 1 to a big power stays ~0 until s is nearly perfect, then shoots up — an apparent <b>emergent</b> jump. Flip to a <b>continuous</b> metric — token accuracy, edit-distance similarity, or average log-prob — and the same capability rises <b>gradually</b> and forecastably. Slide the task length <b>n</b> and watch the "threshold" move even though the model never changed.</p>
+
+        <div class="grid md:grid-cols-2 gap-4 items-end mb-3">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Model scale (parameters) <span id="bScaleVal" class="text-indigo-600 stat">—</span></label>
+            <input id="bScale" type="range" min="600" max="1200" value="980" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>1M</span><span>1T params</span></div>
+          </div>
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Task length n — steps that must ALL be right <span id="bNVal" class="text-indigo-600 stat">20</span></label>
+            <input id="bN" type="range" min="1" max="60" value="20" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>1 (one token)</span><span>60 (long chain)</span></div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-4 items-center">
+          <span class="text-[11px] font-bold text-slate-500 mr-1">Scoring metric:</span>
+          <button data-metric="exact"   class="metric-btn px-3 py-1.5 rounded-lg font-semibold text-xs">🪓 Exact-match (harsh)</button>
+          <button data-metric="token"   class="metric-btn px-3 py-1.5 rounded-lg font-semibold text-xs">📈 Token accuracy</button>
+          <button data-metric="edit"    class="metric-btn px-3 py-1.5 rounded-lg font-semibold text-xs">✏️ Edit similarity</button>
+          <button data-metric="logprob" class="metric-btn px-3 py-1.5 rounded-lg font-semibold text-xs">📊 Avg log-prob</button>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-center">
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+            <svg id="mirageSvg" viewBox="0 0 580 340" class="w-full"></svg>
+          </div>
+          <div>
+            <div class="grid grid-cols-2 gap-2 text-center mb-3">
+              <div class="bg-slate-900 border border-slate-700 rounded-xl p-2"><div id="mActiveLab" class="text-[10px] uppercase font-bold text-slate-300">metric</div><div id="mActive" class="text-lg font-bold text-white mt-1 stat">—</div></div>
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">Latent skill s(x)</div><div id="mLatent" class="text-lg font-bold text-slate-700 mt-1 stat">—</div></div>
+            </div>
+            <div class="grid grid-cols-3 gap-2 text-center mb-3">
+              <div class="bg-rose-50 border border-rose-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-rose-500">Exact-match</div><div id="mExact" class="text-base font-bold text-rose-600 mt-1 stat">—</div></div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-emerald-500">Token acc</div><div id="mToken" class="text-base font-bold text-emerald-600 mt-1 stat">—</div></div>
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">Apparent thresh.</div><div id="mThresh" class="text-base font-bold text-slate-700 mt-1 stat">—</div></div>
+            </div>
+            <div id="mirageVerdict" class="rounded-lg px-3 py-2 text-[12px] mb-3"></div>
+            <div class="rounded-lg px-3 py-2 text-[11px] bg-indigo-50 border border-indigo-200 text-indigo-800">
+              🔎 <b>Same model, same latent skill.</b> The exact-match cliff and the smooth continuous curve are two views of the <em>identical</em> function s(x). Crank <b>n</b> up and the exact-match "threshold" slides right — proof the threshold is a property of the <b>metric × task length</b>, not a switch flipping inside the model.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto">Two views, one function. Card&nbsp;① shows why abilities look like they <strong>switch on</strong> at a scale threshold — flat near 0, then a cliff — and why harder/longer tasks emerge later. Card&nbsp;② reveals the catch: score that <em>same</em> smooth capability with a <strong>continuous</strong> metric and the cliff dissolves into a gentle S-curve. <strong>Some "emergence" is a real phase change worth watching; a lot of it is a mirage of the all-or-nothing ruler.</strong> The safe read: report a continuous metric too, don't assume you can forecast capability from loss alone — and still watch for genuinely abrupt jumps.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Sudden skills — the claim, and the "mirage" critique</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build an emergence-vs-mirage simulator</h2>
+    <p class="text-slate-500 mb-8">Reproduce the whole phenomenon from <strong>one smooth latent-skill function</strong>. Score it with a harsh all-or-nothing metric to manufacture an "emergent" cliff, then with continuous metrics to reveal the same capability rising smoothly — the exact engine behind LOOK ① and ②.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">One smooth latent skill — no cliff anywhere</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Start with a single, gently-rising probability that the model gets one step (one token / one reasoning move) right. It's a plain sigmoid in log-scale — <strong>perfectly smooth</strong>. Everything else is derived from this.</p>
+        <div class="relative"><pre>import numpy as np
+# x = log10(model size or compute). ONE smooth per-step skill:
+def skill(x, x0=9.2, k=1.55):
+    return 1 / (1 + np.exp(-k * (x - x0)))   # s(x) in (0, 1), NO cliff
+# x0 = the scale where a single step is 50% likely to be correct.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">The harsh metric — exact-match manufactures a cliff</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A task counts as solved only if <strong>all n steps</strong> are correct. That's <code>s ** n</code>. Because s is below 1, raising it to a large power keeps the score pinned near zero until s is nearly perfect — then it rockets up. That knee is the "emergent ability".</p>
+        <div class="relative"><pre>def exact_match(x, x0, n):
+    return skill(x, x0) ** n        # all n steps must be right
+# s rises GENTLY, but s**n stays ~0 until s is close to 1,
+# then SHOOTS up -> a sharp cliff that looks like emergence.
+# bigger n (longer task) => the cliff appears at a LARGER scale.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Continuous metrics — the same skill, smoothly</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Now score the identical model with metrics that give <strong>partial credit</strong>. Token accuracy, edit-distance similarity and average log-prob all read s directly (or a monotone function of it) — so they inherit its smooth, forecastable shape. No cliff.</p>
+        <div class="relative"><pre>def token_accuracy(x, x0):  return skill(x, x0)          # fraction of steps right
+def edit_similarity(x, x0): return skill(x, x0)          # 1 - norm. edit distance ~ s
+def avg_log_prob(x, x0):    return np.log(skill(x, x0))  # continuous, concave, smooth
+# all three rise gradually with scale -> capability is predictable.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Reproduce the mirage — one model, two curves</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Sweep scale once. Plot exact-match and token accuracy on the same axis. The <strong>only</strong> difference between the cliff and the smooth curve is the metric — the underlying s(x) is identical. That is the core of Schaeffer et al.'s argument.</p>
+        <div class="relative"><pre>xs = np.linspace(6, 12, 200)              # 1M ... 1T params
+cliff  = exact_match(xs, x0=9.2, n=25)    # flat ~0, then SUDDEN jump
+smooth = token_accuracy(xs, x0=9.2)       # gentle S-curve, SAME model
+# same s(x) underneath -> the metric alone creates the "emergence".</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Show the threshold is an artifact of n</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Find where exact-match crosses 50%. Invert the sigmoid at the skill level <code>s = 0.5 ** (1/n)</code>. Increase n and the apparent threshold slides to larger scale — even though the latent skill never moved. The "phase transition" lives in the ruler.</p>
+        <div class="relative"><pre>def apparent_threshold(x0, n, k=1.55):
+    s = 0.5 ** (1/n)                  # skill needed so that s**n = 0.5
+    return x0 + np.log(s/(1-s)) / k   # invert the sigmoid -> log10(params)
+
+apparent_threshold(9.2,  5)   # short task  -> emerges earlier
+apparent_threshold(9.2, 40)   # long  task  -> emerges much later
+# crank n up: threshold moves RIGHT, but skill(x) is unchanged.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">The honest takeaway — and why it's a safety issue</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Not all emergence is a mirage: genuine sharp transitions may exist, and users often <em>do</em> care about all-or-nothing outcomes (a proof either checks out or it doesn't). So measure deliberately — and keep watching for real jumps, because a dangerous capability appearing abruptly is exactly what you can't afford to miss.</p>
+        <div class="relative"><pre># practical guardrails:
+# 1) always report a CONTINUOUS metric alongside exact-match
+#    (token acc / edit dist / log-prob / Brier) -> it forecasts.
+# 2) smooth loss (Day 40) does NOT imply smooth capability.
+# 3) exact-match matters when the USER needs the whole answer right.
+# 4) for safety: keep monitoring for ABRUPT new abilities
+#    (deception, tool misuse) as you scale -> real jumps can hide.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 41 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">Some abilities look like they <strong>switch on</strong> at a scale threshold — flat near 0, then a sudden cliff (Wei et al. 2022). But score the <em>same</em> smooth latent skill with an <strong>all-or-nothing metric</strong> and you get <code>s<sup>n</sup></code> — a manufactured cliff; swap to a <strong>continuous metric</strong> and the identical capability rises gently and forecastably (Schaeffer et al. 2023). So a lot of "emergence" is a <strong>mirage of the ruler</strong> — yet real phase changes may still lurk, which is why it matters for <strong>capability forecasting and safety</strong>. Measure with continuous metrics, don't read capability off loss alone, and keep watching for abrupt jumps. <strong>👉 Tomorrow — Day 42: Grokking — when a model overfits for ages, then <em>suddenly</em> generalizes long after the training loss flatlined.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+  if (t.dataset.tab === "look") renderAll();
+});
+
+const $ = id => document.getElementById(id);
+
+/* SKILL-ENGINE-START */
+// ===== Day 41 · Emergent Abilities — client-side, no ML, fully deterministic =====
+//
+// ONE smooth latent per-step skill drives EVERYTHING:
+//    s(x) = 1 / (1 + exp(-k*(x - x0)))      x = log10(params), a SMOOTH sigmoid.
+//
+// A task needs n correct steps/tokens. From the SAME s we derive metrics:
+//   • EXACT-MATCH (all-or-nothing):  acc = s^n
+//        raising s (<1) to a big power turns a gentle rise into a sharp CLIFF.
+//        This is the "emergent ability" — but it lives in the METRIC, not the model.
+//   • TOKEN ACCURACY (partial credit):        acc = s               -> smooth
+//   • EDIT SIMILARITY (1 - norm. edit dist):  ~ s                   -> smooth
+//   • AVG LOG-PROB (continuous):              ln(s)                 -> smooth, concave
+//
+// Same latent capability. Harsh discontinuous metric => apparent emergence;
+// continuous metric => smooth improvement (Schaeffer et al. 2023, "a Mirage?").
+const K_LATENT = 1.55;   // steepness of the (smooth) latent skill vs log10(params)
+function skill(x, x0){ return 1 / (1 + Math.exp(-K_LATENT * (x - x0))); }   // latent s in (0,1)
+function exactMatch(x, x0, n){ return Math.pow(skill(x, x0), n); }          // s^n  -> cliff
+function tokenAcc(x, x0){ return skill(x, x0); }                            // smooth
+function avgLogProb(x, x0){ return Math.log(skill(x, x0)); }                // <=0, smooth
+// apparent exact-match threshold: scale where s^n crosses 0.5 (invert the sigmoid)
+function threshExact(x0, n){ const s = Math.pow(0.5, 1 / n); return x0 + Math.log(s / (1 - s)) / K_LATENT; }
+
+function fmtParams(x){
+  const v = Math.pow(10, x);
+  if (v >= 1e12) return (v/1e12).toFixed(v < 1e13 ? 1 : 0) + "T";
+  if (v >= 1e9)  return (v/1e9).toFixed(v  < 1e10 ? 1 : 0) + "B";
+  if (v >= 1e6)  return (v/1e6).toFixed(v  < 1e7  ? 1 : 0) + "M";
+  if (v >= 1e3)  return (v/1e3).toFixed(0) + "K";
+  return v.toFixed(0);
+}
+/* SKILL-ENGINE-END */
+
+// scale axis is shared by both cards: log10(params) 6..12
+const X_MIN = 6, X_MAX = 12;
+const XT = [[6,"1M"],[7,"10M"],[8,"100M"],[9,"1B"],[10,"10B"],[11,"100B"],[12,"1T"]];
+
+// ===================== CARD A · emergence curves =====================
+const TASKS = [
+  { id:"add2",  name:"2-digit addition",              x0:8.0,  n:6,  color:"#10b981", on:true  },
+  { id:"instr", name:"Follow multi-step instructions", x0:9.3,  n:12, color:"#0ea5e9", on:true  },
+  { id:"add3",  name:"3–4 digit arithmetic",           x0:9.1,  n:16, color:"#6366f1", on:true  },
+  { id:"word",  name:"Multi-step word problems",       x0:9.9,  n:26, color:"#f59e0b", on:true  },
+  { id:"chain", name:"Long chained reasoning",         x0:10.4, n:42, color:"#f43f5e", on:false }
+];
+const CA = { x: 9.5 };
+
+function toggleClass(on){
+  return on
+    ? "px-2.5 py-1 rounded-lg text-[11px] font-semibold border-2 bg-white text-slate-700"
+    : "px-2.5 py-1 rounded-lg text-[11px] font-semibold border-2 border-slate-200 bg-slate-50 text-slate-400";
+}
+function buildToggles(){
+  const c = $("taskToggles"); c.innerHTML = "";
+  TASKS.forEach(t => {
+    const b = document.createElement("button");
+    b.className = toggleClass(t.on);
+    if (t.on) b.style.borderColor = t.color;
+    b.innerHTML = `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${t.on ? t.color : '#cbd5e1'};margin-right:5px;vertical-align:middle"></span>${t.name}`;
+    b.onclick = () => { t.on = !t.on; buildToggles(); renderEmergence(); };
+    c.appendChild(b);
+  });
+}
+
+function renderEmergence(){
+  $("aScaleVal").textContent = fmtParams(CA.x);
+  $("aScaleBig").textContent = fmtParams(CA.x);
+
+  const W = 580, H = 340, mL = 48, mR = 16, mT = 18, mB = 40;
+  const x0 = mL, x1 = W - mR, y0 = mT, y1 = H - mB;
+  const xPx = xv => x0 + (xv - X_MIN) / (X_MAX - X_MIN) * (x1 - x0);
+  const yPx = yv => y0 + (1 - yv) * (y1 - y0);
+
+  // grid
+  let g = "";
+  XT.forEach(([t,l]) => {
+    const px = xPx(t);
+    g += `<line x1="${px}" y1="${y0}" x2="${px}" y2="${y1}" stroke="#e2e8f0"/>`;
+    g += `<text x="${px}" y="${y1+15}" text-anchor="middle" font-size="9.5" fill="#94a3b8">${l}</text>`;
+  });
+  [0,0.25,0.5,0.75,1].forEach(v => {
+    const py = yPx(v);
+    g += `<line x1="${x0}" y1="${py}" x2="${x1}" y2="${py}" stroke="#eef2f7"/>`;
+    g += `<text x="${x0-6}" y="${py+3}" text-anchor="end" font-size="9.5" fill="#94a3b8">${(v*100).toFixed(0)}%</text>`;
+  });
+
+  // curves for enabled tasks
+  const enabled = TASKS.filter(t => t.on);
+  let paths = "", dots = "";
+  const mx = xPx(CA.x);
+  enabled.forEach(t => {
+    let d = "";
+    for (let i = 0; i <= 160; i++){ const xv = X_MIN + (X_MAX - X_MIN) * i / 160; d += (i ? " L" : "M") + xPx(xv).toFixed(1) + " " + yPx(exactMatch(xv, t.x0, t.n)).toFixed(1); }
+    paths += `<path d="${d}" fill="none" stroke="${t.color}" stroke-width="2.4"/>`;
+    dots  += `<circle cx="${mx}" cy="${yPx(exactMatch(CA.x, t.x0, t.n)).toFixed(1)}" r="4" fill="${t.color}" stroke="#fff" stroke-width="1.5"/>`;
+  });
+
+  $("emergeSvg").innerHTML = g
+    + `<line x1="${mx}" y1="${y0}" x2="${mx}" y2="${y1}" stroke="#0f172a" stroke-width="1" stroke-dasharray="2 3" opacity="0.5"/>`
+    + paths + dots
+    + `<text x="${(x0+x1)/2}" y="${H-3}" text-anchor="middle" font-size="10.5" fill="#64748b">Model scale — parameters (log) →</text>`
+    + `<text transform="translate(12 ${(y0+y1)/2}) rotate(-90)" text-anchor="middle" font-size="10.5" fill="#64748b">Exact-match accuracy</text>`;
+
+  // task stat rows
+  let emerged = 0, rows = "";
+  enabled.forEach(t => {
+    const acc = exactMatch(CA.x, t.x0, t.n);
+    let status, cls;
+    if (acc < 0.05){ status = "dormant (~0)"; cls = "text-slate-400"; }
+    else if (acc < 0.5){ status = "emerging"; cls = "text-amber-600"; }
+    else { status = "emerged ✓"; cls = "text-emerald-600"; emerged++; }
+    rows += `<div class="flex items-center justify-between text-[12px] py-1 border-b border-slate-100 last:border-0">
+        <span class="flex items-center gap-1.5"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${t.color}"></span>${t.name}</span>
+        <span class="flex items-center gap-2"><span class="stat font-bold ${cls}">${(acc*100).toFixed(acc < 0.1 ? 1 : 0)}%</span><span class="text-[10px] ${cls} w-16 text-right">${status}</span></span>
+      </div>`;
+  });
+  $("taskStats").innerHTML = rows || `<div class="text-slate-400 text-sm py-3 text-center">Toggle a task on above.</div>`;
+  $("aEmerged").textContent = enabled.length ? `${emerged} / ${enabled.length}` : "—";
+
+  const v = $("emergeVerdict");
+  if (enabled.length === 0){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-slate-100 border border-slate-200 text-slate-600";
+    v.innerHTML = "Toggle on a task to see its emergence curve.";
+  } else if (emerged === 0){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-rose-50 border border-rose-200 text-rose-800";
+    v.innerHTML = `🛑 <b>Pre-emergence.</b> At <b>${fmtParams(CA.x)}</b> params every task is still pinned near 0% — you'd conclude the model simply <em>can't</em> do these. But the latent skill is climbing quietly; slide right and abilities will "switch on".`;
+  } else if (emerged === enabled.length){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = `✅ <b>All emerged.</b> Past their thresholds every task jumped from ~0% to solid accuracy. Notice the jumps landed at <em>different</em> scales — longer/harder tasks (bigger n) emerge later.`;
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = `⚠️ <b>Mid-transition.</b> ${emerged} of ${enabled.length} tasks have emerged; the rest are still near 0. Each has its <em>own</em> threshold — you can't read the next jump off the ones that already fired (that's the forecasting problem).`;
+  }
+}
+
+// ===================== CARD B · the mirage (metric artifact) =====================
+const CB = { x: 9.8, n: 20, x0: 9.2, metric: "exact" };
+
+function styleMetric(){
+  document.querySelectorAll(".metric-btn").forEach(b => {
+    const on = b.dataset.metric === CB.metric;
+    b.className = "metric-btn px-3 py-1.5 rounded-lg font-semibold text-xs " + (on ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200");
+  });
+}
+
+function renderMirage(){
+  const x = CB.x, n = CB.n, x0 = CB.x0, m = CB.metric;
+  $("bScaleVal").textContent = fmtParams(x);
+  $("bNVal").textContent = n;
+
+  const W = 580, H = 340, mL = 54, mR = 16, mT = 18, mB = 40;
+  const gx0 = mL, gx1 = W - mR, gy0 = mT, gy1 = H - mB;
+  const xPx = xv => gx0 + (xv - X_MIN) / (X_MAX - X_MIN) * (gx1 - gx0);
+
+  const isLog = (m === "logprob");
+  const yBot = isLog ? avgLogProb(X_MIN, x0) : 0;
+  const yTop = isLog ? 0 : 1;
+  const yPx = yv => gy0 + (yTop - yv) / (yTop - yBot) * (gy1 - gy0);
+
+  const FNS = {
+    exact:   { f: xv => exactMatch(xv, x0, n), c: "#f43f5e", lab: "Exact-match" },
+    token:   { f: xv => tokenAcc(xv, x0),      c: "#10b981", lab: "Token accuracy" },
+    edit:    { f: xv => tokenAcc(xv, x0),      c: "#14b8a6", lab: "Edit similarity" },
+    logprob: { f: xv => avgLogProb(xv, x0),    c: "#6366f1", lab: "Avg log-prob" }
+  };
+  const act = FNS[m];
+
+  // grid
+  let g = "";
+  XT.forEach(([t,l]) => {
+    const px = xPx(t);
+    g += `<line x1="${px}" y1="${gy0}" x2="${px}" y2="${gy1}" stroke="#e2e8f0"/>`;
+    g += `<text x="${px}" y="${gy1+15}" text-anchor="middle" font-size="9.5" fill="#94a3b8">${l}</text>`;
+  });
+  if (isLog){
+    for (let k = 0; k <= 4; k++){ const val = yBot + (yTop - yBot) * k / 4, py = yPx(val);
+      g += `<line x1="${gx0}" y1="${py}" x2="${gx1}" y2="${py}" stroke="#eef2f7"/>`;
+      g += `<text x="${gx0-6}" y="${py+3}" text-anchor="end" font-size="9.5" fill="#94a3b8">${val.toFixed(1)}</text>`;
+    }
+  } else {
+    [0,0.25,0.5,0.75,1].forEach(val => { const py = yPx(val);
+      g += `<line x1="${gx0}" y1="${py}" x2="${gx1}" y2="${py}" stroke="#eef2f7"/>`;
+      g += `<text x="${gx0-6}" y="${py+3}" text-anchor="end" font-size="9.5" fill="#94a3b8">${(val*100).toFixed(0)}%</text>`;
+    });
+  }
+
+  // faint reference curve (only when both live on the 0..1 axis)
+  let ref = "";
+  if (!isLog){
+    if (m === "exact"){
+      let d = "";
+      for (let i = 0; i <= 160; i++){ const xv = X_MIN + (X_MAX - X_MIN) * i / 160; d += (i ? " L" : "M") + xPx(xv).toFixed(1) + " " + yPx(tokenAcc(xv, x0)).toFixed(1); }
+      ref = `<path d="${d}" fill="none" stroke="#10b981" stroke-width="1.6" stroke-dasharray="4 3" opacity="0.55"/>`
+          + `<text x="${gx0+8}" y="${gy0+13}" font-size="9.5" fill="#10b981">faint = token accuracy (smooth)</text>`;
+    } else {
+      let d = "";
+      for (let i = 0; i <= 160; i++){ const xv = X_MIN + (X_MAX - X_MIN) * i / 160; d += (i ? " L" : "M") + xPx(xv).toFixed(1) + " " + yPx(exactMatch(xv, x0, n)).toFixed(1); }
+      ref = `<path d="${d}" fill="none" stroke="#f43f5e" stroke-width="1.6" stroke-dasharray="4 3" opacity="0.55"/>`
+          + `<text x="${gx1-8}" y="${gy0+13}" text-anchor="end" font-size="9.5" fill="#f43f5e">faint = exact-match (cliff)</text>`;
+    }
+  } else {
+    ref = `<text x="${gx0+8}" y="${gy0+13}" font-size="9.5" fill="#6366f1">continuous metric — no cliff</text>`;
+  }
+
+  // active curve + marker
+  let da = "";
+  for (let i = 0; i <= 160; i++){ const xv = X_MIN + (X_MAX - X_MIN) * i / 160; da += (i ? " L" : "M") + xPx(xv).toFixed(1) + " " + yPx(act.f(xv)).toFixed(1); }
+  const mx = xPx(x), my = yPx(act.f(x));
+
+  $("mirageSvg").innerHTML = g + ref
+    + `<path d="${da}" fill="none" stroke="${act.c}" stroke-width="2.8"/>`
+    + `<line x1="${mx}" y1="${gy0}" x2="${mx}" y2="${gy1}" stroke="#0f172a" stroke-width="1" stroke-dasharray="2 3" opacity="0.5"/>`
+    + `<circle cx="${mx}" cy="${my.toFixed(1)}" r="5" fill="${act.c}" stroke="#fff" stroke-width="2"/>`
+    + `<text x="${(gx0+gx1)/2}" y="${H-3}" text-anchor="middle" font-size="10.5" fill="#64748b">Model scale — parameters (log) →</text>`
+    + `<text transform="translate(12 ${(gy0+gy1)/2}) rotate(-90)" text-anchor="middle" font-size="10.5" fill="#64748b">${isLog ? "avg log-prob (higher = better)" : "task score"}</text>`;
+
+  // stats
+  const s = skill(x, x0), em = exactMatch(x, x0, n), ta = tokenAcc(x, x0), lp = avgLogProb(x, x0);
+  $("mLatent").textContent = (s*100).toFixed(0) + "%";
+  $("mExact").textContent  = (em*100).toFixed(em < 0.1 ? 1 : 0) + "%";
+  $("mToken").textContent  = (ta*100).toFixed(0) + "%";
+  $("mThresh").textContent = fmtParams(threshExact(x0, n));
+  $("mActiveLab").textContent = act.lab;
+  $("mActive").textContent = isLog ? lp.toFixed(2) : (act.f(x)*100).toFixed(m === "exact" && act.f(x) < 0.1 ? 1 : 0) + "%";
+
+  const v = $("mirageVerdict");
+  if (m === "exact"){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-rose-50 border border-rose-200 text-rose-800";
+    v.innerHTML = `🪓 <b>Looks emergent.</b> Flat near 0, then a cliff around <b>${fmtParams(threshExact(x0, n))}</b> params. But this curve is just <b>s<sup>${n}</sup></b> of a perfectly smooth latent skill (dashed green = the same skill scored continuously). Flip the metric →`;
+  } else if (isLog){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-indigo-50 border border-indigo-200 text-indigo-800";
+    v.innerHTML = `📊 <b>Smooth.</b> Average log-prob rises gradually and monotonically — a continuous view of the identical model. No threshold, no cliff: the "emergence" was the all-or-nothing ruler, not the model.`;
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = `✅ <b>Smooth &amp; forecastable.</b> The very same model + latent skill, scored with partial credit, rises as a gentle S-curve (dashed red = the exact-match cliff, same skill). The capability was there all along — the harsh metric hid it.`;
+  }
+}
+
+function renderAll(){ renderEmergence(); renderMirage(); }
+
+// ===================== wiring =====================
+$("aScale").oninput = e => { CA.x = (+e.target.value) / 100; renderEmergence(); };
+$("bScale").oninput = e => { CB.x = (+e.target.value) / 100; renderMirage(); };
+$("bN").oninput     = e => { CB.n = +e.target.value; renderMirage(); };
+document.querySelectorAll(".metric-btn").forEach(b => b.onclick = () => {
+  CB.metric = b.dataset.metric; styleMetric(); renderMirage();
+  $("mirageSvg").classList.remove("fade-in"); void $("mirageSvg").offsetWidth; $("mirageSvg").classList.add("fade-in");
+});
+
+buildToggles();
+styleMetric();
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. The observation: abilities appear suddenly", why:"On many tasks a model scores essentially <strong>0%</strong> across a wide range of sizes — then, past some scale, accuracy <strong>jumps sharply</strong>. Wei et al. (2022) catalogued dozens: multi-digit arithmetic, word unscrambling, following instructions, chain-of-thought reasoning. This looks nothing like a smooth curve — it looks like a switch flipping.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">tiny models: score ≈ 0%<br>bigger... still ≈ 0%<br>past a threshold:<br><br>📈 SUDDEN JUMP<br><br>"an emergent ability"</div>`, code:`# Wei et al. 2022: small models ~0, then a sharp jump.
+#   tasks: arithmetic, unscrambling, instruction following, CoT...
+# "emergent" = not present in small models, appears in large ones.` },
+ { title:"2. Emergence ≠ the smooth scaling laws", why:"Day 40 said <strong>loss</strong> falls as a smooth, extrapolable power law. Emergence is the awkward companion: the <em>downstream task score</em> can stay flat then leap, so you <strong>cannot</strong> always read capability off the loss curve. The model's loss was improving the whole time — the task metric just didn't show it until late.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">loss(compute) → SMOOTH 📉<br>(Day 40, extrapolable)<br><br>task score → FLAT then JUMP<br>(not extrapolable)<br><br>smooth loss ≠ smooth skill</div>`, code:`# emergence is not the Day-40 story:
+# loss(C)   -> smooth power law, you can forecast it.
+# task acc  -> can look flat then jump, hard to forecast.
+# => a falling loss does not tell you WHEN a skill appears.` },
+ { title:"3. Why it matters: forecasting & safety", why:"If capabilities appear without warning, two things break. <strong>Forecasting:</strong> you can't promise a feature will work at the next scale — the jump is invisible until you cross it. <strong>Safety:</strong> a <em>dangerous</em> capability (deception, cyber-offense, tool misuse) could switch on abruptly, unanticipated by the smaller-model evals you trusted. That's the whole reason emergence became a headline concern.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">why care?<br><br>🔮 forecasting: a jump is<br>invisible until you cross it<br><br>🛡️ safety: harmful skills<br>could appear abruptly</div>`, code:`# stakes of "sudden" capabilities:
+#  - forecasting: can't promise the next scale works.
+#  - safety: dangerous skills may appear without warning
+#    -> small-model evals can miss what a big model will do.` },
+ { title:"4. The twist: blame the metric", why:"Schaeffer et al. (2023), <em>\"Are Emergent Abilities of LLMs a Mirage?\"</em>, pointed at the <strong>measuring stick</strong>. Most emergence charts use <strong>exact-match</strong> — the entire multi-token answer must be perfect to score a point. That's a <strong>discontinuous, all-or-nothing</strong> way to grade a model whose underlying competence is improving smoothly.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">Schaeffer et al. 2023<br>"a Mirage?"<br><br>suspect = the METRIC<br>exact-match = 0 or 1<br>(all-or-nothing, harsh)<br><br>a discontinuous ruler</div>`, code:`# Schaeffer et al. 2023 - "Are Emergent Abilities a Mirage?"
+# the usual metric is EXACT-MATCH: the whole answer must be
+# perfect -> a 0/1, DISCONTINUOUS score on a smoothly
+# improving model. that choice can manufacture a cliff.` },
+ { title:"5. The mechanism: s to the power n", why:"Take one smooth latent per-step skill <strong>s</strong> (probability a single token/step is right). A task with <strong>n</strong> steps scored by exact-match needs them <em>all</em> right: accuracy = <strong>sⁿ</strong>. Since s &lt; 1, sⁿ stays microscopic until s is nearly perfect — then it rockets up. The cliff is manufactured by (harsh metric) × (task length). You built this in LOOK ②.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">s = smooth per-step skill<br>exact-match = sⁿ<br><br>s rises gently, but sⁿ<br>stays ~0 until s ≈ 1,<br>then SHOOTS up<br><br>cliff = harsh metric × n</div>`, code:`s = skill(x)          # ONE smooth latent per-step skill (sigmoid)
+exact = s ** n        # exact-match: all n steps must be right
+# s rises gently, but s**n stays ~0 until s is near 1, then jumps.
+# the cliff is manufactured by (harsh metric) x (task length n).` },
+ { title:"6. The resolution: swap the ruler", why:"Score the <em>same</em> model with a <strong>continuous</strong> metric — token accuracy, edit-distance similarity, average log-prob, Brier score — and the curve becomes a smooth, forecastable S-curve. The capability was rising all along; the exact-match ruler hid it. Emergence often also fades with <strong>more test examples</strong> and finer-grained scoring.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">keep the model,<br>change the metric:<br><br>token acc = s → smooth<br>edit-dist ≈ s → smooth<br>log-prob = ln(s) → smooth<br><br>the cliff dissolves</div>`, code:`# swap the ruler, keep the model:
+token_acc = s                    # partial credit -> smooth
+edit_sim  = 1 - norm_edit_dist   # ~ s            -> smooth
+logprob   = log(s)               # continuous     -> smooth
+# same capability, now clearly gradual & forecastable.` },
+ { title:"7. The honest verdict — and what's next", why:"Not <em>all</em> emergence is a mirage. Genuine sharp transitions may exist, and users often <strong>do</strong> care about all-or-nothing outcomes — a proof either checks out or it doesn't, code compiles or it doesn't. So the lesson is disciplined measurement: report a continuous metric too, don't forecast capability from loss alone, and keep watching for <em>real</em> abrupt jumps (safety). Next up: another surprising sudden transition — <strong>grokking</strong>.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">verdict:<br>• much emergence = metric mirage<br>• some jumps may be REAL<br>• users often need exact answers<br><br>measure continuously,<br>watch for real jumps<br><br>next: Day 42 — Grokking</div>`, code:`# nuance: not ALL emergence is a mirage.
+#  - genuine sharp transitions may exist.
+#  - users often DO care about all-or-nothing (proof works or not).
+# lesson: report continuous metrics too, don't read capability
+#         off loss alone, keep watching for real jumps (safety).
+# Day 42: Grokking - sudden generalization long after overfitting.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
