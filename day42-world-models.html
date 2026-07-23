@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 42 — World Models</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  input[type=range]{ accent-color:#6366f1; }
+  svg text { font-family:-apple-system,"Inter",sans-serif; }
+  canvas { border-radius:12px; width:100%; height:auto; display:block; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 42</div>
+      <h1 class="text-xl font-bold">🌐 World Models — an agent that learns a <strong>simulator of its own environment</strong>: feed it a <strong>state + an action</strong> and it predicts the <strong>next state</strong>. Now the agent can <strong>plan and "dream"</strong> thousands of rollouts <em>inside</em> the model — cheap, fast, safe — instead of paying to act in the slow, costly, risky real world (Ha &amp; Schmidhuber's <em>World Models</em>; Dreamer). The catch: the model is <strong>imperfect</strong>, so feeding its own predictions back in makes long imagined rollouts <strong>drift</strong> as errors <strong>compound</strong>.</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Dream inside a learned model — and watch the imagined world drift from the real one</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Here is a tiny 2-D world: a ball bouncing in a box under gravity, nudged by <strong>actions</strong>. Its <strong>true dynamics</strong> are a real hand-coded physics step — <code>(state, action) → next state</code> — the "expensive real world". Beside it lives a <strong>learned world model</strong>: the <em>same</em> equations but with <strong>imperfect parameters</strong> (its estimate of gravity, bounciness, drag). Roll the model forward from a start state, feeding <strong>its own predictions back in</strong> (a "dream" / imagined rollout), and compare it step-by-step to the true trajectory. Small errors <strong>compound</strong> — the dream drifts, and a bounce can blow the gap wide open. Everything below is computed live in your browser: real state-transition math, real drift metric. No neural net, no server.</p>
+      </div>
+
+      <!-- ===================== CARD A · the world + the dream ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">① The world vs the dream <span class="text-slate-400 normal-case font-normal">— solid = TRUE env · dashed = world model's imagined rollout · gray = real path walked</span></div>
+        <p class="text-[11px] text-slate-400 mb-4"><b>Step the real env</b> to spend one real interaction (the ball moves under true physics). Or <b>Dream</b>: from the current state the world model imagines the next <em>N</em> steps for the <em>same</em> actions — free and fast, but only as good as the model. Turn up <b>model error</b> and the dashed path peels away from the solid one; a wall bounce amplifies the divergence. That growing gap is why you can only trust a rollout for so many steps.</p>
+
+        <div class="grid md:grid-cols-3 gap-4 items-end mb-4">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Dream rollout length <span id="aNVal" class="text-indigo-600 stat">45</span></label>
+            <input id="aN" type="range" min="1" max="90" value="45" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>1 step</span><span>90 steps (long dream)</span></div>
+          </div>
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">World-model error <span id="aErrVal" class="text-indigo-600 stat">35%</span></label>
+            <input id="aErr" type="range" min="0" max="100" value="35" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>0 = perfect model</span><span>100 = very wrong</span></div>
+          </div>
+          <div>
+            <div class="text-[12px] font-bold text-slate-600 mb-1">Action policy</div>
+            <div id="presetBtns" class="flex flex-wrap gap-1.5"></div>
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-start">
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+            <canvas id="worldCanvas" width="560" height="360"></canvas>
+            <div class="flex flex-wrap gap-3 justify-center mt-2 text-[11px] text-slate-500">
+              <span class="flex items-center gap-1"><span style="display:inline-block;width:16px;height:3px;background:#10b981;border-radius:2px"></span>true env (reality)</span>
+              <span class="flex items-center gap-1"><span style="display:inline-block;width:16px;height:0;border-top:3px dashed #6366f1"></span>dreamed (world model)</span>
+              <span class="flex items-center gap-1"><span style="display:inline-block;width:16px;height:3px;background:#cbd5e1;border-radius:2px"></span>real path walked</span>
+            </div>
+          </div>
+          <div>
+            <div class="flex flex-wrap gap-2 mb-3">
+              <button id="btnDream" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-indigo-600 text-white hover:bg-indigo-500">▶ Dream rollout</button>
+              <button id="btnStepReal" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-emerald-600 text-white hover:bg-emerald-500">⏩ Step real env (+1)</button>
+              <button id="btnNewStart" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-200 text-slate-700 hover:bg-slate-300">🎲 New start</button>
+              <button id="btnReset" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-200 text-slate-700 hover:bg-slate-300">⟳ Reset</button>
+            </div>
+            <div class="grid grid-cols-3 gap-2 text-center mb-3">
+              <div class="bg-rose-50 border border-rose-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-rose-500">Final drift</div><div id="aFinal" class="text-lg font-bold text-rose-600 mt-1 stat">—</div></div>
+              <div class="bg-amber-50 border border-amber-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-amber-500">Mean drift</div><div id="aMean" class="text-lg font-bold text-amber-600 mt-1 stat">—</div></div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-emerald-500">Reliable horizon</div><div id="aHorizon" class="text-lg font-bold text-emerald-600 mt-1 stat">—</div></div>
+            </div>
+            <div class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 mb-3 text-[12px] text-slate-600">
+              <div class="flex justify-between py-0.5"><span>Real steps taken (costly)</span><span id="aRealSteps" class="stat font-bold text-slate-800">0</span></div>
+              <div class="flex justify-between py-0.5"><span>Dream step shown</span><span id="aDreamStep" class="stat font-bold text-slate-800">0 / 0</span></div>
+              <div class="flex justify-between py-0.5"><span>Drift-tolerance for "reliable"</span><span class="stat font-bold text-slate-800">0.06 units</span></div>
+            </div>
+            <div id="worldVerdict" class="rounded-lg px-3 py-2 text-[12px]"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD B · compounding error ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">② Compounding error <span class="text-slate-400 normal-case font-normal">— the drift between imagined and true state, plotted step by step across the rollout</span></div>
+        <p class="text-[11px] text-slate-400 mb-4">Because the model feeds its <b>own predictions</b> back in, every step's error becomes part of the <em>input</em> to the next — so errors don't stay small, they <b>accumulate and often explode</b>. Slide the <b>rollout length</b> to see more of the curve; slide <b>model error</b> to scale it. At error = 0 the model is perfect, the dream equals reality, and the curve is flat on the floor — you could plan forever. Any error above zero, and there's a <b>horizon</b> past which the dream is fantasy.</p>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-center">
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+            <svg id="errSvg" viewBox="0 0 580 320" class="w-full"></svg>
+          </div>
+          <div>
+            <div class="grid grid-cols-2 gap-2 text-center mb-3">
+              <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-indigo-500">Error at last step</div><div id="bFinal" class="text-lg font-bold text-indigo-600 mt-1 stat">—</div></div>
+              <div class="bg-slate-900 border border-slate-700 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-300">Growth per step (avg)</div><div id="bGrowth" class="text-lg font-bold text-white mt-1 stat">—</div></div>
+            </div>
+            <div id="errVerdict" class="rounded-lg px-3 py-2 text-[12px] mb-3"></div>
+            <div class="rounded-lg px-3 py-2 text-[11px] bg-indigo-50 border border-indigo-200 text-indigo-800">
+              🔎 <b>Same model, longer dream = more drift.</b> This is the core limit of learning in imagination: short rollouts stay grounded and are gold for planning &amp; sample-efficiency; long ones hallucinate a world of their own. Real systems fight back with <em>uncertainty/ensembles, periodic re-grounding in real data, and rollouts in a compact latent space</em> — not raw pixels.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto">One learned dynamics function, two uses. A world model lets an agent <strong>plan by dreaming</strong> — cheap, fast, safe rollouts instead of costly real-world trials, the engine behind Ha &amp; Schmidhuber's <em>World Models</em>, Dreamer, MuZero-style latent planning, and why <strong>video-generation models are called implicit world models</strong>. But every prediction feeds the next, so an imperfect model's errors <strong>compound</strong> and the dream <strong>drifts</strong>. The craft of world models is buying as many trustworthy imagined steps as you can before reality and imagination part ways.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">A learned model of the world — plan by dreaming</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a world model &amp; dream inside it</h2>
+    <p class="text-slate-500 mb-8">Reproduce the whole LOOK demo from scratch: a real hand-coded environment, a deliberately-imperfect learned model with the <em>same</em> shape, an autoregressive rollout that feeds predictions back in, and a drift metric that reveals compounding error. This is the exact engine powering LOOK ① and ②.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">State, action, and the TRUE environment dynamics</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A world is just a function <code>(state, action) → next state</code>. Here the state is a bouncing ball <code>{x, y, vx, vy}</code> in a unit box, the action is a velocity nudge, and the "true" step is real physics: apply the action, gravity, drag, integrate, then reflect off the walls with restitution. This is the slow, costly real world an agent would normally have to act in.</p>
+        <div class="relative"><pre>const R = 0.022, DT = 1;                       // ball radius, one tick per step
+const TRUE = { g:0.0013, e:0.88, drag:0.9985, imp:0.010, vbias:0 };
+const ACT = a => [{ax:0,ay:0},{ax:-1,ay:0},{ax:1,ay:0},{ax:0,ay:1}][a];
+
+function physStep(s, a, p){                     // ONE parameterised physics step
+  let {x,y,vx,vy} = s; const {ax,ay} = ACT(a);
+  vx += ax*p.imp;  vy += ay*p.imp;              // action = velocity impulse
+  vy -= p.g;  vx += p.vbias;                    // gravity (+ systematic bias)
+  vx *= p.drag; vy *= p.drag;                   // drag
+  x += vx*DT;  y += vy*DT;                       // integrate
+  if (x&lt;R){x=R;vx=-vx*p.e;} if (x&gt;1-R){x=1-R;vx=-vx*p.e;}   // wall bounce
+  if (y&lt;R){y=R;vy=-vy*p.e;} if (y&gt;1-R){y=1-R;vy=-vy*p.e;}   // (restitution e)
+  return {x,y,vx,vy};
+}
+const trueStep = (s,a) => physStep(s, a, TRUE);</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">The learned world model — same shape, imperfect parameters</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A trained world model never recovers the true physics exactly — it has a slightly wrong idea of gravity, bounciness, drag and how much an action does. We model that honestly: the <em>same</em> <code>physStep</code>, but with parameters offset by an <code>err</code> knob. At <code>err = 0</code> the model is perfect (it equals the true env); crank it up and it's confidently wrong.</p>
+        <div class="relative"><pre>function modelParams(err){                       // err in [0,1]
+  return {
+    g:    TRUE.g    * (1 + 0.45*err),            // thinks gravity is stronger
+    e:    TRUE.e    * (1 - 0.18*err),            // thinks walls are less bouncy
+    drag: TRUE.drag - 0.004*err,                 // thinks there's more drag
+    imp:  TRUE.imp  * (1 - 0.35*err),            // underestimates its own actions
+    vbias: 0.0018*err                            // a small systematic sideways bias
+  };
+}
+const modelStep = (s,a,err) => physStep(s, a, modelParams(err));
+// err=0  =>  modelParams === TRUE  =>  dream == reality (no drift).</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">The rollout — step reality vs dream, side by side</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Give both the <em>same</em> start state and the <em>same</em> action sequence. Step the true env with <code>trueStep</code>. "Dream" with <code>modelStep</code> — and crucially feed the model <strong>its own previous prediction</strong> (<code>si</code>), never the true state. That autoregressive feedback is exactly how an agent imagines a future it hasn't lived, and exactly why errors get a chance to snowball.</p>
+        <div class="relative"><pre>function rollout(s0, actions, err, N){
+  const trueT=[s0], imagT=[s0], errs=[0];
+  let st=s0, si=s0;                              // st = reality, si = imagination
+  for (let k=0;k&lt;N;k++){
+    const a = actions[k];
+    st = trueStep(st, a);                        // what really happens
+    si = modelStep(si, a, err);                  // dream: prediction feeds itself
+    trueT.push(st); imagT.push(si);
+    errs.push(Math.hypot(st.x-si.x, st.y-si.y)); // drift at this step
+  }
+  return { trueT, imagT, errs };
+}</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">The drift metric — quantify how far the dream has wandered</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A single number per step: the Euclidean distance between imagined and true position. From the whole <code>errs</code> array we read the <strong>final drift</strong>, the <strong>mean drift</strong>, and the <strong>reliable horizon</strong> — the last step before the dream crosses a tolerance. That horizon is the honest answer to "how many steps can I plan on?".</p>
+        <div class="relative"><pre>function metrics(errs, tol=0.06){
+  const N = errs.length - 1;
+  const finalDrift = errs[N];
+  const meanDrift  = errs.reduce((a,b)=>a+b,0) / errs.length;
+  let horizon = N;                               // first step that breaks tolerance
+  for (let k=1;k&lt;=N;k++) if (errs[k] &gt; tol){ horizon = k-1; break; }
+  return { finalDrift, meanDrift, horizon };
+}
+// horizon = how long you can TRUST the imagined world before it lies.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Why the error compounds (and bounces amplify it)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Each step's tiny bias shifts the state the model reads next, so errors are <em>fed back in</em> and grow roughly geometrically. Worse, near a wall a small position error flips whether the ball has bounced <em>yet</em> — after which the two trajectories head opposite ways. That's why longer dreams don't just get a bit worse, they can diverge hard.</p>
+        <div class="relative"><pre>const s0 = { x:0.3, y:0.75, vx:0.02, vy:0.0 };
+const acts = Array.from({length:90}, ()=&gt;0);     // "coast" — just gravity + bounces
+
+const short = rollout(s0, acts.slice(0,10), 0.35, 10);
+const long  = rollout(s0, acts,             0.35, 90);
+metrics(short.errs).finalDrift;   // small — dream still ~ reality
+metrics(long.errs).finalDrift;    // much larger — errors compounded + a bounce hit
+// same model, same err: the ONLY change is how far ahead we dreamed.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Learning in imagination — the payoff, and the guardrails</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The whole point: train a controller on <strong>dreamed</strong> experience instead of costly real steps (Ha &amp; Schmidhuber's V-M-C, Dreamer). It's wildly sample-efficient — but only if you respect the horizon. Keep rollouts short, re-ground in real data, and use uncertainty to know when to stop trusting the dream.</p>
+        <div class="relative"><pre># plan / learn INSIDE the model — cheap, fast, safe:
+for episode in range(K):
+    z = encode(real_observation)          # Vision: obs -> latent z (VAE)
+    for t in range(H):                    # H = SHORT horizon (bounded drift)
+        a  = controller(z)                # pick action from latent
+        z  = world_model.step(z, a)       # Memory: dream next latent (RNN/Transformer)
+        r  = reward_head(z)               # imagined reward
+        train_controller(z, a, r)         # learn from imagination
+    re_ground_on_real_data()              # periodically correct the model
+# short H + re-grounding + ensembles = keep the dream honest.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 42 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">A <strong>world model</strong> is a learned <code>(state, action) → next state</code> simulator of an environment. With it an agent can <strong>plan and learn by dreaming</strong> — rolling out imagined futures cheaply, quickly and safely instead of paying to act in the real world (Ha &amp; Schmidhuber's Vision-Memory-Controller; Dreamer; and why <strong>video models like Sora are read as implicit world models</strong>, plus latent planning in MuZero/PlaNet). The price is <strong>compounding prediction error</strong>: because each prediction feeds the next, an imperfect model's dream <strong>drifts</strong> from reality over long horizons — so short rollouts, re-grounding and uncertainty are what keep imagination useful. <strong>👉 Tomorrow — Day 43: Grokking — when a model overfits for ages, then <em>suddenly</em> generalizes long after the training loss flatlined.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+  if (t.dataset.tab === "look") renderAll();
+});
+
+const $ = id => document.getElementById(id);
+
+/* WORLD-MODEL-ENGINE-START */
+// ===== Day 42 · World Models — client-side, REAL dynamics, no ML library =====
+//
+// A world = a function (state, action) -> next state.
+//   state s = {x, y, vx, vy}  in a unit box; y is UP, gravity pulls y DOWN.
+//   action a in {0:coast, 1:left, 2:right, 3:up} = a velocity impulse.
+//
+// TRUE env  = real hand-coded physics (the slow / costly real world).
+// LEARNED world model = the SAME physics with imperfect parameters (err knob).
+// A dream (imagined rollout) feeds the model's OWN prediction back in each step
+// => small parameter errors COMPOUND autoregressively -> the dream drifts.
+const R = 0.022, DT = 1;                                   // ball radius, one tick/step
+const TRUE = { g:0.0013, e:0.88, drag:0.9985, imp:0.010, vbias:0 };
+const ACT = a => [{ax:0,ay:0},{ax:-1,ay:0},{ax:1,ay:0},{ax:0,ay:1}][a];
+
+function physStep(s, a, p){                                // ONE parameterised physics step
+  let x=s.x, y=s.y, vx=s.vx, vy=s.vy; const im = ACT(a);
+  vx += im.ax * p.imp;  vy += im.ay * p.imp;               // action = velocity impulse
+  vy -= p.g;  vx += p.vbias;                               // gravity + systematic bias
+  vx *= p.drag; vy *= p.drag;                              // drag
+  x += vx * DT;  y += vy * DT;                             // integrate
+  if (x < R){ x = R; vx = -vx * p.e; }                     // wall bounce w/ restitution
+  if (x > 1-R){ x = 1-R; vx = -vx * p.e; }
+  if (y < R){ y = R; vy = -vy * p.e; }
+  if (y > 1-R){ y = 1-R; vy = -vy * p.e; }
+  return { x, y, vx, vy };
+}
+const trueStep = (s,a) => physStep(s, a, TRUE);
+
+function modelParams(err){                                 // err in [0,1]; 0 => === TRUE
+  return {
+    g:    TRUE.g    * (1 + 0.45*err),                      // over-estimates gravity
+    e:    TRUE.e    * (1 - 0.18*err),                      // thinks walls less bouncy
+    drag: TRUE.drag - 0.004*err,                           // thinks there's more drag
+    imp:  TRUE.imp  * (1 - 0.35*err),                      // under-shoots its actions
+    vbias: 0.0018*err                                      // small sideways drift bias
+  };
+}
+const modelStep = (s,a,err) => physStep(s, a, modelParams(err));
+
+// deterministic per-(preset,step,seed) action policy => reproducible futures
+function mulberry32(seed){ return function(){ let t=seed+=0x6D2B79F5; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296; }; }
+function actionAt(preset, k, seed){
+  if (preset === "coast")  return 0;
+  if (preset === "right")  return 2;
+  if (preset === "zig")    return (Math.floor(k/6) % 2 === 0) ? 2 : 1;
+  if (preset === "thrust") return (k % 10 < 3) ? 3 : ((Math.floor(k/10) % 2) ? 1 : 2);
+  if (preset === "random"){ const r = mulberry32((seed + k*2654435761) >>> 0)(); return Math.floor(r*4); }
+  return 0;
+}
+function makeStart(seed){
+  const r = mulberry32(seed >>> 0);
+  return { x: 0.15 + r()*0.35, y: 0.55 + r()*0.32, vx: 0.008 + r()*0.024, vy: -0.008 + r()*0.02 };
+}
+
+// roll BOTH forward from s0 with the SAME actions; imagination is autoregressive
+function rollout(s0, actions, err, N){
+  const trueT = [s0], imagT = [s0], errs = [0];
+  let st = s0, si = s0;
+  for (let k = 0; k < N; k++){
+    const a = actions[k];
+    st = trueStep(st, a);                                  // reality
+    si = modelStep(si, a, err);                            // dream: prediction -> next input
+    trueT.push(st); imagT.push(si);
+    errs.push(Math.hypot(st.x - si.x, st.y - si.y));       // drift at step k+1
+  }
+  return { trueT, imagT, errs };
+}
+function metrics(errs, tol){
+  const N = errs.length - 1;
+  const finalDrift = errs[N];
+  const meanDrift  = errs.reduce((a,b)=>a+b,0) / errs.length;
+  let horizon = N;
+  for (let k = 1; k <= N; k++){ if (errs[k] > tol){ horizon = k-1; break; } }
+  return { finalDrift, meanDrift, horizon };
+}
+/* WORLD-MODEL-ENGINE-END */
+
+const TOL = 0.06;
+const PRESETS = [
+  { id:"coast",  name:"Coast" },
+  { id:"right",  name:"Push →" },
+  { id:"zig",    name:"Zig-zag" },
+  { id:"thrust", name:"Thrust" },
+  { id:"random", name:"Random" }
+];
+
+// shared card state
+const CS = { N:45, err:0.35, preset:"coast", seed:7, t:0, live:null, hist:[], k:0, playing:false, timer:null };
+CS.live = makeStart(CS.seed);
+CS.hist = [CS.live];
+
+function dreamActions(){
+  const arr = [];
+  for (let j = 0; j < CS.N; j++) arr.push(actionAt(CS.preset, CS.t + j, CS.seed));
+  return arr;
+}
+function currentRoll(){ return rollout(CS.live, dreamActions(), CS.err, CS.N); }
+
+// ---------- canvas mapping ----------
+const CV = { W:560, H:360, mx:20, my:16 };
+const bx = () => CV.mx, by = () => CV.my, bw = () => CV.W - 2*CV.mx, bh = () => CV.H - 2*CV.my;
+const px = x => bx() + x * bw();
+const py = y => by() + (1 - y) * bh();          // flip: world-y up, canvas-y down
+
+function buildPresets(){
+  const c = $("presetBtns"); c.innerHTML = "";
+  PRESETS.forEach(pr => {
+    const b = document.createElement("button");
+    const on = pr.id === CS.preset;
+    b.className = "px-2.5 py-1 rounded-lg text-[11px] font-semibold border-2 " + (on ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-slate-50 text-slate-500");
+    b.textContent = pr.name;
+    b.onclick = () => { CS.preset = pr.id; CS.k = CS.N; buildPresets(); renderWorld(); renderError(); };
+    c.appendChild(b);
+  });
+}
+
+function pathStr(traj, upto){
+  let d = "";
+  for (let i = 0; i <= upto && i < traj.length; i++) d += (i ? "L" : "M") + px(traj[i].x).toFixed(1) + " " + py(traj[i].y).toFixed(1) + " ";
+  return d;
+}
+
+function renderWorld(){
+  $("aNVal").textContent = CS.N;
+  $("aErrVal").textContent = Math.round(CS.err*100) + "%";
+
+  const roll = currentRoll();
+  const k = Math.min(CS.k, CS.N);
+  const cvs = $("worldCanvas"), ctx = cvs.getContext("2d");
+  ctx.clearRect(0,0,CV.W,CV.H);
+
+  // box
+  ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.rect(bx(), by(), bw(), bh()); ctx.fill(); ctx.stroke();
+  // faint grid
+  ctx.strokeStyle = "#eef2f7"; ctx.lineWidth = 1;
+  for (let g = 1; g < 5; g++){
+    ctx.beginPath(); ctx.moveTo(px(g/5), by()); ctx.lineTo(px(g/5), by()+bh()); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx(), py(g/5)); ctx.lineTo(bx()+bw(), py(g/5)); ctx.stroke();
+  }
+
+  // real path already walked (gray)
+  if (CS.hist.length > 1){
+    ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 3; ctx.setLineDash([]);
+    ctx.beginPath();
+    CS.hist.forEach((s,i)=>{ const X=px(s.x), Y=py(s.y); i?ctx.lineTo(X,Y):ctx.moveTo(X,Y); });
+    ctx.stroke();
+  }
+
+  // true rollout (emerald solid)
+  ctx.strokeStyle = "#10b981"; ctx.lineWidth = 3; ctx.setLineDash([]);
+  ctx.beginPath();
+  for (let i = 0; i <= k; i++){ const X=px(roll.trueT[i].x), Y=py(roll.trueT[i].y); i?ctx.lineTo(X,Y):ctx.moveTo(X,Y); }
+  ctx.stroke();
+
+  // dreamed rollout (indigo dashed)
+  ctx.strokeStyle = "#6366f1"; ctx.lineWidth = 2.6; ctx.setLineDash([6,5]);
+  ctx.beginPath();
+  for (let i = 0; i <= k; i++){ const X=px(roll.imagT[i].x), Y=py(roll.imagT[i].y); i?ctx.lineTo(X,Y):ctx.moveTo(X,Y); }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // start marker
+  const s0 = roll.trueT[0];
+  ctx.fillStyle = "#0f172a"; ctx.beginPath(); ctx.arc(px(s0.x), py(s0.y), 4, 0, 7); ctx.fill();
+
+  // heads + drift line
+  const tt = roll.trueT[k], ii = roll.imagT[k];
+  ctx.strokeStyle = "#f43f5e"; ctx.lineWidth = 1.4; ctx.setLineDash([2,3]);
+  ctx.beginPath(); ctx.moveTo(px(tt.x),py(tt.y)); ctx.lineTo(px(ii.x),py(ii.y)); ctx.stroke(); ctx.setLineDash([]);
+  // true head (filled emerald)
+  ctx.fillStyle = "#10b981"; ctx.beginPath(); ctx.arc(px(tt.x), py(tt.y), 7, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+  // dream head (hollow indigo)
+  ctx.fillStyle = "#eef2ff"; ctx.beginPath(); ctx.arc(px(ii.x), py(ii.y), 7, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#6366f1"; ctx.lineWidth = 2.4; ctx.stroke();
+
+  // stats
+  const m = metrics(roll.errs, TOL);
+  $("aFinal").textContent = roll.errs[CS.N].toFixed(3);
+  $("aMean").textContent  = m.meanDrift.toFixed(3);
+  $("aHorizon").textContent = (m.horizon >= CS.N ? CS.N + "+" : m.horizon) + (m.horizon >= CS.N ? "" : " st");
+  $("aRealSteps").textContent = CS.hist.length - 1;
+  $("aDreamStep").textContent = k + " / " + CS.N;
+
+  const v = $("worldVerdict");
+  if (CS.err === 0){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = "✅ <b>Perfect model.</b> The dream lands exactly on reality — dashed sits on solid, drift stays 0. With a flawless model you can plan an infinitely long horizon for free. Real learned models are never this lucky.";
+  } else if (m.finalDrift < 0.05){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = `✅ <b>Dream still grounded.</b> After ${CS.N} imagined steps the drift is only <b>${m.finalDrift.toFixed(3)}</b>. Short rollouts like this are the sweet spot — cheap, safe, and faithful enough to plan on.`;
+  } else if (m.finalDrift < 0.18){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = `⚠️ <b>Drifting.</b> Reliable for about <b>${m.horizon} step${m.horizon===1?"":"s"}</b>, then the dream peels away (drift ${m.finalDrift.toFixed(3)}). Plan only within the horizon, or re-ground on a real step.`;
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-rose-50 border border-rose-200 text-rose-800";
+    v.innerHTML = `🛑 <b>Hallucinated.</b> Errors compounded (often after a bounce) to a drift of <b>${m.finalDrift.toFixed(3)}</b> — the imagined ball is living in a different world. Any plan made this far into the dream is fantasy.`;
+  }
+}
+
+// ---------- Card B · error-vs-step chart ----------
+function renderError(){
+  const roll = currentRoll();
+  const errs = roll.errs;
+  const W = 580, H = 320, mL = 46, mR = 16, mT = 16, mB = 38;
+  const x0 = mL, x1 = W - mR, y0 = mT, y1 = H - mB;
+  const N = CS.N;
+  const maxE = Math.max(0.12, ...errs) * 1.14;
+  const xPx = i => x0 + (N === 0 ? 0 : i / N) * (x1 - x0);
+  const yPx = e => y0 + (1 - e / maxE) * (y1 - y0);
+
+  let g = "";
+  // y grid
+  for (let t = 0; t <= 4; t++){
+    const val = maxE * t / 4, pyv = yPx(val);
+    g += `<line x1="${x0}" y1="${pyv}" x2="${x1}" y2="${pyv}" stroke="#eef2f7"/>`;
+    g += `<text x="${x0-6}" y="${pyv+3}" text-anchor="end" font-size="9.5" fill="#94a3b8">${val.toFixed(2)}</text>`;
+  }
+  // x grid
+  const xticks = N <= 10 ? N : 6;
+  for (let t = 0; t <= xticks; t++){
+    const i = Math.round(N * t / xticks), pxv = xPx(i);
+    g += `<line x1="${pxv}" y1="${y0}" x2="${pxv}" y2="${y1}" stroke="#f1f5f9"/>`;
+    g += `<text x="${pxv}" y="${y1+15}" text-anchor="middle" font-size="9.5" fill="#94a3b8">${i}</text>`;
+  }
+  // tolerance line
+  const tolY = yPx(TOL);
+  g += `<line x1="${x0}" y1="${tolY}" x2="${x1}" y2="${tolY}" stroke="#f59e0b" stroke-width="1.3" stroke-dasharray="5 4"/>`;
+  g += `<text x="${x1-4}" y="${tolY-4}" text-anchor="end" font-size="9.5" fill="#d97706">reliable tolerance ${TOL}</text>`;
+
+  // error curve
+  let d = "";
+  for (let i = 0; i <= N; i++) d += (i ? "L" : "M") + xPx(i).toFixed(1) + " " + yPx(errs[i]).toFixed(1) + " ";
+  // filled area
+  let area = `M${xPx(0).toFixed(1)} ${yPx(0).toFixed(1)} `;
+  for (let i = 0; i <= N; i++) area += "L" + xPx(i).toFixed(1) + " " + yPx(errs[i]).toFixed(1) + " ";
+  area += `L${xPx(N).toFixed(1)} ${yPx(0).toFixed(1)} Z`;
+
+  const k = Math.min(CS.k, N);
+  const mk = `<line x1="${xPx(k)}" y1="${y0}" x2="${xPx(k)}" y2="${y1}" stroke="#0f172a" stroke-width="1" stroke-dasharray="2 3" opacity="0.5"/>`
+           + `<circle cx="${xPx(k)}" cy="${yPx(errs[k]).toFixed(1)}" r="4.5" fill="#6366f1" stroke="#fff" stroke-width="2"/>`;
+
+  $("errSvg").innerHTML = g
+    + `<path d="${area}" fill="#6366f1" opacity="0.08"/>`
+    + `<path d="${d}" fill="none" stroke="#6366f1" stroke-width="2.6"/>`
+    + mk
+    + `<text x="${(x0+x1)/2}" y="${H-3}" text-anchor="middle" font-size="10.5" fill="#64748b">Imagined-rollout step →</text>`
+    + `<text transform="translate(12 ${(y0+y1)/2}) rotate(-90)" text-anchor="middle" font-size="10.5" fill="#64748b">drift: |imagined − true| (units)</text>`;
+
+  const m = metrics(errs, TOL);
+  const growth = N > 0 ? (errs[N] / N) : 0;
+  $("bFinal").textContent  = errs[N].toFixed(3);
+  $("bGrowth").textContent = growth.toFixed(4);
+
+  const v = $("errVerdict");
+  if (CS.err === 0){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = "✅ <b>Flat on the floor.</b> Zero model error ⇒ zero drift at every step. The curve never leaves the axis — a perfect world model has no compounding problem at all.";
+  } else if (m.horizon >= N){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = `✅ <b>Below tolerance the whole way.</b> Across all ${N} steps the drift stayed under ${TOL}. Extend the rollout or raise model error to find where it finally breaks.`;
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = `⚠️ <b>Crosses tolerance at step ${m.horizon+1}.</b> Before that the dream is trustworthy; after, error <b>compounds</b> — often jumping at a bounce. That knee is your planning horizon.`;
+  }
+}
+
+function renderAll(){ renderWorld(); renderError(); }
+
+// ---------- animation + controls ----------
+function stopPlay(){ if (CS.timer){ clearInterval(CS.timer); CS.timer = null; } CS.playing = false; $("btnDream").textContent = "▶ Dream rollout"; }
+function playDream(){
+  if (CS.playing){ stopPlay(); return; }
+  CS.playing = true; CS.k = 0; $("btnDream").textContent = "⏸ Pause";
+  CS.timer = setInterval(() => {
+    if (CS.k >= CS.N){ stopPlay(); $("btnDream").textContent = "▶ Replay dream"; return; }
+    CS.k++; renderWorld(); renderError();
+  }, 55);
+}
+
+$("aN").oninput   = e => { CS.N = +e.target.value; CS.k = CS.N; stopPlay(); renderAll(); };
+$("aErr").oninput = e => { CS.err = (+e.target.value)/100; CS.k = CS.N; stopPlay(); renderAll(); };
+$("btnDream").onclick = playDream;
+$("btnStepReal").onclick = () => {
+  stopPlay();
+  const a = actionAt(CS.preset, CS.t, CS.seed);
+  CS.live = trueStep(CS.live, a);                 // pay for ONE real interaction
+  CS.hist.push(CS.live); CS.t++;
+  CS.k = CS.N; renderAll();
+};
+$("btnNewStart").onclick = () => {
+  stopPlay();
+  CS.seed = (Math.random()*1e9) >>> 0;
+  CS.t = 0; CS.live = makeStart(CS.seed); CS.hist = [CS.live]; CS.k = CS.N; renderAll();
+};
+$("btnReset").onclick = () => {
+  stopPlay();
+  CS.seed = 7; CS.t = 0; CS.live = makeStart(CS.seed); CS.hist = [CS.live]; CS.k = CS.N; renderAll();
+};
+
+buildPresets();
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. The problem: acting for real is slow & costly", why:"An agent that only learns by taking real actions is expensive: every trial burns time, money, wear, and sometimes safety. A robot arm can do maybe thousands of grasps a day; a self-driving stack cannot crash a million times to learn. Reinforcement learning is famously <strong>sample-hungry</strong> — millions of steps — which is fine in a fast simulator but brutal in the real world. So the question becomes: could the agent practise somewhere cheaper?", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">real world =<br>slow · costly · risky<br><br>RL needs MILLIONS of steps<br><br>❓ can we practise<br>somewhere cheap?</div>`, code:`# real interaction is the bottleneck
+# each real step costs time / money / safety
+# classic RL: millions of env steps to learn
+# => we want to practise without touching reality (much).` },
+ { title:"2. The idea: learn a model of the world", why:"A <strong>world model</strong> is a learned function that captures the environment's <em>dynamics</em>: given the current state and an action, it predicts the next state (and often the reward). It answers \"what happens if I do this?\" without you actually doing it. Once you have such a model, the agent carries a private, fast, safe copy of the world in its head — a simulator it can query as often as it likes.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">world model =<br>learned dynamics<br><br>(state, action)<br>↓<br>predicted next state (+reward)<br><br>"what if I do this?"</div>`, code:`# a world model = learned dynamics function
+next_state, reward = world_model.step(state, action)
+# it approximates the environment's transition rule,
+# so the agent can ask "what happens if..." for free.` },
+ { title:"3. Plan & learn by dreaming inside the model", why:"With a world model the agent can <strong>roll out imagined futures</strong> — pick an action, predict the next state, pick again, and so on — entirely inside the model. This is \"learning in imagination\" or <em>dreaming</em>. It's cheap (no hardware), fast (faster than real time), safe (no real crashes) and massively parallel. The agent can try thousands of what-ifs, keep the plans that look good, and only then act for real.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">DREAM a rollout:<br>a → ŝ → a → ŝ → a → ŝ ...<br><br>cheap · fast · safe · parallel<br><br>try 1000 futures in your head,<br>act on the best one</div>`, code:`# roll the model forward without touching reality:
+s = start
+for t in range(H):
+    a = policy(s)
+    s = world_model.step(s, a)   # imagined step ("dream")
+# thousands of these -> plan / train the policy cheaply.` },
+ { title:"4. Vision (V): compress the observation to a latent z", why:"Raw observations (images, sensor streams) are huge and redundant. The first block of the classic architecture is <strong>Vision</strong>: a VAE-style encoder that squashes each high-dimensional observation into a small <strong>latent vector z</strong> capturing just the gist — where things are, roughly. Predicting the next <em>latent</em> is far easier and cheaper than predicting the next full image, so the whole world model works in this compact space.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">Vision (VAE)<br><br>🖼️ big observation<br>↓ encode<br>z = small latent vector<br><br>predict in z-space,<br>not in pixels</div>`, code:`# Vision: compress observation -> latent (VAE encoder)
+z = encoder(observation)     # e.g. 64-dim latent
+# small, denoised gist of the scene.
+# the model predicts the NEXT z, not the next raw image.` },
+ { title:"5. Memory (M): predict the next latent from z + action", why:"The heart of the world model is <strong>Memory</strong>: a sequence model — an RNN (as in Ha &amp; Schmidhuber) or a Transformer — that takes the current latent <code>z</code> and action <code>a</code> and predicts the <strong>next latent</strong> <code>z'</code> (often a distribution over it). This <em>is</em> the learned dynamics. It carries a hidden state so it can remember momentum, off-screen objects and context. Chain it and you get imagined rollouts entirely in latent space.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">Memory (RNN / Transformer)<br><br>(z, action) → ẑ'<br><br>hidden state remembers<br>momentum & context<br><br>THIS is the dynamics model</div>`, code:`# Memory: predict next latent from (latent, action)
+z_next, h = memory_rnn(z, action, h)   # h = hidden state
+# an RNN (Ha & Schmidhuber) or Transformer.
+# chaining z -> z_next -> ... = an imagined rollout.` },
+ { title:"6. Controller (C): pick actions — trained in the dream", why:"The <strong>Controller</strong> is a deliberately tiny policy that maps the latent (and memory state) to an action. Because Vision and Memory did the hard perceptual and predictive work, the controller can be small and is cheap to train — famously with evolution strategies or RL. Crucially it can be trained <strong>almost entirely on dreamed rollouts</strong>, then dropped back into the real environment. Ha &amp; Schmidhuber even solved tasks where the controller was trained inside the dream and transferred to reality.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">Controller (tiny policy)<br><br>(z, memory) → action<br><br>trained on DREAMED rollouts,<br>then deployed for real<br><br>V + M + C = World Models</div>`, code:`# Controller: small policy over the latent
+action = controller(z, h)     # tiny net (ES / RL trainable)
+# train it INSIDE the dream, then act in the real env.
+# Vision + Memory + Controller = Ha & Schmidhuber, 2018.` },
+ { title:"7. Why it matters now: video models, robotics, planning", why:"World models are having a moment. Large <strong>video-generation models (Sora-class)</strong> that predict future frames are increasingly read as <em>implicit</em> world models — they've learned intuitive physics and object permanence just to predict pixels. In robotics and control, <strong>Dreamer</strong>, <strong>PlaNet</strong> and <strong>MuZero</strong> plan in learned latent dynamics and set sample-efficiency records. The common thread: learn the dynamics once, then get cheap foresight for planning, data augmentation and control.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">where you see them now:<br><br>🎬 video models (Sora) =<br>implicit world models<br>🤖 Dreamer / PlaNet / MuZero<br>🎯 planning & sample efficiency</div>`, code:`# world models in the wild:
+#  - Dreamer / PlaNet: plan in learned latent dynamics (RL)
+#  - MuZero: plan with a learned model, no rules given
+#  - Sora-class video models: predict frames => implicit
+#    world model (learns intuitive physics to predict pixels)` },
+ { title:"8. The catch: compounding prediction error", why:"No learned model is exact. When you roll it out, you feed its <em>own</em> prediction back in as the next input — so a small error at step 1 shifts step 2's input, whose error shifts step 3, and so on. Errors <strong>compound</strong>, roughly geometrically, and the imagined trajectory <strong>drifts</strong> away from reality. Near a decision boundary (in LOOK, a wall bounce) a tiny error flips the outcome and the two paths diverge hard. This is exactly what the demo's drift curve shows.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">autoregressive rollout:<br>error feeds the next input<br><br>ε → 2ε → 4ε → ...<br><br>dream DRIFTS from reality;<br>a bounce blows it wide open</div>`, code:`# prediction feeds itself -> errors accumulate
+s_hat = start
+for t in range(H):
+    s_hat = model.step(s_hat, a[t])   # uses its OWN last output
+    drift[t] = dist(s_hat, s_true[t]) # grows over the horizon
+# longer dream => more compounding => less trustworthy.` },
+ { title:"9. Hallucinated dynamics — and how to keep the dream honest", why:"Push a rollout too far and the model can <strong>hallucinate</strong> physics that don't exist — invent momentum, teleport objects, ignore walls — and a policy trained on that fantasy fails in reality. The fixes are practical: keep rollouts <strong>short</strong> (bounded drift), model <strong>uncertainty</strong> and use <strong>ensembles</strong> to know when to stop trusting a prediction, <strong>re-ground</strong> periodically on real data, and roll out in a compact <strong>latent</strong> space rather than raw pixels. World models are powerful precisely when you respect their horizon.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">too-long dream =<br>🌀 hallucinated dynamics<br><br>fixes:<br>• short rollouts<br>• uncertainty / ensembles<br>• re-ground on real data<br>• latent, not pixels</div>`, code:`# keep imagination useful:
+#  - SHORT horizon H (drift stays bounded)
+#  - ensembles / uncertainty -> stop trusting when unsure
+#  - periodically re-ground the model on REAL data
+#  - roll out in latent space, not raw pixels
+# world models shine WITHIN their reliable horizon.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
