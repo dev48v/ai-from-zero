@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 43 — State-Space Models / Mamba</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  input[type=range]{ accent-color:#6366f1; }
+  svg text { font-family:-apple-system,"Inter",sans-serif; }
+  canvas { border-radius:12px; width:100%; height:auto; display:block; }
+  .tok { display:inline-flex; align-items:center; justify-content:center; min-width:26px; height:26px; padding:0 6px; border-radius:7px; font-size:11px; font-weight:600; }
+  .pulse { animation: pulse .5s ease-out; }
+  @keyframes pulse { from { transform:scale(1.25); } to { transform:scale(1); } }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 43</div>
+      <h1 class="text-xl font-bold">🐍 State-Space Models / <strong>Mamba</strong> — the transformer alternative. An attention model <strong>re-reads the whole history for every new token</strong>, so its cost grows with the <em>square</em> of the length and its memory grows with the length — a wall you hit on very long inputs. An <strong>SSM</strong> instead keeps a <strong>fixed-size state</strong> and updates it <strong>token-by-token</strong> (like a smart running summary): <strong>constant memory, linear time</strong>, and it can <strong>stream forever</strong>. Mamba's twist is <strong>selectivity</strong> — the state update <em>depends on the input</em>, so the model can choose <strong>what to remember and what to forget</strong>. The tradeoff: pinpoint recall (attention's strength) vs raw efficiency (the SSM's).</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Feed a stream, token by token — watch attention's cost explode while an SSM stays flat</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Two ways to process a sequence, side by side. <strong>Attention</strong> lets every new token look back at <em>all</em> the tokens before it — brilliant for recall, but every step re-reads the whole history, so the running cost climbs like <span class="mono">n²</span> and the memory (the KV cache) grows with the length. A <strong>state-space model</strong> instead folds each token into <strong>one fixed-size state</strong> and moves on — the per-token work never changes, so total cost is <em>linear</em> and memory is <em>constant</em>, no matter how long the stream. Below, both counters are computed live as you advance the stream. Card ② runs the <em>actual</em> SSM recurrence <span class="mono">h = a·h + b·x</span> in your browser, with a <strong>selective gate</strong> you can flip on and off. No neural net, no server.</p>
+      </div>
+
+      <!-- ===================== CARD A · cost & memory ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">① The quadratic wall vs the fixed state <span class="text-slate-400 normal-case font-normal">— advance the stream and compare the running cost + memory</span></div>
+        <p class="text-[11px] text-slate-400 mb-4"><b>Step</b> or <b>play</b> to feed one more token. On the left, <b>attention</b> re-reads every earlier token (the whole look-back window lights up) — its per-token cost is the position number, so the total balloons as <span class="mono">n(n+1)/2 ≈ n²/2</span>. On the right, the <b>SSM</b> touches only its <em>fixed</em> state of <span id="aDLabel">4</span> cells — per-token cost is constant, so the total rises in a straight line. Push the stream longer and the gap becomes a chasm.</p>
+
+        <div class="grid md:grid-cols-3 gap-4 items-end mb-4">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Stream length (n) <span id="aNVal" class="text-indigo-600 stat">24</span></label>
+            <input id="aN" type="range" min="2" max="64" value="24" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>2</span><span>64 tokens</span></div>
+          </div>
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">SSM state size (d) <span id="aDVal" class="text-indigo-600 stat">4</span></label>
+            <input id="aD" type="range" min="2" max="16" value="4" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>2 cells</span><span>16 cells (still constant per token)</span></div>
+          </div>
+          <div>
+            <div class="text-[12px] font-bold text-slate-600 mb-1">Advance the stream</div>
+            <div class="flex flex-wrap gap-1.5">
+              <button id="btnStepA" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-indigo-600 text-white hover:bg-indigo-500">⏩ +1 token</button>
+              <button id="btnPlayA" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-800 text-white hover:bg-slate-700">▶ Play</button>
+              <button id="btnResetA" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-200 text-slate-700 hover:bg-slate-300">⟳ Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- token stream -->
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4">
+          <div class="text-[10px] uppercase font-bold text-slate-400 mb-2">the sequence — <span id="aCurLbl" class="text-slate-600">0</span> / <span id="aNLbl">24</span> tokens processed</div>
+          <div id="tokRow" class="flex flex-wrap gap-1.5"></div>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-4 mb-4">
+          <!-- attention panel -->
+          <div class="bg-rose-50 border border-rose-200 rounded-xl p-4">
+            <div class="font-bold text-rose-700 text-sm mb-1">🔎 Attention <span class="font-normal text-rose-400 text-[11px]">— re-reads the whole history</span></div>
+            <div class="text-[11px] text-rose-500 mb-2">This token looks back at <b><span id="attnLook">0</span></b> tokens (the whole window below):</div>
+            <div id="attnTokens" class="flex flex-wrap gap-1 mb-3 min-h-[26px]"></div>
+            <div class="grid grid-cols-3 gap-2 text-center">
+              <div class="bg-white/70 rounded-lg p-2"><div class="text-[9px] uppercase font-bold text-rose-400">This step's cost</div><div id="attnPer" class="text-base font-bold text-rose-600 stat">0</div></div>
+              <div class="bg-white/70 rounded-lg p-2"><div class="text-[9px] uppercase font-bold text-rose-400">Total cost ∝ n²</div><div id="attnTotal" class="text-base font-bold text-rose-600 stat">0</div></div>
+              <div class="bg-white/70 rounded-lg p-2"><div class="text-[9px] uppercase font-bold text-rose-400">Memory (KV)</div><div id="attnMem" class="text-base font-bold text-rose-600 stat">0</div></div>
+            </div>
+          </div>
+          <!-- ssm panel -->
+          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+            <div class="font-bold text-emerald-700 text-sm mb-1">🐍 SSM / Mamba <span class="font-normal text-emerald-400 text-[11px]">— one fixed-size state</span></div>
+            <div class="text-[11px] text-emerald-600 mb-2">The new token folds into a state of <b><span id="ssmDlbl">4</span></b> cells (updated in place):</div>
+            <div id="ssmState" class="flex flex-wrap gap-1.5 mb-3 min-h-[26px] items-end"></div>
+            <div class="grid grid-cols-3 gap-2 text-center">
+              <div class="bg-white/70 rounded-lg p-2"><div class="text-[9px] uppercase font-bold text-emerald-500">This step's cost</div><div id="ssmPer" class="text-base font-bold text-emerald-700 stat">0</div></div>
+              <div class="bg-white/70 rounded-lg p-2"><div class="text-[9px] uppercase font-bold text-emerald-500">Total cost ∝ n</div><div id="ssmTotal" class="text-base font-bold text-emerald-700 stat">0</div></div>
+              <div class="bg-white/70 rounded-lg p-2"><div class="text-[9px] uppercase font-bold text-emerald-500">Memory (state)</div><div id="ssmMem" class="text-base font-bold text-emerald-700 stat">0</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-center">
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+            <svg id="costSvg" viewBox="0 0 580 300" class="w-full"></svg>
+          </div>
+          <div>
+            <div class="grid grid-cols-2 gap-2 text-center mb-3">
+              <div class="bg-rose-50 border border-rose-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-rose-500">Attn cost at n</div><div id="cAttn" class="text-lg font-bold text-rose-600 mt-1 stat">—</div></div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-emerald-500">SSM cost at n</div><div id="cSsm" class="text-lg font-bold text-emerald-600 mt-1 stat">—</div></div>
+            </div>
+            <div class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 mb-3 text-center">
+              <div class="text-[10px] uppercase font-bold text-slate-300">Attention does this many times MORE work than the SSM at n = <span id="rN" class="stat">24</span></div>
+              <div id="ratio" class="text-2xl font-bold text-white mt-1 stat">—</div>
+            </div>
+            <div id="lookVerdict" class="rounded-lg px-3 py-2 text-[12px]"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD B · the recurrence + selectivity ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">② The recurrent state — <span class="mono normal-case">h = a·h + b·x</span> — with a selective gate <span class="text-slate-400 normal-case font-normal">— run the real recurrence on a token stream</span></div>
+        <p class="text-[11px] text-slate-400 mb-4">This is the actual SSM math, running live. Each token updates a single running state <span class="mono">h</span>: keep a fraction <span class="mono">a</span> of the old state, add <span class="mono">b</span> times the new input. Flip <b>selectivity</b> on and the tokens change <span class="mono">a</span> and <span class="mono">b</span> <em>based on their content</em>: <span class="text-indigo-600 font-semibold">⟂ reset</span> forces <span class="mono">a≈0</span> (new topic — flush the past), <span class="text-indigo-600 font-semibold">★ keep</span> forces <span class="mono">a≈0, b≈1</span> (important — write this value in), and <span class="text-amber-600 font-semibold">· noise</span> forces <span class="mono">a≈1, b≈0</span> (irrelevant — hold what I have, ignore it). A non-selective SSM uses the <em>same</em> <span class="mono">a,b</span> for every token, so it can't make any of those choices — that's exactly the weakness Mamba fixes.</p>
+
+        <div class="grid md:grid-cols-4 gap-4 items-end mb-4">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Retention a <span id="bAVal" class="text-indigo-600 stat">0.70</span></label>
+            <input id="bA" type="range" min="0" max="98" value="70" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>0 = forget fast</span><span>~1 = long memory</span></div>
+          </div>
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Input gain b <span id="bBVal" class="text-indigo-600 stat">0.50</span></label>
+            <input id="bB" type="range" min="0" max="100" value="50" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>0</span><span>1</span></div>
+          </div>
+          <div>
+            <div class="text-[12px] font-bold text-slate-600 mb-1">Selectivity</div>
+            <button id="btnSel" class="w-full px-3 py-1.5 rounded-lg font-semibold text-xs bg-indigo-600 text-white hover:bg-indigo-500">✅ Selective: ON</button>
+          </div>
+          <div>
+            <div class="text-[12px] font-bold text-slate-600 mb-1">&nbsp;</div>
+            <button id="btnReplayB" class="w-full px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-800 text-white hover:bg-slate-700">▶ Replay stream</button>
+          </div>
+        </div>
+
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4">
+          <div class="text-[10px] uppercase font-bold text-slate-400 mb-2">the input stream — <span class="text-indigo-600">⟂ reset</span> = "new topic, forget the past" · <span class="text-indigo-600">★ keep</span> = "important, write this in" · <span class="text-amber-600">· noise</span> = "irrelevant, ignore it"</div>
+          <div id="btokRow" class="flex flex-wrap gap-1.5"></div>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-center">
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+            <svg id="stateSvg" viewBox="0 0 580 300" class="w-full"></svg>
+          </div>
+          <div>
+            <div class="flex flex-wrap gap-3 justify-center mb-3 text-[11px] text-slate-500">
+              <span class="flex items-center gap-1"><span style="display:inline-block;width:16px;height:3px;background:#6366f1;border-radius:2px"></span>selective state</span>
+              <span class="flex items-center gap-1"><span style="display:inline-block;width:16px;height:0;border-top:3px dashed #94a3b8"></span>non-selective state</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-center mb-3">
+              <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-indigo-500">Final state (selective)</div><div id="bSel" class="text-lg font-bold text-indigo-600 mt-1 stat">—</div></div>
+              <div class="bg-slate-100 border border-slate-300 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-500">Final state (fixed)</div><div id="bFix" class="text-lg font-bold text-slate-600 mt-1 stat">—</div></div>
+            </div>
+            <div id="stateVerdict" class="rounded-lg px-3 py-2 text-[12px] mb-3"></div>
+            <div class="rounded-lg px-3 py-2 text-[11px] bg-indigo-50 border border-indigo-200 text-indigo-800">
+              🔎 <b>Same recurrence, two behaviours.</b> Watch what happens at <span class="text-indigo-600 font-semibold">⟂</span> and <span class="text-indigo-600 font-semibold">★</span>: the <b>selective</b> line snaps — it flushes on reset and freezes on keep. The <b>non-selective</b> line just leaks at one fixed rate, unable to tell an important token from noise. That input-dependent gating is the whole idea behind Mamba, and it's what let a fixed-size state finally rival attention.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto">Attention buys perfect recall by re-reading everything — at a cost that grows like the <strong>square</strong> of the sequence length and a memory that grows with it. A <strong>state-space model</strong> trades that for a <strong>fixed-size running state</strong>: <strong>linear time, constant memory</strong>, and the ability to <strong>stream indefinitely</strong>. Plain recurrence was too forgetful to compete — until <strong>Mamba's selectivity</strong> made the state update depend on the input, so the model can choose what to remember and what to forget. That's why SSMs matter for <strong>very long context, streaming, and on-device / edge</strong> — and why the frontier increasingly reaches for <strong>hybrids</strong> that keep a little attention for recall alongside cheap SSM layers.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">From the attention wall to a fixed-size state — and why selectivity changed everything</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a selective state-space model from scratch</h2>
+    <p class="text-slate-500 mb-8">Reproduce the whole LOOK demo: the two cost models that show the quadratic wall, the real scalar recurrence <code>h = a·h + b·x</code>, a full run over a token stream, and the selective gate that lets the state choose what to remember. This is the exact engine powering LOOK ① and ②.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">The two cost models — the quadratic wall vs linear streaming</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Attention lets token <em>t</em> look back at all <em>t</em> tokens before it, so per-token work is <code>t</code> and the total after <code>n</code> tokens is <code>n(n+1)/2 ≈ n²/2</code> — and it must cache all <code>n</code> keys/values. An SSM only ever touches its fixed state of size <code>d</code>, so per-token work is a constant <code>d</code>, the total is <code>d·n</code> (linear), and memory is just <code>d</code> — forever.</p>
+        <div class="relative"><pre>// ATTENTION: re-reads the whole history every token
+const attnPerToken = t => t;                 // t = position (1..n)
+const attnTotal    = n => n * (n + 1) / 2;   // ~ n^2 / 2  -> the wall
+const attnMemory   = n => n;                  // KV cache grows with length
+
+// SSM / MAMBA: one fixed-size state, updated in place
+const ssmPerToken  = d => d;                  // CONSTANT (state size)
+const ssmTotal     = (n, d) => d * n;         // LINEAR in length
+const ssmMemory    = d => d;                  // CONSTANT — streams forever
+
+attnTotal(1024);        // 524,800  (quadratic)
+ssmTotal(1024, 16);     //  16,384  (linear)  -> ~32x less work</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">The scalar recurrence — a running, decaying summary</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The heart of an SSM is one line. Keep a fraction <code>a</code> of the old state (<code>a</code> near 1 = long memory, near 0 = forget fast), add <code>b</code> times the new input <code>x</code>, and read the output out with <code>c</code>. No history is stored — everything the model "knows" is compressed into <code>h</code>.</p>
+        <div class="relative"><pre>// state update: h_t = a * h_{t-1} + b * x_t
+function ssmStep(h, x, a, b){ return a * h + b * x; }
+// readout:       y_t = c * h_t
+function readout(h, c){ return c * h; }
+
+// 'a' in [0,1] = how much of the PAST survives (the "forget" dial)
+// 'b'          = how strongly the new input enters the state
+// 'c'          = how the state is projected back out</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Run a stream through it — one pass, constant memory</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Streaming is just a loop: for each token, update the single state and emit an output. Notice there's no growing array of past tokens — only <code>h</code> lives between steps. That's the whole reason an SSM can process a million-token stream in constant memory.</p>
+        <div class="relative"><pre>function runFixedSSM(xs, a, b, c){
+  let h = 0; const ys = [];
+  for (const x of xs){          // one token at a time
+    h = ssmStep(h, x, a, b);    // update the fixed state
+    ys.push(readout(h, c));     // emit output
+  }
+  return ys;                     // memory used: ONE number, always
+}
+runFixedSSM([2,4,7,6,0,0,0], 0.7, 0.5, 1);</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">The weakness of a fixed SSM — it can't tell signal from noise</h3></div>
+        <p class="text-sm text-slate-600 mb-3">With the <em>same</em> <code>a,b</code> for every token, the state leaks at one fixed rate. It has no way to say "this token matters, hold it" or "new topic, dump the old stuff". A burst of noise decays at the same speed as a crucial fact. This input-blindness is why classic linear SSMs and RNNs lagged behind attention on recall-heavy tasks.</p>
+        <div class="relative"><pre>// fixed (LTI) SSM: a and b never change, whatever the token is
+const a = 0.7, b = 0.5;
+// a "reset" token (x=0) does NOT flush — the past still survives:
+//   h = 0.7 * h_old + 0.5 * 0  =  0.7 * h_old
+// a "keep" token can't be locked in — it decays like everything else.
+// => the model cannot CHOOSE what to remember.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Selectivity — Mamba's twist: make a, b depend on the input</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Mamba makes the parameters <strong>functions of the current token</strong>. Now the model can gate its own memory: on a "new topic" token drive <code>a→0</code> to flush the state; on an "important" token drive <code>a→0, b→1</code> to write the value in cleanly; on an "irrelevant" token drive <code>a→1, b→0</code> to hold what it has and ignore the input. That content-aware remember/forget is exactly what a fixed SSM lacked — and it's computed live in LOOK ②.</p>
+        <div class="relative"><pre>// selective: a and b are chosen from the TOKEN's content
+function selectiveA(tok, baseA){
+  if (tok.type === "reset") return 0.04;  // "forget the past"  -> flush
+  if (tok.type === "keep")  return 0.05;  // "write this value" -> clear old
+  if (tok.type === "noise") return 0.98;  // "ignore this"      -> hold state
+  return baseA;                           // otherwise: normal decay
+}
+function selectiveB(tok, baseB){
+  if (tok.type === "keep")  return 1.0;   // let the important value in fully
+  if (tok.type === "noise") return 0.0;   // block the irrelevant input
+  return baseB;
+}</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Put it together — the selective streaming loop (+ why it's still fast)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Swap the fixed <code>a,b</code> for the token-dependent ones and you have a selective SSM: it flushes on reset, freezes on keep, and still runs in one pass with constant memory. The catch: input-dependent parameters break the simple convolution trick — so Mamba uses a hardware-aware <strong>parallel scan</strong> to train fast on GPUs, then runs as a plain recurrence at inference.</p>
+        <div class="relative"><pre>function runSelectiveSSM(tokens, baseA, baseB, c){
+  let h = 0; const ys = [];
+  for (const tok of tokens){
+    const a = selectiveA(tok, baseA);   // chosen per token
+    const b = selectiveB(tok, baseB);
+    h = ssmStep(h, tok.x, a, b);        // same one-line update
+    ys.push(readout(h, c));
+  }
+  return ys;
+}
+// training: an associative PARALLEL SCAN computes all h_t at once on GPU;
+// inference: the plain O(1)-memory recurrence above, streaming forever.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 43 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">A <strong>state-space model</strong> processes a sequence by folding each token into a <strong>fixed-size state</strong> — <code>h = a·h + b·x</code> — giving <strong>linear time, constant memory</strong>, and the ability to <strong>stream forever</strong>, unlike attention whose cost grows like <code>n²</code>. Plain recurrence was too forgetful to compete, so <strong>Mamba</strong> made the update <strong>selective</strong>: the parameters depend on the input, letting the state <strong>choose what to remember and forget</strong> — trained fast via a parallel scan. The lasting tradeoff is <strong>recall</strong> (attention's edge) vs <strong>efficiency</strong> (the SSM's), which is why long-context, streaming and edge systems lean on SSMs and <strong>hybrids</strong>. <strong>👉 Tomorrow — Day 44: Diffusion models — turning pure noise into an image, one denoising step at a time.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+  if (t.dataset.tab === "look") renderAll();
+});
+
+const $ = id => document.getElementById(id);
+
+/* SSM-ENGINE-START */
+// ===== Day 43 · State-Space Models / Mamba — client-side, REAL recurrence, no ML library =====
+//
+// TWO ways to process a sequence:
+//   ATTENTION re-reads the WHOLE history for every new token
+//     -> per-token cost = position, total ~ n^2/2, memory (KV cache) grows with n.
+//   SSM / MAMBA keeps ONE fixed-size state and updates it token-by-token
+//     -> per-token cost = state size d (CONSTANT), total = d*n (LINEAR), memory = d.
+//
+// --- cost / memory models (the quadratic wall vs linear streaming) ---
+function attnPerToken(t){ return t; }              // t = 1..n (re-reads all t)
+function attnTotal(n){ return n * (n + 1) / 2; }   // ~ n^2 / 2
+function attnMemory(n){ return n; }                // KV entries
+function ssmPerToken(d){ return d; }               // constant, independent of position
+function ssmTotal(n, d){ return d * n; }           // linear in length
+function ssmMemory(d){ return d; }                 // constant
+
+// --- the scalar state-space recurrence (the actual SSM math) ---
+// h_t = a * h_{t-1} + b * x_t   (state update: a decaying running summary)
+// y_t = c * h_t                 (readout)
+function ssmStep(h, x, a, b){ return a * h + b * x; }
+function readout(h, c){ return c * h; }
+
+// --- selectivity (Mamba's twist): a and b DEPEND on the input token ---
+// non-selective (classic LTI) SSM: same a,b for every token -> can't choose.
+// selective SSM: the token's CONTENT gates the memory, per token:
+//   reset -> a≈0        ("new topic — forget everything before this")
+//   keep  -> a≈0, b≈1   ("important — write this value in cleanly")
+//   noise -> a≈1, b≈0   ("irrelevant — hold what I have, ignore this")
+function selectiveA(tok, baseA){
+  if (tok.type === "reset") return 0.04;
+  if (tok.type === "keep")  return 0.05;
+  if (tok.type === "noise") return 0.98;
+  return baseA;
+}
+function selectiveB(tok, baseB){
+  if (tok.type === "keep")  return 1.0;
+  if (tok.type === "noise") return 0.0;
+  return baseB;
+}
+
+// run the whole stream through the recurrence, return the state trajectory
+function runSSM(tokens, baseA, baseB, c, selective){
+  let h = 0; const H = [], Y = [];
+  for (const tok of tokens){
+    const a = selective ? selectiveA(tok, baseA) : baseA;
+    const b = selective ? selectiveB(tok, baseB) : baseB;
+    h = ssmStep(h, tok.x, a, b);
+    H.push(h); Y.push(readout(h, c));
+  }
+  return { H, Y };
+}
+
+// a small REAL d-dim state, just for the Card-A visual (each dim its own decay)
+function ssmStateAt(tokens, k, d){
+  const a = new Array(d), h = new Array(d).fill(0);
+  for (let i = 0; i < d; i++) a[i] = 0.55 + 0.4 * (d > 1 ? i / (d - 1) : 0);
+  for (let t = 0; t < k; t++){
+    const x = ((tokens[t].charCodeAt(0) || 100) % 13) / 12;   // token -> value in ~[0,1]
+    for (let i = 0; i < d; i++) h[i] = a[i] * h[i] + (1 - a[i]) * x;
+  }
+  return h;
+}
+/* SSM-ENGINE-END */
+
+// ============================ CARD A ============================
+const POOL = "the cat sat on a warm mat then a small dog ran fast across the wide green yard while birds sang high in a tall old oak tree near the slow river at pale dawn".split(" ");
+function makeStream(n){ const t = []; for (let i = 0; i < n; i++) t.push(POOL[i % POOL.length]); return t; }
+
+const A = { N:24, d:4, cur:24, playing:false, timer:null };
+
+function renderTokRow(){
+  const toks = makeStream(A.N), c = $("tokRow"); c.innerHTML = "";
+  toks.forEach((w, i) => {
+    const seen = i < A.cur, isCur = i === A.cur - 1;
+    const s = document.createElement("span");
+    s.className = "tok " + (isCur ? "bg-indigo-600 text-white pulse" : seen ? "bg-slate-200 text-slate-600" : "bg-slate-50 text-slate-300 border border-slate-200");
+    s.textContent = w;
+    c.appendChild(s);
+  });
+  $("aCurLbl").textContent = A.cur; $("aNLbl").textContent = A.N;
+}
+
+function renderAttnPanel(){
+  const toks = makeStream(A.N), c = $("attnTokens"); c.innerHTML = "";
+  const k = A.cur;
+  for (let i = 0; i < k; i++){
+    const s = document.createElement("span");
+    s.className = "tok " + (i === k - 1 ? "bg-rose-500 text-white" : "bg-rose-200 text-rose-700");
+    s.textContent = toks[i];
+    c.appendChild(s);
+  }
+  $("attnLook").textContent = k;
+  $("attnPer").textContent = attnPerToken(k);
+  $("attnTotal").textContent = attnTotal(k).toLocaleString();
+  $("attnMem").textContent = attnMemory(k);
+}
+
+function renderSsmPanel(){
+  const toks = makeStream(A.N), c = $("ssmState"); c.innerHTML = "";
+  const st = ssmStateAt(toks, A.cur, A.d);
+  st.forEach(v => {
+    const wrap = document.createElement("div");
+    wrap.className = "flex flex-col items-center";
+    const bar = document.createElement("div");
+    bar.style.width = "20px"; bar.style.height = Math.max(4, v * 40).toFixed(0) + "px";
+    bar.style.background = "#10b981"; bar.style.borderRadius = "4px"; bar.className = "pulse";
+    const lbl = document.createElement("div");
+    lbl.className = "text-[9px] text-emerald-700 mono mt-0.5"; lbl.textContent = v.toFixed(2);
+    wrap.appendChild(bar); wrap.appendChild(lbl); c.appendChild(wrap);
+  });
+  $("ssmDlbl").textContent = A.d; $("aDLabel").textContent = A.d;
+  $("ssmPer").textContent = ssmPerToken(A.d);
+  $("ssmTotal").textContent = ssmTotal(A.cur, A.d).toLocaleString();
+  $("ssmMem").textContent = ssmMemory(A.d);
+}
+
+function renderCostChart(){
+  const W = 580, H = 300, mL = 52, mR = 14, mT = 14, mB = 40;
+  const x0 = mL, x1 = W - mR, y0 = mT, y1 = H - mB, N = A.N;
+  const maxY = Math.max(attnTotal(N), ssmTotal(N, A.d), 1);
+  const xPx = i => x0 + (N <= 1 ? 0 : (i - 1) / (N - 1)) * (x1 - x0);
+  const yPx = v => y0 + (1 - v / maxY) * (y1 - y0);
+  let g = "";
+  for (let t = 0; t <= 4; t++){
+    const val = maxY * t / 4, pyv = yPx(val);
+    g += `<line x1="${x0}" y1="${pyv}" x2="${x1}" y2="${pyv}" stroke="#eef2f7"/>`;
+    g += `<text x="${x0-6}" y="${pyv+3}" text-anchor="end" font-size="9.5" fill="#94a3b8">${Math.round(val).toLocaleString()}</text>`;
+  }
+  const xticks = 6;
+  for (let t = 0; t <= xticks; t++){
+    const i = Math.max(1, Math.round(N * t / xticks)), pxv = xPx(i);
+    g += `<line x1="${pxv}" y1="${y0}" x2="${pxv}" y2="${y1}" stroke="#f1f5f9"/>`;
+    g += `<text x="${pxv}" y="${y1+15}" text-anchor="middle" font-size="9.5" fill="#94a3b8">${i}</text>`;
+  }
+  let dA = "", dS = "";
+  for (let i = 1; i <= N; i++){
+    dA += (i === 1 ? "M" : "L") + xPx(i).toFixed(1) + " " + yPx(attnTotal(i)).toFixed(1) + " ";
+    dS += (i === 1 ? "M" : "L") + xPx(i).toFixed(1) + " " + yPx(ssmTotal(i, A.d)).toFixed(1) + " ";
+  }
+  const k = Math.max(1, Math.min(A.cur, N));
+  const mk = `<line x1="${xPx(k)}" y1="${y0}" x2="${xPx(k)}" y2="${y1}" stroke="#0f172a" stroke-width="1" stroke-dasharray="2 3" opacity="0.45"/>`
+    + `<circle cx="${xPx(k)}" cy="${yPx(attnTotal(k)).toFixed(1)}" r="4.5" fill="#f43f5e" stroke="#fff" stroke-width="2"/>`
+    + `<circle cx="${xPx(k)}" cy="${yPx(ssmTotal(k, A.d)).toFixed(1)}" r="4.5" fill="#10b981" stroke="#fff" stroke-width="2"/>`;
+  $("costSvg").innerHTML = g
+    + `<path d="${dA}" fill="none" stroke="#f43f5e" stroke-width="2.6"/>`
+    + `<path d="${dS}" fill="none" stroke="#10b981" stroke-width="2.6"/>`
+    + mk
+    + `<text x="${xPx(N)-4}" y="${yPx(attnTotal(N))-6}" text-anchor="end" font-size="10" font-weight="700" fill="#f43f5e">attention ∝ n²</text>`
+    + `<text x="${xPx(N)-4}" y="${yPx(ssmTotal(N, A.d))-6}" text-anchor="end" font-size="10" font-weight="700" fill="#059669">SSM ∝ n</text>`
+    + `<text x="${(x0+x1)/2}" y="${H-3}" text-anchor="middle" font-size="10.5" fill="#64748b">tokens processed (n) →</text>`
+    + `<text transform="translate(13 ${(y0+y1)/2}) rotate(-90)" text-anchor="middle" font-size="10.5" fill="#64748b">cumulative work (operations)</text>`;
+}
+
+function renderCardA(){
+  $("aNVal").textContent = A.N; $("aDVal").textContent = A.d;
+  renderTokRow(); renderAttnPanel(); renderSsmPanel(); renderCostChart();
+
+  const n = A.N, at = attnTotal(n), st = ssmTotal(n, A.d);
+  $("cAttn").textContent = at.toLocaleString();
+  $("cSsm").textContent = st.toLocaleString();
+  $("rN").textContent = n;
+  const ratio = st > 0 ? at / st : 0;
+  $("ratio").textContent = ratio.toFixed(1) + "×";
+
+  const v = $("lookVerdict");
+  if (ratio < 2){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-slate-100 border border-slate-200 text-slate-700";
+    v.innerHTML = `On a short stream (n = ${n}) the two are close — the quadratic term hasn't taken over yet. <b>Push the length up</b> and watch attention's red curve peel away from the SSM's straight green line.`;
+  } else if (ratio < 6){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = `⚠️ At n = ${n}, attention already does <b>${ratio.toFixed(1)}×</b> the SSM's work. This is the wall forming: every doubling of length roughly <b>quadruples</b> attention's cost but only <b>doubles</b> the SSM's.`;
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = `🐍 At n = ${n}, attention does <b>${ratio.toFixed(1)}×</b> the work of the SSM — and its memory grew to <b>${n}</b> entries while the SSM held steady at <b>${A.d}</b>. This gap is exactly why SSMs win on very long context, streaming and edge devices.`;
+  }
+}
+
+function stopPlayA(){ if (A.timer){ clearInterval(A.timer); A.timer = null; } A.playing = false; $("btnPlayA").textContent = "▶ Play"; }
+$("btnPlayA").onclick = () => {
+  if (A.playing){ stopPlayA(); return; }
+  A.playing = true; A.cur = 0; $("btnPlayA").textContent = "⏸ Pause";
+  A.timer = setInterval(() => {
+    if (A.cur >= A.N){ stopPlayA(); return; }
+    A.cur++; renderCardA();
+  }, 180);
+};
+$("btnStepA").onclick = () => { stopPlayA(); A.cur = A.cur >= A.N ? 1 : A.cur + 1; renderCardA(); };
+$("btnResetA").onclick = () => { stopPlayA(); A.cur = A.N; renderCardA(); };
+$("aN").oninput = e => { A.N = +e.target.value; if (A.cur > A.N) A.cur = A.N; stopPlayA(); renderCardA(); };
+$("aD").oninput = e => { A.d = +e.target.value; stopPlayA(); renderCardA(); };
+
+// ============================ CARD B ============================
+const BTOKENS = [
+  {label:"3", x:3, type:"normal"},
+  {label:"5", x:5, type:"normal"},
+  {label:"8", x:8, type:"normal"},
+  {label:"⟂", x:0, type:"reset"},
+  {label:"2", x:2, type:"normal"},
+  {label:"★6", x:6, type:"keep"},
+  {label:"·9", x:9, type:"noise"},
+  {label:"·1", x:1, type:"noise"},
+  {label:"·8", x:8, type:"noise"},
+  {label:"·2", x:2, type:"noise"},
+  {label:"4", x:4, type:"normal"}
+];
+const B = { baseA:0.70, baseB:0.50, c:1, selective:true, cur:BTOKENS.length, playing:false, timer:null };
+
+function renderBTokRow(){
+  const c = $("btokRow"); c.innerHTML = "";
+  BTOKENS.forEach((tok, i) => {
+    const seen = i < B.cur, isCur = i === B.cur - 1;
+    let base = "bg-slate-200 text-slate-600";
+    if (tok.type === "reset" || tok.type === "keep") base = "bg-indigo-100 text-indigo-700 border border-indigo-300";
+    if (tok.type === "noise") base = "bg-amber-100 text-amber-700 border border-amber-300";
+    const s = document.createElement("span");
+    s.className = "tok " + (isCur ? "bg-indigo-600 text-white pulse" : seen ? base : "bg-slate-50 text-slate-300 border border-slate-200");
+    s.textContent = tok.label;
+    c.appendChild(s);
+  });
+}
+
+function renderStateChart(){
+  const sel = runSSM(BTOKENS, B.baseA, B.baseB, B.c, true).H;
+  const fix = runSSM(BTOKENS, B.baseA, B.baseB, B.c, false).H;
+  const W = 580, H = 300, mL = 44, mR = 14, mT = 16, mB = 40;
+  const x0 = mL, x1 = W - mR, y0 = mT, y1 = H - mB, n = BTOKENS.length;
+  const all = sel.concat(fix); const maxY = Math.max(1, ...all) * 1.12, minY = Math.min(0, ...all);
+  const xPx = i => x0 + (n <= 1 ? 0 : i / (n - 1)) * (x1 - x0);
+  const yPx = v => y0 + (1 - (v - minY) / (maxY - minY)) * (y1 - y0);
+  let g = "";
+  for (let t = 0; t <= 4; t++){
+    const val = minY + (maxY - minY) * t / 4, pyv = yPx(val);
+    g += `<line x1="${x0}" y1="${pyv}" x2="${x1}" y2="${pyv}" stroke="#eef2f7"/>`;
+    g += `<text x="${x0-6}" y="${pyv+3}" text-anchor="end" font-size="9.5" fill="#94a3b8">${val.toFixed(1)}</text>`;
+  }
+  // control-token guides + labels
+  BTOKENS.forEach((tok, i) => {
+    if (tok.type === "reset" || tok.type === "keep"){
+      const pxv = xPx(i);
+      g += `<line x1="${pxv}" y1="${y0}" x2="${pxv}" y2="${y1}" stroke="#c7d2fe" stroke-width="1.3" stroke-dasharray="4 3"/>`;
+      g += `<text x="${pxv}" y="${y0+10}" text-anchor="middle" font-size="11" fill="#6366f1" font-weight="700">${tok.label}</text>`;
+    }
+    const pxv = xPx(i);
+    g += `<text x="${pxv}" y="${y1+15}" text-anchor="middle" font-size="9" fill="#94a3b8">${i}</text>`;
+  });
+  const k = Math.max(1, Math.min(B.cur, n));
+  let dS = "", dF = "";
+  for (let i = 0; i < k; i++){
+    dS += (i === 0 ? "M" : "L") + xPx(i).toFixed(1) + " " + yPx(sel[i]).toFixed(1) + " ";
+    dF += (i === 0 ? "M" : "L") + xPx(i).toFixed(1) + " " + yPx(fix[i]).toFixed(1) + " ";
+  }
+  const hd = `<circle cx="${xPx(k-1)}" cy="${yPx(sel[k-1]).toFixed(1)}" r="4.5" fill="#6366f1" stroke="#fff" stroke-width="2"/>`
+    + `<circle cx="${xPx(k-1)}" cy="${yPx(fix[k-1]).toFixed(1)}" r="4" fill="#94a3b8" stroke="#fff" stroke-width="2"/>`;
+  $("stateSvg").innerHTML = g
+    + `<path d="${dF}" fill="none" stroke="#94a3b8" stroke-width="2.4" stroke-dasharray="6 5"/>`
+    + `<path d="${dS}" fill="none" stroke="#6366f1" stroke-width="2.8"/>`
+    + hd
+    + `<text x="${(x0+x1)/2}" y="${H-3}" text-anchor="middle" font-size="10.5" fill="#64748b">token position →</text>`
+    + `<text transform="translate(12 ${(y0+y1)/2}) rotate(-90)" text-anchor="middle" font-size="10.5" fill="#64748b">state value  h</text>`;
+  return { sel, fix };
+}
+
+function renderCardB(){
+  $("bAVal").textContent = B.baseA.toFixed(2);
+  $("bBVal").textContent = B.baseB.toFixed(2);
+  $("btnSel").textContent = B.selective ? "✅ Selective: ON" : "⬜ Selective: OFF";
+  $("btnSel").className = "w-full px-3 py-1.5 rounded-lg font-semibold text-xs " + (B.selective ? "bg-indigo-600 text-white hover:bg-indigo-500" : "bg-slate-200 text-slate-700 hover:bg-slate-300");
+  renderBTokRow();
+  const { sel, fix } = renderStateChart();
+  const k = Math.max(1, Math.min(B.cur, BTOKENS.length));
+  $("bSel").textContent = sel[k-1].toFixed(2);
+  $("bFix").textContent = fix[k-1].toFixed(2);
+
+  const v = $("stateVerdict"), gap = Math.abs(sel[k-1] - fix[k-1]);
+  if (B.selective && gap > 0.5){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = `🐍 <b>Selective wins.</b> The two states differ by <b>${gap.toFixed(2)}</b> right now — the selective line <b>flushed</b> at ⟂, <b>wrote</b> the value at ★, then <b>held steady</b> through the amber noise, while the fixed line got scrambled by that same junk. Content-aware gating is what a plain SSM can't do.`;
+  } else if (B.selective){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-indigo-50 border border-indigo-200 text-indigo-800";
+    v.innerHTML = `Selectivity is ON. Play the stream past <b>⟂</b>, <b>★</b> and the amber <b>· noise</b> tokens and watch the indigo line snap away from the dashed fixed line — the gate choosing to forget, write, or ignore.`;
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = `Selectivity is OFF, so <b>a</b> and <b>b</b> are the same for every token. The state can't flush on <b>⟂</b>, can't lock the <b>★</b> value, and lets the amber <b>· noise</b> scramble it — blind to what each token means. Turn it back on to see the difference.`;
+  }
+}
+
+function stopPlayB(){ if (B.timer){ clearInterval(B.timer); B.timer = null; } B.playing = false; $("btnReplayB").textContent = "▶ Replay stream"; }
+$("btnReplayB").onclick = () => {
+  if (B.playing){ stopPlayB(); return; }
+  B.playing = true; B.cur = 1; $("btnReplayB").textContent = "⏸ Pause";
+  B.timer = setInterval(() => {
+    if (B.cur >= BTOKENS.length){ stopPlayB(); return; }
+    B.cur++; renderCardB();
+  }, 320);
+};
+$("btnSel").onclick = () => { B.selective = !B.selective; renderCardB(); };
+$("bA").oninput = e => { B.baseA = (+e.target.value) / 100; stopPlayB(); B.cur = BTOKENS.length; renderCardB(); };
+$("bB").oninput = e => { B.baseB = (+e.target.value) / 100; stopPlayB(); B.cur = BTOKENS.length; renderCardB(); };
+
+function renderAll(){ renderCardA(); renderCardB(); }
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. A sequence model reads tokens in order", why:"Language, audio, DNA, sensor logs — they're all <strong>sequences</strong>: an ordered list of tokens where meaning depends on context. A sequence model's job is to turn each position into an output that reflects everything relevant that came before. The hard question every architecture answers differently is: <em>when I'm at token t, how do I bring in the earlier tokens?</em> Attention and state-space models are two very different answers to exactly that question.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">a sequence:<br>x₁ x₂ x₃ … xₜ …<br><br>at each t, produce yₜ<br>using the earlier context<br><br>❓ HOW do we reach back?</div>`, code:`# a sequence: ordered tokens, context matters
+seq = ["the", "cat", "sat", "on", "the", "mat"]
+# goal: at each position t, output y_t
+# using information from x_1 .. x_t
+# the whole game = HOW you access the past.` },
+ { title:"2. Attention's answer: look at everything, directly", why:"Attention gives every token a direct line to every other token. To process token t it compares t against all tokens so far, scores how relevant each is, and pulls in a weighted blend. Nothing is bottlenecked — a fact 500 tokens ago is <em>one hop</em> away. This direct, content-based lookup is why Transformers are so good at precise <strong>recall</strong> and long-range reasoning.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">ATTENTION<br><br>token t ⟷ every earlier token<br>score · weight · blend<br><br>any past token = 1 hop away<br>→ great RECALL</div>`, code:`# attention: token t attends to ALL tokens <= t
+for j in range(t):
+    score[j] = similarity(query_t, key_j)
+w = softmax(score)                 # relevance weights
+y_t = sum(w[j] * value_j for j in range(t))
+# direct access to any past token = strong recall.` },
+ { title:"3. The catch: the quadratic wall", why:"That direct access isn't free. If every token attends to every other token, an n-token sequence needs on the order of <strong>n × n</strong> comparisons — cost grows with the <em>square</em> of the length. Double the context and you roughly <strong>quadruple</strong> the compute. Worse, generation caches a key/value for every past token, so <strong>memory grows linearly</strong> and never shrinks. That's the wall you hit at very long context — and exactly what LOOK ① plots.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">cost ≈ n × n = n²<br><br>2× length → 4× compute<br>KV memory grows with n<br><br>🧱 the quadratic wall</div>`, code:`# n tokens, each attends to ~n others:
+compute = n * n            # ~ n^2  -> the wall
+kv_memory = n              # cache grows every token
+# 1k tokens: ~1M ops.  1M tokens: ~1e12 ops.
+# doubling length ~ quadruples the work.` },
+ { title:"4. An old idea, reborn: keep a running state", why:"Before attention, recurrent models (RNNs) processed sequences differently: carry a <strong>hidden state</strong> and update it one token at a time. The state is a <em>fixed-size summary</em> of everything seen so far — you never store the raw history. That means <strong>constant memory</strong> and <strong>linear time</strong>: each token is O(1) work regardless of how long the stream is. State-space models are a clean, modern take on this recurrent idea.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">RECURRENCE<br><br>carry a fixed-size state h<br>hₜ = f(hₜ₋₁, xₜ)<br><br>never store raw history<br>→ constant memory, linear time</div>`, code:`# recurrence: one fixed-size state, updated per token
+h = 0                      # the whole "memory"
+for x in stream:
+    h = update(h, x)       # O(1) work, O(1) memory
+    y = readout(h)
+# no growing cache -> stream forever.` },
+ { title:"5. The state-space recurrence: h = a·h + b·x", why:"An SSM makes that update beautifully simple and linear: keep a fraction <code>a</code> of the old state and add <code>b</code> times the new input, then read the output out with <code>c</code>. Think of <code>h</code> as a <strong>smart running summary</strong>: <code>a</code> near 1 means long memory (the past lingers), near 0 means it forgets fast. It's an exponential-moving-average with learnable knobs — the exact recurrence running live in LOOK ②.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">hₜ = a·hₜ₋₁ + b·xₜ<br>yₜ = c·hₜ<br><br>a→1 : remember long<br>a→0 : forget fast<br><br>a smart running summary</div>`, code:`# the scalar SSM recurrence
+h = a*h + b*x     # state: keep 'a' of old, add 'b' of new
+y = c*h           # readout
+# a in [0,1] = retention (the "forget" dial)
+# in real SSMs h is a vector and a,b,c are matrices,
+# but the shape is exactly this.` },
+ { title:"6. Why a FIXED recurrence isn't enough", why:"There's a reason attention displaced RNNs. If <code>a</code> and <code>b</code> are the <em>same</em> for every token, the state leaks at one fixed rate and treats every token identically. It can't say \"this token is important, hold it\" or \"new topic, dump the old context\" — a crucial fact and a burst of noise decay at the same speed. This input-blindness is why classic linear SSMs (and RNNs) struggled to match attention on recall-heavy tasks.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">fixed a,b for EVERY token<br><br>can't say "remember this"<br>can't say "forget that"<br><br>signal decays like noise<br>→ weak recall 😔</div>`, code:`# fixed (LTI) SSM: same a,b whatever the token is
+a, b = 0.7, 0.5
+h = a*h + b*x      # identical rule for every token
+# a "reset" token can't flush the state,
+# an "important" token can't be locked in.
+# => the model cannot CHOOSE what to keep.` },
+ { title:"7. Selectivity — Mamba's key idea", why:"Mamba's breakthrough: make the parameters <strong>depend on the input</strong>. Now <code>a</code> and <code>b</code> are computed <em>from the current token</em>, so the model can gate its own memory content-by-content — drive <code>a→0</code> to flush on a topic change, <code>a→1</code> to lock an important value and ignore incoming noise. This <strong>selective</strong> state update is what finally let a fixed-size recurrent state rival attention's recall. Flip the toggle in LOOK ② to watch it happen.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">SELECTIVE SSM (Mamba)<br><br>a, b = f(current token)<br><br>reset → a≈0 (forget)<br>keep  → a≈1 (remember)<br><br>the state CHOOSES 🎯</div>`, code:`# selective: parameters are functions of the token
+a_t = paramA(x_t)   # e.g. reset -> ~0, keep -> ~1
+b_t = paramB(x_t)
+h = a_t*h + b_t*x_t  # input-dependent gating
+# the model decides, per token, what to remember/forget.
+# THIS is the twist that made SSMs competitive.` },
+ { title:"8. But is it still fast? The parallel scan", why:"Input-dependent parameters break the old trick of turning a fixed recurrence into one big convolution (an FFT-friendly shortcut). Mamba's answer is a hardware-aware <strong>parallel scan</strong>: the recurrence is an <em>associative</em> operation, so all states <code>h₁…hₙ</code> can be computed together on a GPU in a log-depth prefix scan — no sequential bottleneck at training time. At inference it runs as the plain O(1)-memory recurrence, streaming token by token.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">train: PARALLEL SCAN<br>(associative → log-depth on GPU)<br><br>infer: plain recurrence<br>O(1) memory, stream forever<br><br>selective AND fast ⚡</div>`, code:`# recurrence h_t = a_t*h_{t-1} + b_t*x_t is ASSOCIATIVE
+# -> a prefix scan computes all h_t in parallel on GPU
+#    (log-depth), avoiding a sequential loop in training.
+# inference: run it as the simple O(1)-memory recurrence.
+# fast to train, cheap to stream.` },
+ { title:"9. Why it matters: long context, streaming, the edge", why:"Constant memory and linear time make SSMs a natural fit for <strong>very long sequences</strong> (whole books, genomes, high-res audio), <strong>streaming</strong> (a live feed you can't re-read), and <strong>on-device / edge</strong> inference where memory is tight. The honest tradeoff is <strong>recall vs efficiency</strong>: attention still shines at pinpointing a specific earlier token, so the frontier increasingly ships <strong>hybrids</strong> — mostly cheap SSM layers with a few attention layers for exact recall (Jamba, Zamba, and Mamba-2 style designs).", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">where SSMs win:<br>📚 very long context<br>🌊 streaming / live feeds<br>📱 edge / on-device<br><br>tradeoff: recall ↔ efficiency<br>→ HYBRIDS (SSM + a little attn)</div>`, code:`# SSM sweet spots: long context, streaming, edge
+#   constant memory  -> a book / genome in one pass
+#   linear time      -> cheap at 100k+ tokens
+# attention's edge: exact recall of a specific token
+# => hybrids: mostly SSM layers + a few attention layers
+#    (Jamba, Zamba, Mamba-2). Best of both worlds.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
