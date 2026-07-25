@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 44 — Model Collapse</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  input[type=range]{ accent-color:#6366f1; }
+  svg text { font-family:-apple-system,"Inter",sans-serif; }
+  canvas { border-radius:12px; width:100%; height:auto; display:block; }
+  .pill { display:inline-flex; align-items:center; justify-content:center; min-width:26px; height:26px; padding:0 8px; border-radius:7px; font-size:11px; font-weight:600; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 44</div>
+      <h1 class="text-xl font-bold">🌀 Model Collapse — <strong>what happens when AI learns from AI.</strong> Train a model on data made by the <strong>previous</strong> model, then repeat — generation after generation. Each round only ever sees a <strong>finite sample</strong>, so the <strong>rare cases (the tails) vanish first</strong>; then a <strong>simple model</strong> smears the leftover structure toward the <em>average</em>; and the <strong>spread shrinks a little every generation</strong>. Compound that over many rounds and everything converges to a <strong>bland, narrow blob</strong> — the model has forgotten the diversity of the real world. The fix is refreshingly simple: <strong>keep real human data in the mix.</strong></h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Start with a rich world, then let a model train on its own output — over and over</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">The gray shape below is the <strong>real</strong> distribution — two big populations, a <em>rare</em> subgroup near <span class="mono">5</span>, and a heavy tail out past <span class="mono">8</span>. Generation 0 is a finite sample of it. Then each <strong>generation</strong> does exactly two things, live in your browser: <strong>fit a simple model</strong> (just a mean and a variance) to the current sample, and <strong>resample</strong> a fresh batch from that fit — which becomes the next generation's training data. No real data is looked at again. Watch the rare cases die, the histogram narrow toward the average, and the spread shrink every round. Then flip on <strong>"mix in real data"</strong> and watch the bleeding stop. All numbers are a real recursive fit-and-resample, not a canned animation.</p>
+      </div>
+
+      <!-- ===================== CARD A · the recursive collapse ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">① The recursive-training loop <span class="text-slate-400 normal-case font-normal">— fit → resample → repeat, and watch a rich world collapse to its average</span></div>
+        <p class="text-[11px] text-slate-400 mb-4"><b>+1 generation</b> (or <b>play</b>) trains a fresh model on the <em>last</em> model's output. The <span style="color:#94a3b8;font-weight:700">gray area</span> is the real world (fixed, for reference); the <span style="color:#6366f1;font-weight:700">indigo bars</span> are the current generation's sample. Smaller <b>sample size</b> = faster collapse (finite samples miss more). Slide <b>mix in real data</b> above 0 to anchor every generation to a few genuine human samples.</p>
+
+        <div class="grid md:grid-cols-3 gap-4 items-end mb-4">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Sample per generation (n) <span id="aNVal" class="text-indigo-600 stat">20</span></label>
+            <input id="aN" type="range" min="8" max="200" value="20" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>8 (collapses fast)</span><span>200 (barely moves)</span></div>
+          </div>
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Mix in real data <span id="aPVal" class="text-indigo-600 stat">0%</span></label>
+            <input id="aP" type="range" min="0" max="60" value="0" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>0% = pure synthetic loop</span><span>60% real</span></div>
+          </div>
+          <div>
+            <div class="text-[12px] font-bold text-slate-600 mb-1">Advance the loop</div>
+            <div class="flex flex-wrap gap-1.5">
+              <button id="btnStepA" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-indigo-600 text-white hover:bg-indigo-500">⏩ +1 generation</button>
+              <button id="btnPlayA" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-800 text-white hover:bg-slate-700">▶ Play</button>
+              <button id="btnResetA" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-200 text-slate-700 hover:bg-slate-300">⟳ Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-3 gap-4 items-stretch">
+          <div class="lg:col-span-2 bg-slate-50 border border-slate-200 rounded-xl p-2">
+            <svg id="collapseSvg" viewBox="0 0 640 320" class="w-full"></svg>
+          </div>
+          <div class="flex flex-col gap-3">
+            <div class="bg-slate-900 rounded-xl px-3 py-3 text-center">
+              <div class="text-[10px] uppercase font-bold text-slate-300">Generation</div>
+              <div id="genLbl" class="text-3xl font-bold text-white mt-0.5 stat">0</div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-center">
+              <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2"><div class="text-[9px] uppercase font-bold text-indigo-500">Spread left</div><div id="spreadPct" class="text-lg font-bold text-indigo-600 stat">100%</div><div class="text-[9px] text-slate-400">of the real σ</div></div>
+              <div class="bg-rose-50 border border-rose-200 rounded-xl p-2"><div class="text-[9px] uppercase font-bold text-rose-500">Rare cases left</div><div id="rarePct" class="text-lg font-bold text-rose-600 stat">100%</div><div class="text-[9px] text-slate-400">tail past 6</div></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-center">
+              <div class="bg-white border border-slate-200 rounded-xl p-2"><div class="text-[9px] uppercase font-bold text-slate-400">Fitted mean μ̂</div><div id="muVal" class="text-base font-bold text-slate-700 stat">—</div></div>
+              <div class="bg-white border border-slate-200 rounded-xl p-2"><div class="text-[9px] uppercase font-bold text-slate-400">Fitted σ̂</div><div id="sigVal" class="text-base font-bold text-slate-700 stat">—</div></div>
+            </div>
+            <div id="lookVerdict" class="rounded-lg px-3 py-2 text-[12px]"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD B · variance trajectory + the fix ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">② Variance shrinks every generation — and real data stops the bleed <span class="text-slate-400 normal-case font-normal">— two recursions from the same start</span></div>
+        <p class="text-[11px] text-slate-400 mb-4">Both lines start from the <em>same</em> generation-0 sample. The <span style="color:#f43f5e;font-weight:700">rose line</span> is the pure synthetic loop (0% real) — it slides toward zero: everything collapses to a single average value. The <span style="color:#10b981;font-weight:700">green line</span> mixes in a slice of real data every generation and <b>plateaus</b> — the tails and spread keep getting re-injected, so it never forgets the real world. Both are the actual recurrence, run to <span id="bGlbl">60</span> generations live.</p>
+
+        <div class="grid md:grid-cols-3 gap-4 items-end mb-4">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Sample per generation (n) <span id="bNVal" class="text-indigo-600 stat">30</span></label>
+            <input id="bN" type="range" min="15" max="150" value="30" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>15</span><span>150 (delays collapse)</span></div>
+          </div>
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Real data mixed into the green line <span id="bPVal" class="text-emerald-600 stat">25%</span></label>
+            <input id="bP" type="range" min="0" max="60" value="25" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>0%</span><span>60%</span></div>
+          </div>
+          <div>
+            <div class="text-[12px] font-bold text-slate-600 mb-1">Re-run the two recursions</div>
+            <button id="btnRunB" class="w-full px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-800 text-white hover:bg-slate-700">🎲 New seed &amp; run</button>
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6 items-center">
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+            <svg id="trajSvg" viewBox="0 0 600 320" class="w-full"></svg>
+          </div>
+          <div>
+            <div class="flex flex-wrap gap-3 justify-center mb-3 text-[11px] text-slate-500">
+              <span class="flex items-center gap-1"><span style="display:inline-block;width:16px;height:3px;background:#f43f5e;border-radius:2px"></span>pure synthetic loop (0% real)</span>
+              <span class="flex items-center gap-1"><span style="display:inline-block;width:16px;height:3px;background:#10b981;border-radius:2px"></span>with real data mixed in</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-center mb-3">
+              <div class="bg-rose-50 border border-rose-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-rose-500">Pure loop, final spread</div><div id="bPure" class="text-lg font-bold text-rose-600 mt-1 stat">—</div></div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-emerald-600">With real mix, final spread</div><div id="bMix" class="text-lg font-bold text-emerald-600 mt-1 stat">—</div></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-center mb-3">
+              <div class="bg-white border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">Rare cases surviving — pure</div><div id="bRarePure" class="text-base font-bold text-rose-600 mt-1 stat">—</div></div>
+              <div class="bg-white border border-slate-200 rounded-xl p-2"><div class="text-[10px] uppercase font-bold text-slate-400">Rare cases surviving — mixed</div><div id="bRareMix" class="text-base font-bold text-emerald-600 mt-1 stat">—</div></div>
+            </div>
+            <div id="trajVerdict" class="rounded-lg px-3 py-2 text-[12px] mb-3"></div>
+            <div class="rounded-lg px-3 py-2 text-[11px] bg-indigo-50 border border-indigo-200 text-indigo-800">
+              🔎 <b>Why the green line survives.</b> A single generation of the pure loop shrinks variance by a factor of about <span class="mono">(n−1)/n</span> — tiny, but it <em>compounds</em> every round until the spread hits zero. Mixing in even a modest slice of real data resets that: each generation re-injects genuine tails and spread, so the recursion settles at a stable floor instead of vanishing. This is the core defence against model collapse — <b>never train purely on your own output; keep anchoring to originals.</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto"><strong>Model collapse</strong> is what happens when generative models are trained, generation after generation, on data produced by earlier models. Three errors compound: finite samples <strong>miss the rare tails</strong>, a limited model <strong>can't represent the full structure</strong>, and estimation error <strong>nudges the spread down each round</strong>. The result is a distribution that first loses its rare cases, then narrows toward the average, until <strong>everything looks the same</strong>. As the open web fills with AI-generated text and images, this is a real risk for the next round of training — which is why <strong>genuine human data is becoming precious</strong>, and why the practical fix is to <strong>keep real data in the mix, filter synthetic data, and accumulate rather than replace</strong> (it pairs directly with Day 39, Synthetic Data).</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">From "AI learning from AI" to a world that forgets its own diversity</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build model collapse from scratch</h2>
+    <p class="text-slate-500 mb-8">Reproduce the whole LOOK demo: a rich "real world" distribution, a simple fit-and-resample generative model, the recursive loop that makes variance shrink every generation, live measures of the collapse, and the real-data mix that stops it. This is the exact engine powering LOOK ① and ②.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">The "real world" — a rich distribution with rare cases and a tail</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Real data is diverse: common patterns, minority subpopulations, and rare long-tail events. We model it as a mixture — two big modes, a rare subgroup, and a heavy tail — so there's genuine structure for a collapse to destroy.</p>
+        <div class="relative"><pre>// the real distribution = a mixture of Gaussians (weight, mean, std)
+const REAL = [
+  { w:0.45, m:-2.0, s:0.55 },   // big population A
+  { w:0.40, m: 2.0, s:0.55 },   // big population B   -> bimodal
+  { w:0.12, m: 5.0, s:0.50 },   // a RARE subpopulation
+  { w:0.03, m: 8.0, s:0.50 },   // the heavy TAIL (extreme cases)
+];
+function sampleReal(){
+  let r = Math.random(), acc = 0;
+  for (const c of REAL){ acc += c.w; if (r <= acc) return gauss(c.m, c.s); }
+  return gauss(8, 0.5);
+}
+const gauss = (m,s) => m + s*Math.sqrt(-2*Math.log(1-Math.random()))*Math.cos(2*Math.PI*Math.random());</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">The generative model — fit, then resample</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Our "model" is deliberately simple: estimate a mean and a variance from the sample, then generate new data by drawing from that single Gaussian. Two things to notice: a single Gaussian <em>cannot</em> represent two modes or a tail (it will smear them into the average), and we fit variance with the maximum-likelihood estimator (divide by <code>n</code>), which is biased slightly low on a finite sample.</p>
+        <div class="relative"><pre>function fit(sample){                 // "train" on the data we have
+  const n = sample.length;
+  const mean = sample.reduce((a,b)=>a+b,0) / n;
+  let v = 0; for (const x of sample) v += (x-mean)**2;
+  v /= n;                             // MLE variance (÷n): biased LOW on finite n
+  return { mean, std: Math.sqrt(v) };
+}
+function generate(model, k){          // "sample" from the trained model
+  const out = [];
+  for (let i=0;i<k;i++) out.push(gauss(model.mean, model.std));
+  return out;                         // a single Gaussian: no modes, no tail
+}</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">The recursive loop — train on the last model's output</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Generation 0 is real data. After that, each generation trains on the <em>previous</em> generation's synthetic output — real data is never seen again. This is the loop that appears whenever models scrape a web that is increasingly full of AI-generated content.</p>
+        <div class="relative"><pre>let sample = Array.from({length:n}, sampleReal);   // gen 0: real data
+for (let g = 1; g <= generations; g++){
+  const model = fit(sample);        // train on what we currently have
+  sample = generate(model, n);      // its output BECOMES the next training set
+  // no real data is ever looked at again -> errors have no way to correct
+}</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Why it collapses — the variance shrinks every generation</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Here's the maths. If you draw <code>n</code> points from a distribution of variance <code>V</code>, the expected ML-estimated variance of that new sample is <code>((n-1)/n)·V</code> — a hair smaller. Feed that back in as the new truth and it compounds: after <code>t</code> generations the spread is <code>((n-1)/n)^t</code> of the original, heading to zero. The tails go first (extreme values are rarest, so a finite sample almost never keeps them), then the whole thing narrows toward a single average value.</p>
+        <div class="relative"><pre>// each generation multiplies the variance by ~ (n-1)/n  < 1
+//   var_after ≈ (n-1)/n * var_before          (compounds every round)
+//   var_t     ≈ ((n-1)/n)^t * var_0    ->  0  (collapse)
+// smaller n  -> factor further below 1 -> collapses FASTER.
+//
+// even an UNBIASED estimator collapses: variance becomes a positive
+// random walk whose only stable resting point is 0 (it is absorbing).
+// three compounding errors (Shumailov et al.):
+//   1. sampling error  - finite samples miss the rare tails
+//   2. expressivity    - a simple model can't hold the real structure
+//   3. estimation error- fitted stats drift, with no correction signal</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Measure the collapse — spread and surviving tail</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Two live gauges tell the story: the <strong>spread</strong> (fitted σ as a fraction of the original) and the <strong>rare-case survival</strong> (fraction of samples still out in the tail). The rare-case gauge hits zero <em>first</em> — the tails die well before the bulk finishes narrowing.</p>
+        <div class="relative"><pre>const spreadPct = fit(sample).std / std0;                 // 1.0 -> 0.0
+const rareMass  = sample.filter(x => x > 6).length / n;   // tail survival
+// typical run (n small):
+//   gen 0 : spread 100%, rare cases present
+//   gen 5 : rare cases already ~gone, spread still ~80%   <- tails die FIRST
+//   gen 40: spread a few %, everything piled on one value <- looks the same</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">The fix — keep real data in the mix</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Replace a fraction <code>p</code> of every generation with fresh real samples. Those genuine points re-inject the tails and the spread each round, so the compounding shrink is cancelled and the recursion settles at a stable floor instead of vanishing. Even a modest mix prevents collapse — the same reason production pipelines <strong>accumulate real data, filter synthetic data, and never train purely on their own output</strong>.</p>
+        <div class="relative"><pre>function nextGen(sample, n, p){       // p = fraction of REAL data mixed in
+  const model = fit(sample);
+  const kReal = Math.round(p * n), kSyn = n - kReal;
+  const out = generate(model, kSyn);              // (1-p) from the model
+  for (let i=0;i<kReal;i++) out.push(sampleReal()); // p from the REAL world
+  return out;                                      // tails + spread re-injected
+}
+// p = 0   -> spread -> 0        (collapse)
+// p = 0.2 -> spread plateaus    (stable: it keeps remembering the real world)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 44 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2"><strong>Model collapse</strong> is the degeneration that happens when models are trained, round after round, on data generated by earlier models. Each generation only sees a <strong>finite sample</strong>, so the <strong>rare tails vanish first</strong>; a <strong>simple model</strong> smears the rest toward the <strong>average</strong>; and estimation error <strong>shrinks the spread every generation</strong> — compounding until <strong>everything looks the same</strong>. As the web fills with synthetic content this becomes a real training risk, which is why <strong>genuine human data is now precious</strong>. The defence is simple and provable: <strong>keep real data in the mix, filter and verify synthetic data, and accumulate rather than replace.</strong> <strong>👉 Tomorrow — Day 45: Diffusion models — turning pure noise into an image, one denoising step at a time.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+  if (t.dataset.tab === "look") renderAll();
+});
+
+const $ = id => document.getElementById(id);
+
+/* COLLAPSE-ENGINE-START */
+// ===== Day 44 · Model Collapse — client-side, REAL recursive fit+resample, no ML library =====
+//
+// THE LOOP: train a model on the PREVIOUS model's output, generation after generation.
+//   gen 0  = a finite sample of the REAL world (rich: 2 modes + a rare subgroup + a heavy tail)
+//   gen t+1 = fit(mean, variance) to gen t, then RESAMPLE n points from that fit.
+// Real data is never seen again, so three errors compound and the distribution collapses:
+//   - finite samples miss the rare tails       -> tails vanish first
+//   - a single Gaussian can't hold the structure-> modes smear toward the average
+//   - the ML variance (÷n) is biased low        -> spread shrinks ~(n-1)/n every round
+//
+// FIX: mix a fraction p of fresh REAL data into every generation -> spread + tails re-injected.
+
+// --- seeded RNG so runs are reproducible (mulberry32) ---
+let RND = mulberry32(20260725);
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function rand(){ return RND(); }
+function gauss(m, s){ const u = 1 - rand(), v = rand(); return m + s*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+
+// --- the REAL distribution: a mixture (weight, mean, std) ---
+const REAL = [
+  { w:0.45, m:-2.0, s:0.55 },   // big population A
+  { w:0.40, m: 2.0, s:0.55 },   // big population B   -> bimodal
+  { w:0.12, m: 5.0, s:0.50 },   // a RARE subpopulation
+  { w:0.03, m: 8.0, s:0.50 },   // the heavy TAIL
+];
+function sampleReal(){ let r = rand(), acc = 0; for (const c of REAL){ acc += c.w; if (r <= acc) return gauss(c.m, c.s); } return gauss(8, 0.5); }
+function realDensity(x){ let d = 0; for (const c of REAL){ d += c.w * Math.exp(-0.5*((x-c.m)/c.s)**2) / (c.s*Math.sqrt(2*Math.PI)); } return d; }
+function drawReal(n){ const a = new Array(n); for (let i=0;i<n;i++) a[i] = sampleReal(); return a; }
+
+// --- fit the simple model: mean + ML variance (÷n, biased slightly LOW) ---
+function fit(sample){
+  const n = sample.length; let mean = 0; for (const x of sample) mean += x; mean /= n;
+  let v = 0; for (const x of sample){ const d = x - mean; v += d*d; } v /= n;
+  return { mean, varc: v, std: Math.sqrt(v) };
+}
+
+// --- one generation: resample (1-p)*n from the fit + p*n fresh REAL points ---
+function nextGen(sample, n, p){
+  const model = fit(sample);
+  const kReal = Math.round(p * n), kSyn = n - kReal, out = new Array(n);
+  for (let i=0;i<kSyn;i++)  out[i]        = gauss(model.mean, model.std); // learn from itself
+  for (let i=0;i<kReal;i++) out[kSyn + i] = sampleReal();                 // anchor to reality
+  return out;
+}
+
+// --- collapse gauges ---
+// the model's OWN probability of a rare/tail event (past TAIL_TH): a smooth read
+// of "does the model still believe rare cases exist?" -> dies first as the fit narrows.
+const TAIL_TH = 4;
+function erf(x){ const t=1/(1+0.3275911*Math.abs(x)); const y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x); return x>=0?y:-y; }
+function tailProb(f){ return 0.5*(1 - erf((TAIL_TH - f.mean) / (f.std*Math.SQRT2))); } // P(x > TAIL_TH) under the fit
+
+// --- the real world's spread, for reference ---
+const REAL_STD = Math.sqrt(REAL.reduce((a,c)=>a+c.w*(c.s*c.s+c.m*c.m),0) - REAL.reduce((a,c)=>a+c.w*c.m,0)**2);
+/* COLLAPSE-ENGINE-END */
+
+// ============================ CARD A ============================
+const XLO = -6, XHI = 12, BINS = 54;
+const A = { n:20, p:0, gen:0, pop:[], rare0:1, playing:false, timer:null };
+
+function resetA(){
+  stopPlayA();
+  RND = mulberry32(1554);
+  A.gen = 0; A.pop = drawReal(A.n);
+  A.rare0 = tailProb(fit(A.pop)) || 1e-9;   // gen-0 tail belief = the 100% baseline
+}
+
+function histCounts(pop){
+  const w = (XHI - XLO) / BINS, c = new Array(BINS).fill(0);
+  for (const x of pop){ let b = Math.floor((x - XLO) / w); if (b < 0) b = 0; if (b >= BINS) b = BINS - 1; c[b]++; }
+  return { c, w };
+}
+
+function renderCollapseChart(){
+  const W = 640, H = 320, mL = 40, mR = 14, mT = 16, mB = 34;
+  const x0 = mL, x1 = W - mR, y0 = mT, y1 = H - mB;
+  const { c, w } = histCounts(A.pop);
+  const xPx = x => x0 + (x - XLO) / (XHI - XLO) * (x1 - x0);
+  // expected real counts per bin (for the faint reference shape)
+  const realCnt = c.map((_, i) => { const cx = XLO + (i + 0.5) * w; return realDensity(cx) * w * A.n; });
+  const maxY = Math.max(1, ...c, ...realCnt) * 1.08;
+  const yPx = v => y0 + (1 - v / maxY) * (y1 - y0);
+
+  let g = "";
+  // baseline
+  g += `<line x1="${x0}" y1="${yPx(0)}" x2="${x1}" y2="${yPx(0)}" stroke="#cbd5e1"/>`;
+  // x ticks
+  for (let xv = -6; xv <= 12; xv += 3){
+    g += `<line x1="${xPx(xv)}" y1="${y0}" x2="${xPx(xv)}" y2="${y1}" stroke="#f1f5f9"/>`;
+    g += `<text x="${xPx(xv)}" y="${y1+14}" text-anchor="middle" font-size="9.5" fill="#94a3b8">${xv}</text>`;
+  }
+  // faint REAL reference area
+  let ra = `M ${xPx(XLO).toFixed(1)} ${yPx(0).toFixed(1)} `;
+  realCnt.forEach((v, i) => { const cx = XLO + (i + 0.5) * w; ra += `L ${xPx(cx).toFixed(1)} ${yPx(v).toFixed(1)} `; });
+  ra += `L ${xPx(XHI).toFixed(1)} ${yPx(0).toFixed(1)} Z`;
+  g += `<path d="${ra}" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1"/>`;
+  // current-generation bars
+  const bw = (x1 - x0) / BINS;
+  c.forEach((v, i) => {
+    if (v <= 0) return;
+    const px = x0 + i * bw, ph = yPx(0) - yPx(v);
+    g += `<rect x="${(px+0.6).toFixed(1)}" y="${yPx(v).toFixed(1)}" width="${(bw-1.2).toFixed(1)}" height="${ph.toFixed(1)}" fill="#6366f1" opacity="0.9" rx="1"/>`;
+  });
+  // rare-region marker (x > TAIL_TH): everything to the right is the rare subgroup + heavy tail
+  g += `<line x1="${xPx(TAIL_TH)}" y1="${y0}" x2="${xPx(TAIL_TH)}" y2="${y1}" stroke="#f43f5e" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>`;
+  g += `<text x="${xPx(TAIL_TH)+4}" y="${y0+11}" font-size="9" fill="#f43f5e" font-weight="700">rare zone →</text>`;
+  // fitted mean marker
+  const m = fit(A.pop).mean;
+  g += `<line x1="${xPx(m)}" y1="${y0}" x2="${xPx(m)}" y2="${yPx(0)}" stroke="#0f172a" stroke-width="1.4" stroke-dasharray="2 3" opacity="0.55"/>`;
+  g += `<text x="${xPx(m)}" y="${y0+11}" text-anchor="middle" font-size="9" fill="#0f172a" font-weight="700">μ̂</text>`;
+  // labels
+  g += `<text x="${x0+4}" y="${y0+11}" font-size="9.5" fill="#94a3b8" font-weight="700">■ real world</text>`;
+  g += `<text x="${(x0+x1)/2}" y="${H-4}" text-anchor="middle" font-size="10" fill="#64748b">value →</text>`;
+  $("collapseSvg").innerHTML = g;
+}
+
+function renderCardA(){
+  $("aNVal").textContent = A.n;
+  $("aPVal").textContent = A.p + "%";
+  $("genLbl").textContent = A.gen;
+  const f = fit(A.pop);
+  const spread = f.std / REAL_STD, rare = tailProb(f) / A.rare0;
+  $("spreadPct").textContent = Math.round(Math.min(1.2, spread) * 100) + "%";
+  $("rarePct").textContent = Math.round(Math.max(0, Math.min(1.2, rare)) * 100) + "%";
+  $("muVal").textContent = f.mean.toFixed(2);
+  $("sigVal").textContent = f.std.toFixed(2);
+  renderCollapseChart();
+
+  const v = $("lookVerdict");
+  if (A.gen === 0){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-slate-100 border border-slate-200 text-slate-700";
+    v.innerHTML = `<b>Generation 0 — the real, rich world.</b> Two big modes, a rare subgroup near 5, a heavy tail past 8. Press <b>+1 generation</b> to let the model start training on its own output.`;
+  } else if (A.p > 0 && spread > 0.45){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = `🩹 <b>Real data is holding it open.</b> With <b>${A.p}%</b> genuine samples mixed in every round, the spread has steadied at <b>${Math.round(spread*100)}%</b> and rare cases keep coming back — the collapse is arrested.`;
+  } else if (spread < 0.4 || rare < 0.15){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-rose-50 border border-rose-200 text-rose-800";
+    v.innerHTML = `🌀 <b>Collapsing.</b> By generation ${A.gen} the rare cases are down to <b>${Math.round(Math.max(0,rare)*100)}%</b> and the spread to <b>${Math.round(spread*100)}%</b> of the real world — the histogram is piling onto the average. Turn up <b>mix in real data</b> to stop it.`;
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = `⚠️ <b>The tails are dying first.</b> Rare cases already at <b>${Math.round(Math.max(0,rare)*100)}%</b> while the bulk is still <b>${Math.round(spread*100)}%</b> wide. Keep stepping — each generation nudges the spread down a little more.`;
+  }
+}
+
+function stopPlayA(){ if (A.timer){ clearInterval(A.timer); A.timer = null; } A.playing = false; $("btnPlayA").textContent = "▶ Play"; }
+$("btnPlayA").onclick = () => {
+  if (A.playing){ stopPlayA(); return; }
+  if (A.gen >= 80) resetA();
+  A.playing = true; $("btnPlayA").textContent = "⏸ Pause";
+  A.timer = setInterval(() => {
+    if (A.gen >= 80){ stopPlayA(); return; }
+    A.pop = nextGen(A.pop, A.n, A.p / 100); A.gen++; renderCardA();
+  }, 160);
+};
+$("btnStepA").onclick = () => { stopPlayA(); if (A.gen >= 80) resetA(); else { A.pop = nextGen(A.pop, A.n, A.p / 100); A.gen++; } renderCardA(); };
+$("btnResetA").onclick = () => { resetA(); renderCardA(); };
+$("aN").oninput = e => { A.n = +e.target.value; resetA(); renderCardA(); };
+$("aP").oninput = e => { A.p = +e.target.value; renderCardA(); };
+
+// ============================ CARD B ============================
+const B = { n:30, p:25, G:60, seed:1491 };
+
+function simulatePair(){
+  RND = mulberry32(B.seed);
+  const pop0 = drawReal(B.n);
+  let a = pop0.slice(), b = pop0.slice();
+  const stdPure = [], stdMix = [], rarePure = [], rareMix = [];
+  const tp0 = tailProb(fit(pop0)) || 1e-9;   // gen-0 tail belief = shared 100% baseline
+  for (let g = 0; g <= B.G; g++){
+    stdPure.push(fit(a).std); stdMix.push(fit(b).std);
+    rarePure.push(tailProb(fit(a))); rareMix.push(tailProb(fit(b)));
+    if (g < B.G){ a = nextGen(a, B.n, 0); b = nextGen(b, B.n, B.p / 100); }
+  }
+  return { stdPure, stdMix, rarePure, rareMix, std0: stdPure[0], tp0 };
+}
+
+function renderTraj(){
+  const d = simulatePair();
+  const W = 600, H = 320, mL = 46, mR = 14, mT = 16, mB = 36;
+  const x0 = mL, x1 = W - mR, y0 = mT, y1 = H - mB;
+  const maxY = Math.max(1, d.std0) * 1.08;
+  const xPx = g => x0 + (B.G <= 0 ? 0 : g / B.G) * (x1 - x0);
+  const yPx = v => y0 + (1 - v / maxY) * (y1 - y0);
+  let g = "";
+  for (let t = 0; t <= 4; t++){
+    const val = maxY * t / 4, pyv = yPx(val);
+    g += `<line x1="${x0}" y1="${pyv}" x2="${x1}" y2="${pyv}" stroke="#eef2f7"/>`;
+    g += `<text x="${x0-6}" y="${pyv+3}" text-anchor="end" font-size="9.5" fill="#94a3b8">${val.toFixed(1)}</text>`;
+  }
+  for (let t = 0; t <= 6; t++){
+    const gg = Math.round(B.G * t / 6), pxv = xPx(gg);
+    g += `<text x="${pxv}" y="${y1+14}" text-anchor="middle" font-size="9.5" fill="#94a3b8">${gg}</text>`;
+  }
+  const path = arr => { let s = ""; arr.forEach((v, i) => { s += (i === 0 ? "M" : "L") + xPx(i).toFixed(1) + " " + yPx(v).toFixed(1) + " "; }); return s; };
+  g += `<path d="${path(d.stdMix)}" fill="none" stroke="#10b981" stroke-width="2.8"/>`;
+  g += `<path d="${path(d.stdPure)}" fill="none" stroke="#f43f5e" stroke-width="2.8"/>`;
+  g += `<circle cx="${xPx(B.G)}" cy="${yPx(d.stdPure[B.G]).toFixed(1)}" r="4.5" fill="#f43f5e" stroke="#fff" stroke-width="2"/>`;
+  g += `<circle cx="${xPx(B.G)}" cy="${yPx(d.stdMix[B.G]).toFixed(1)}" r="4.5" fill="#10b981" stroke="#fff" stroke-width="2"/>`;
+  g += `<text x="${(x0+x1)/2}" y="${H-4}" text-anchor="middle" font-size="10" fill="#64748b">generation →</text>`;
+  g += `<text transform="translate(13 ${(y0+y1)/2}) rotate(-90)" text-anchor="middle" font-size="10" fill="#64748b">spread (fitted σ)</text>`;
+  $("trajSvg").innerHTML = g;
+
+  const pPure = d.stdPure[B.G] / d.std0, pMix = d.stdMix[B.G] / d.std0;
+  $("bPure").textContent = Math.round(pPure * 100) + "%";
+  $("bMix").textContent = Math.round(pMix * 100) + "%";
+  $("bRarePure").textContent = Math.round(Math.min(1.2, d.rarePure[B.G] / d.tp0) * 100) + "%";
+  $("bRareMix").textContent  = Math.round(Math.min(1.2, d.rareMix[B.G]  / d.tp0) * 100) + "%";
+
+  const vv = $("trajVerdict");
+  vv.className = "rounded-lg px-3 py-2 text-[12px] bg-slate-900 text-slate-100";
+  if (B.p === 0){
+    vv.innerHTML = `Both lines are pure synthetic loops — both slide toward zero. Raise <b>real data mixed in</b> and watch the green line lift off the floor.`;
+  } else {
+    vv.innerHTML = `After ${B.G} generations the pure loop has kept just <b>${Math.round(pPure*100)}%</b> of the real spread, while <b>${B.p}%</b> real data holds the green line at <b>${Math.round(pMix*100)}%</b>. Same recursion — one forgets the world, one remembers it.`;
+  }
+}
+
+$("btnRunB").onclick = () => { B.seed = Math.floor(Math.random() * 1e9); renderTraj(); };
+$("bN").oninput = e => { B.n = +e.target.value; $("bNVal").textContent = B.n; renderTraj(); };
+$("bP").oninput = e => { B.p = +e.target.value; $("bPVal").textContent = B.p + "%"; renderTraj(); };
+
+function renderAll(){ renderCardA(); renderTraj(); }
+resetA(); renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. AI is starting to learn from AI", why:"For years, models trained on human-made text and images. But the web is now filling with <strong>AI-generated</strong> content, and the next models scrape that web. So increasingly, a model's training data was written by an earlier model. The question this raises: if you keep training models on the output of previous models, <em>generation after generation</em>, what happens to what they know?", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">human data → model v1<br>model v1 output → web<br>web (now part AI) → model v2<br>model v2 output → web<br>…<br><br>❓ where does this end up?</div>`, code:`# each new model trains on a web that is
+# increasingly made of OLDER models' output
+data_v2 = scrape_web()      # part human, part AI-generated
+model_v2 = train(data_v2)
+# repeat for v3, v4, ...  -> a recursive loop.` },
+ { title:"2. The recursive loop, made precise", why:"Strip it to the essentials. Generation 0 is real data. To make generation <em>t+1</em>, you <strong>fit a model</strong> to generation <em>t</em>, then <strong>sample</strong> new data from that model — and that synthetic data becomes the training set for the next round. Crucially, the real data is <em>never looked at again</em>. That's the exact loop running live in LOOK ①.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">gen 0 = real sample<br><br>fit model to gen t<br>↓<br>sample gen t+1 from it<br>↓<br>repeat<br><br>real data: never seen again</div>`, code:`sample = draw_from_real(n)        # gen 0
+for t in range(generations):
+    model  = fit(sample)          # train on current data
+    sample = model.sample(n)      # its output = next training set
+# no fresh real data enters the loop.` },
+ { title:"3. Finite samples miss the rare cases", why:"Any finite sample is a lottery — and rare events almost never win. If a subpopulation is 3% of the world and you draw 30 points, you'll often get <em>zero</em> of them. Fit a model to that sample and it assigns those cases ~zero probability, so they can't appear next round. <strong>The tails die first.</strong> Rare styles, dialects, minority topics, unusual images — the long tail is exactly what a finite resample throws away.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">real: •••••••••• ◦   (◦ = rare, 3%)<br>sample 30 → often NO ◦<br><br>model: P(◦) ≈ 0<br>next gen: ◦ gone forever<br><br>📉 tails vanish FIRST</div>`, code:`# a 3% subgroup, sampled n=30 times:
+#   P(zero of them) = 0.97**30 ≈ 40%
+# if none are sampled, the fit gives them ~0 probability
+# -> they cannot reappear in the next generation.
+# rare = fragile.  the long tail erodes first.` },
+ { title:"4. A simple model smears structure toward the average", why:"Real data has structure — multiple modes, skew, a tail. But a model has limited capacity. Fit a <em>single</em> Gaussian to two-humped data and it can only produce one hump, centred on the <strong>average</strong> of the two. The distinct groups blur into a bland middle that matches <em>neither</em>. Even a perfect sampler can't fix a model that simply cannot represent the shape it was shown.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">real:   /\\    /\\   (two modes)<br>fit 1 Gaussian:<br>         ___<br>        /   \\      (one blob, in the middle)<br><br>→ modes merge toward the average</div>`, code:`# single Gaussian fit to bimodal data:
+mean = average(all_points)   # sits BETWEEN the two modes
+# it can only draw one hump around that mean
+# -> the two real groups collapse into a bland middle
+#    that matched neither of them. (expressivity error)` },
+ { title:"5. The spread shrinks a little every generation", why:"Here's the quiet killer. When you estimate variance from <em>n</em> points and resample, the new sample's expected variance is about <code>(n-1)/n</code> of the old — a hair smaller. Feed it back as the new truth and that hair <strong>compounds</strong>: after <em>t</em> rounds the spread is <code>((n-1)/n)^t</code>, heading to zero. Smaller samples shrink faster. Even an unbiased estimator collapses, because variance becomes a random walk whose only stable resting point is zero.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">var_t+1 ≈ (n−1)/n · var_t<br><br>×0.98 ×0.98 ×0.98 …<br>= (0.98)^t → 0<br><br>smaller n → shrinks faster<br>📉 spread → 0</div>`, code:`# resample n points from a dist of variance V:
+#   E[ sample_variance ] = (n-1)/n * V   (a touch smaller)
+# recursion: var_t ≈ ((n-1)/n)**t * var_0  ->  0
+# n = 25:  0.96 per round; n = 8: 0.875 -> collapses fast.
+# the spread bleeds out one generation at a time.` },
+ { title:"6. Errors compound — there's no correction signal", why:"In a normal training run, real data keeps the model honest — mistakes get corrected against reality. In the recursive loop there is <strong>no reality to check against</strong>: each generation's errors become the next generation's ground truth. Sampling error, expressivity error, and estimation error all <strong>accumulate</strong> and reinforce each other. Small drifts today are baked in as 'truth' tomorrow.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">gen t error<br>↓ becomes<br>gen t+1 "truth"<br>↓ adds its own error<br>gen t+2 "truth"<br><br>no anchor → drift compounds</div>`, code:`# normal training: real data corrects mistakes each step
+# recursive training: the model's OWN output is the target
+#   error_total = sampling + expressivity + estimation
+#   ...and it accumulates, round after round,
+#   with nothing pulling it back toward reality.` },
+ { title:"7. Early collapse vs late collapse", why:"Collapse has two phases. <strong>Early collapse</strong>: the model loses the tails and the minority modes — the rare, the unusual, the diverse. The distribution still looks roughly right but has quietly lost its edges. <strong>Late collapse</strong>: the remaining mass keeps narrowing until the model produces almost the <em>same thing every time</em> — low variance, low diversity, everything converging to a bland average. LOOK ① walks you through both.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">EARLY: tails & minorities gone<br>(looks fine, secretly narrowed)<br><br>LATE: one bland peak<br>(every sample ~ the same)<br><br>diversity → 0</div>`, code:`# early collapse: rare_mass -> 0   (tails first)
+# late  collapse: variance  -> 0   (one value)
+# symptom in generative models:
+#   outputs get repetitive, generic, "average";
+#   uncommon topics/styles/faces disappear.` },
+ { title:"8. Why it matters for real models", why:"This isn't just a toy. As synthetic text and images flood the internet, naively scraping the web risks training on your predecessors' output — degrading quality, diversity and factual coverage over successive model generations. It makes <strong>verified human data increasingly valuable</strong> (some compare pre-2023 data to 'low-background' steel — clean because it predates the contamination). It also compounds bias: whoever is under-represented today gets erased faster tomorrow.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">web fills with AI output<br>↓<br>next model trains on it<br>↓<br>quality & diversity decay<br><br>💎 clean human data = precious</div>`, code:`# risks of naive web-scale training now:
+#   - quality/diversity decay across model generations
+#   - the long tail (rare knowledge) erodes first
+#   - existing biases amplify (minorities erased faster)
+# -> provenance & data curation become first-class problems.` },
+ { title:"9. The fix: keep real data in the mix", why:"The defence is simple and provable. <strong>Don't train purely on synthetic data</strong> — mix in a slice of real human data every generation, and it re-injects the tails and the spread, so the recursion settles at a stable floor instead of vanishing (LOOK ② shows this). Better still, <strong>accumulate</strong> real data rather than replace it, and <strong>filter/verify</strong> synthetic data before reusing it (exactly the Day 39 lesson). Anchor to originals and collapse is avoided.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">each gen: (1−p) synthetic<br>          + p REAL data<br><br>tails + spread re-injected<br>→ spread PLATEAUS, not 0<br><br>✅ collapse avoided</div>`, code:`# the fix: mix a fraction p of REAL data every round
+sample = 0.8 * model.sample(n) + 0.2 * draw_from_real(n)
+# also: ACCUMULATE real data (don't replace it),
+#       and FILTER/verify synthetic before reusing it (Day 39).
+# p even ~10-20% is enough to stop the collapse.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>

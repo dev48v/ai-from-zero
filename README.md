@@ -50,6 +50,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 41 — Emergent Abilities](https://dev48v.infy.uk/ai/days/day41-emergent-abilities.html) — `day41-emergent-abilities.html`
 - [AIFromZero · Day 42 — World Models](https://dev48v.infy.uk/ai/days/day42-world-models.html) — `day42-world-models.html`
 - [AIFromZero · Day 43 — State-Space Models / Mamba](https://dev48v.infy.uk/ai/days/day43-state-space-models.html) — `day43-state-space-models.html`
+- [AIFromZero · Day 44 — Model Collapse](https://dev48v.infy.uk/ai/days/day44-model-collapse.html) — `day44-model-collapse.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
