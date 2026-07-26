@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 45 — Diffusion Language Models</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  @keyframes pop { 0% { transform:scale(.82); } 60% { transform:scale(1.06); } 100% { transform:scale(1); } }
+  @keyframes flipfix { 0% { background:#fffbeb; } 100% { background:#ecfdf5; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  input[type=range]{ accent-color:#6366f1; }
+  /* token chips */
+  .grid-toks { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; }
+  .tok { position:relative; min-width:46px; padding:8px 10px 9px; border-radius:9px; text-align:center;
+         font-family: ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:13px; font-weight:600;
+         border:1.5px solid transparent; transition:background .2s, border-color .2s; }
+  .tok .meter { position:absolute; left:6px; right:6px; bottom:3px; height:3px; border-radius:2px; background:#e2e8f0; overflow:hidden; }
+  .tok .meter > span { display:block; height:100%; background:#6366f1; }
+  .tok-mask { background:#f1f5f9; color:#94a3b8; border-color:#e2e8f0; }
+  .tok-next { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.15); }
+  .tok-confident { background:#eef2ff; color:#3730a3; border-color:#c7d2fe; animation:pop .3s ease-out; }
+  .tok-tentative { background:#fffbeb; color:#b45309; border-color:#fcd34d; animation:pop .3s ease-out; }
+  .tok-revised { background:#ecfdf5; color:#047857; border-color:#6ee7b7; animation:flipfix .5s ease-out; }
+  .tok-frozen { background:#f8fafc; color:#334155; border-color:#cbd5e1; animation:pop .3s ease-out; }
+  .tok-frozen::after { content:"🔒"; position:absolute; top:-8px; right:-6px; font-size:10px; }
+  .tok-pend { background:#fff; color:#cbd5e1; border-color:#e2e8f0; border-style:dashed; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 45</div>
+      <h1 class="text-xl font-bold">🌫️ Diffusion Language Models — <strong>writing text by clearing the fog, not typing left-to-right.</strong> A normal LLM is <strong>autoregressive</strong>: it writes one token at a time, strictly left-to-right, and once a token is out it's <em>frozen</em> — it can't unsee a bad word. A <strong>diffusion LM</strong> (LLaDA, Mercury) starts from a whole sentence of <strong>[MASK]</strong> and <strong>denoises</strong> it: at each step it predicts <em>every</em> blank at once, keeps only the <strong>most-confident</strong> ones, and repeats — so it fills many tokens <strong>in parallel, in any order</strong>, and can even go back and <strong>revise</strong> an early guess as context arrives. Fewer steps than there are tokens, and a chance to fix mistakes the left-to-right writer never gets.</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Start from a sentence of pure [MASK] — then denoise it into words, most-confident-first</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Every slot below begins as <span class="mono">[MASK]</span>. Each <strong>denoise step</strong> scores <em>all</em> the blanks at once — the <span style="color:#6366f1;font-weight:700">indigo meter</span> under each mask is how confident the model is about that slot right now — and reveals the <strong>top few</strong>. Easy, predictable words (the anchors) light up first; their neighbours then gain <strong>context</strong> and become confident too, so the sentence fills <strong>outward in any order</strong>, several tokens per step. With <strong>refinement</strong> on, a word guessed early with little context appears <span style="color:#b45309;font-weight:700">amber</span> (a tentative guess) and later flips <span style="color:#047857;font-weight:700">green</span> when context corrects it — the revision a left-to-right writer can never make. Every number here is a real confidence schedule computed live in your browser, not a canned animation.</p>
+      </div>
+
+      <!-- ===================== CARD A · the denoiser ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">① The denoiser <span class="text-slate-400 normal-case font-normal">— predict every blank, keep the most-confident, repeat</span></div>
+        <p class="text-[11px] text-slate-400 mb-4"><b>+1 denoise step</b> (or <b>play</b>) scores all masked slots and unmasks the top <b>K</b> by confidence. The <span style="color:#6366f1;font-weight:700">indigo ring</span> marks the slots about to be revealed next. Raise <b>tokens per step</b> to fill faster (more parallel); toggle <b>refinement</b> to let early low-confidence guesses (<span style="color:#b45309;font-weight:700">amber</span>) be revised (<span style="color:#047857;font-weight:700">green</span>) once their neighbours arrive.</p>
+
+        <div class="grid md:grid-cols-3 gap-4 items-end mb-4">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Tokens revealed per step (K) <span id="aKVal" class="text-indigo-600 stat">2</span></label>
+            <input id="aK" type="range" min="1" max="4" value="2" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>1 (careful)</span><span>4 (very parallel)</span></div>
+          </div>
+          <div>
+            <div class="text-[12px] font-bold text-slate-600 mb-1">Refinement (revisability)</div>
+            <button id="aRevise" class="w-full px-3 py-1.5 rounded-lg font-semibold text-xs bg-emerald-600 text-white hover:bg-emerald-500">✓ ON — can revise early guesses</button>
+          </div>
+          <div>
+            <div class="text-[12px] font-bold text-slate-600 mb-1">Run the denoiser</div>
+            <div class="flex flex-wrap gap-1.5">
+              <button id="btnStepA" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-indigo-600 text-white hover:bg-indigo-500">🌫️ +1 denoise step</button>
+              <button id="btnPlayA" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-800 text-white hover:bg-slate-700">▶ Play</button>
+              <button id="btnResetA" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-200 text-slate-700 hover:bg-slate-300">⟳ Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-3 gap-4 items-stretch">
+          <div class="lg:col-span-2 bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col justify-center">
+            <div id="denoiseGrid" class="grid-toks justify-center"></div>
+            <div class="flex flex-wrap gap-3 justify-center mt-5 text-[10px] text-slate-500">
+              <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded bg-slate-100 border border-slate-300"></span>[MASK] + confidence meter</span>
+              <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded" style="background:#eef2ff;border:1px solid #c7d2fe"></span>confident reveal</span>
+              <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded" style="background:#fffbeb;border:1px solid #fcd34d"></span>tentative guess</span>
+              <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded" style="background:#ecfdf5;border:1px solid #6ee7b7"></span>revised (fixed)</span>
+            </div>
+          </div>
+          <div class="flex flex-col gap-3">
+            <div class="bg-slate-900 rounded-xl px-3 py-3 text-center">
+              <div class="text-[10px] uppercase font-bold text-slate-300">Denoise step</div>
+              <div id="stepLbl" class="text-3xl font-bold text-white mt-0.5 stat">0</div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-center">
+              <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2"><div class="text-[9px] uppercase font-bold text-indigo-500">Tokens filled</div><div id="filledVal" class="text-lg font-bold text-indigo-600 stat">0 / 11</div><div class="text-[9px] text-slate-400">any order</div></div>
+              <div class="bg-amber-50 border border-amber-200 rounded-xl p-2"><div class="text-[9px] uppercase font-bold text-amber-600">Revisions made</div><div id="revVal" class="text-lg font-bold text-amber-600 stat">0</div><div class="text-[9px] text-slate-400">early guesses fixed</div></div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-xl p-2 text-center"><div class="text-[9px] uppercase font-bold text-slate-400">Steps a left-to-right writer would need</div><div class="text-base font-bold text-slate-700 stat">11 (one per token)</div></div>
+            <div id="lookVerdict" class="rounded-lg px-3 py-2 text-[12px]"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD B · diffusion vs autoregressive race ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">② Parallel &amp; any-order vs strictly left-to-right <span class="text-slate-400 normal-case font-normal">— same sentence, two ways to write it</span></div>
+        <p class="text-[11px] text-slate-400 mb-4">Both panels build the <em>same</em> 11-token sentence. The <span style="color:#6366f1;font-weight:700">diffusion writer</span> reveals <b>K</b> most-confident tokens per step, in whatever order confidence allows. The <span style="color:#334155;font-weight:700">autoregressive writer</span> reveals <b>one</b> token per step, strictly left-to-right, and each token is <b>🔒 frozen</b> the instant it's written — it only ever sees what's to its left, and can never go back. Watch the two step counters diverge.</p>
+
+        <div class="grid md:grid-cols-2 gap-4 items-end mb-4">
+          <div>
+            <label class="text-[12px] font-bold text-slate-600 flex justify-between">Diffusion tokens per step (K) <span id="bKVal" class="text-indigo-600 stat">2</span></label>
+            <input id="bK" type="range" min="1" max="4" value="2" class="w-full">
+            <div class="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>1</span><span>4 (fewest steps)</span></div>
+          </div>
+          <div>
+            <div class="text-[12px] font-bold text-slate-600 mb-1">Run the race</div>
+            <div class="flex flex-wrap gap-1.5">
+              <button id="btnRaceStep" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-indigo-600 text-white hover:bg-indigo-500">⏭ +1 step (both)</button>
+              <button id="btnRacePlay" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-800 text-white hover:bg-slate-700">▶ Play race</button>
+              <button id="btnRaceReset" class="px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-200 text-slate-700 hover:bg-slate-300">⟳ Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div class="bg-indigo-50/40 border border-indigo-200 rounded-xl p-4">
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-[11px] font-bold text-indigo-700 uppercase">🌫️ Diffusion — parallel, any-order</div>
+              <div class="text-right"><span class="text-[9px] uppercase font-bold text-slate-400">step</span> <span id="dStepLbl" class="text-xl font-bold text-indigo-600 stat">0</span></div>
+            </div>
+            <div id="raceDGrid" class="grid-toks"></div>
+          </div>
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-[11px] font-bold text-slate-600 uppercase">➡️ Autoregressive — one token, left-to-right</div>
+              <div class="text-right"><span class="text-[9px] uppercase font-bold text-slate-400">step</span> <span id="aStepLbl" class="text-xl font-bold text-slate-700 stat">0</span></div>
+            </div>
+            <div id="raceAGrid" class="grid-toks"></div>
+          </div>
+        </div>
+
+        <div id="raceVerdict" class="rounded-lg px-3 py-2 text-[12px] mt-4"></div>
+        <div class="rounded-lg px-3 py-2 text-[11px] bg-indigo-50 border border-indigo-200 text-indigo-800 mt-3">
+          🔎 <b>Why parallel wins on steps — and any-order wins on quality.</b> An <b>N</b>-token sentence takes the autoregressive writer <b>N</b> steps, always. The diffusion writer needs about <b>⌈N/K⌉</b> steps, because it commits several tokens at once — and it commits the <em>easy, confident</em> ones first, then lets their context resolve the hard ones (instead of being forced to guess left-to-right before the right-hand context exists). Because nothing is frozen until the model chooses, it can also <b>re-mask and rewrite</b> a slot it now thinks is wrong. The catch: predicting every position each step is more compute per step, and it can't reuse a KV-cache the way a left-to-right decoder does — so real systems (LLaDA, Mercury) trade a bit of that for lower latency and the freedom to self-correct.
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto"><strong>Diffusion language models</strong> generate text the way image diffusion generates pictures: begin with pure noise — here a sentence of <strong>[MASK]</strong> — and <strong>denoise</strong> it over a handful of steps. Each step predicts every blank at once and keeps only the <strong>most-confident</strong> tokens, so words appear <strong>in parallel and in any order</strong>, easy anchors first, hard tokens once their context exists. Unlike an autoregressive model — which writes strictly left-to-right and <strong>freezes each token forever</strong> — a diffusion LM can <strong>revise an early guess</strong>, and finishes in <strong>fewer steps than there are tokens</strong>. It's a genuinely different bet from both the transformer default and from <strong>Mamba (Day 43)</strong>: Mamba keeps the left-to-right order but makes it linear-time; diffusion drops the left-to-right order entirely. The price is more compute per step and no free KV-cache — which is why autoregressive still dominates, while text-diffusion (LLaDA, Mercury) is the fast-moving challenger to watch.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">From "type it left-to-right" to "clear the fog everywhere at once"</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a diffusion language model from scratch</h2>
+    <p class="text-slate-500 mb-8">Reproduce the whole LOOK demo: a target sentence, a per-token confidence signal, the most-confident-first unmask schedule that fills many tokens per step in any order, the refinement pass that revises early guesses, and the left-to-right autoregressive baseline it races against. This is the exact engine powering LOOK ① and ②.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">The sentence — each token has a "how predictable" prior</h3></div>
+        <p class="text-sm text-slate-600 mb-3">In a real model a transformer scores every slot; here we stand in for it with a small, honest signal. Function words (<span class="mono">the</span>, <span class="mono">in</span>, <span class="mono">at</span>) are highly predictable → high prior; content words (<span class="mono">diffusion</span>, <span class="mono">masked</span>) are hard on their own → low prior. Each hard word also carries a plausible <em>wrong</em> guess (its distractor) for when it's forced to commit with no context.</p>
+        <div class="relative"><pre>// the target sentence + a per-token "prior" (0..1 = how predictable alone)
+const TOKENS = [
+  { w:"a",         prior:0.90, dist:null      },  // function words: easy anchors
+  { w:"diffusion", prior:0.34, dist:"language" },  // content words: hard alone
+  { w:"model",     prior:0.60, dist:"system"   },
+  { w:"fills",     prior:0.44, dist:"writes"   },
+  { w:"in",        prior:0.90, dist:null       },
+  { w:"all",       prior:0.70, dist:"some"     },
+  { w:"the",       prior:0.92, dist:null       },
+  { w:"masked",    prior:0.40, dist:"hidden"   },
+  { w:"words",     prior:0.55, dist:"tokens"   },
+  { w:"at",        prior:0.88, dist:null       },
+  { w:"once",      prior:0.66, dist:"speed"    },
+];
+const N = TOKENS.length;              // 11 slots</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">The starting point — a sentence of pure [MASK]</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Autoregressive generation starts empty and appends. Diffusion generation starts <em>full</em> — every position exists, but every one is noise (a <span class="mono">[MASK]</span> token). Generation is the process of turning that all-masked sequence into clean tokens. This is the text version of "start from a noisy image."</p>
+        <div class="relative"><pre>// every slot starts masked — the "pure noise" the model will denoise
+let seq = TOKENS.map(() => ({ revealed:false, word:"[MASK]", kind:"mask" }));
+// seeded noise so a run is reproducible but the schedule is genuinely emergent
+const noise = TOKENS.map((_,i) => (rand()*0.12 - 0.06));   // tiny ±0.06 jitter</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Confidence — prior plus context from revealed neighbours</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The key signal. A slot's confidence is its own predictability <em>plus</em> a bonus for every <strong>already-revealed neighbour</strong>. That's what makes generation spread: an isolated content word is unsure, but once the words around it are known, its meaning is pinned down and confidence jumps. Real diffusion LMs read this off the model's own token probabilities each step.</p>
+        <div class="relative"><pre>function revealedNeighbours(seq, i){
+  let n = 0;
+  if (i > 0     &amp;&amp; seq[i-1].revealed) n++;
+  if (i < N-1   &amp;&amp; seq[i+1].revealed) n++;
+  return n;                                   // 0, 1 or 2
+}
+function confidence(seq, i){
+  return TOKENS[i].prior                       // predictable on its own?
+       + 0.26 * revealedNeighbours(seq, i)     // + context as neighbours land
+       + noise[i];                             // + a touch of jitter
+}
+const THRESH = 0.72;   // above this, the model is sure enough to commit cleanly</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">The schedule — unmask the top-K most confident, every step</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Here is the whole trick. Each step, score all the <em>masked</em> slots, sort by confidence, and reveal the best <code>K</code> of them at once — multiple tokens, in confidence order, not left-to-right. Bigger <code>K</code> = more parallel = fewer steps. The anchors go first; each reveal raises its neighbours' confidence, so the next step's winners are usually right next door.</p>
+        <div class="relative"><pre>function denoiseStep(seq, K){
+  const masked = [];
+  for (let i=0;i&lt;N;i++) if (!seq[i].revealed) masked.push(i);
+  masked.sort((a,b) =&gt; confidence(seq,b) - confidence(seq,a));  // most-confident first
+  for (const i of masked.slice(0, K)){        // reveal K at once, any order
+    const sure = confidence(seq,i) &gt;= THRESH;
+    seq[i] = sure || !TOKENS[i].dist
+      ? { revealed:true, word:TOKENS[i].w,   kind:"confident" }  // commit clean
+      : { revealed:true, word:TOKENS[i].dist, kind:"tentative", i }; // a guess (step 5 fixes it)
+  }
+}
+// steps to finish ≈ ceil(N / K)   — fewer than N, the autoregressive count</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Refinement — revise a guess once context arrives</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A slot revealed early, before its neighbours existed, is only a <em>tentative</em> guess (amber). Diffusion's superpower: it isn't frozen. Each step, before unmasking, re-check every tentative slot — now that context has landed, its confidence has climbed past the threshold, so overwrite the guess with the correct word (green). This is the correction an autoregressive model structurally cannot make.</p>
+        <div class="relative"><pre>function refine(seq){                    // run at the START of each step
+  for (let i=0;i&lt;N;i++){
+    if (seq[i].kind === "tentative" &amp;&amp; confidence(seq,i) &gt;= THRESH){
+      seq[i] = { revealed:true, word:TOKENS[i].w, kind:"revised" };  // fix it
+    }
+  }
+}
+// early guess "language"  --(neighbours 'a','model' land)-->  "diffusion"
+// nothing is ever locked until the model itself is confident.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">The baseline — autoregressive, one token, left-to-right, frozen</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The model to beat. It reveals slot 0, then 1, then 2 — one per step, in order — and each token, once written, only ever saw what was to its left and can never change. That's <code>N</code> steps and no second chances. Put the two side by side and the trade-off is the whole story: left-to-right is simple and cache-friendly; diffusion is parallel, any-order, and revisable.</p>
+        <div class="relative"><pre>function autoregressiveStep(seq, cursor){
+  seq[cursor] = { revealed:true, word:TOKENS[cursor].w, kind:"frozen" }; // 🔒 forever
+  return cursor + 1;                    // strictly left-to-right, one at a time
+}
+// diffusion : ceil(11 / K) steps, any order, can revise   (LLaDA, Mercury)
+// autoregr. : 11 steps, fixed order, frozen                (GPT-style default)
+// Mamba (Day 43): still left-to-right, but linear-time instead of n^2.
+// diffusion's bet is different again: drop the left-to-right order entirely.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 45 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2"><strong>Diffusion language models</strong> write text by <strong>denoising</strong>, not by typing. They start from a whole sequence of <strong>[MASK]</strong> and, over a few steps, predict every blank at once and keep only the <strong>most-confident</strong> tokens — so words appear <strong>in parallel and in any order</strong>, easy anchors first, hard words once their context exists. Because nothing is frozen until the model is sure, they can <strong>revise an early guess</strong> — the fix a left-to-right, autoregressive model can never make — and they finish in <strong>fewer steps than there are tokens</strong>. The cost is more compute per step and no free KV-cache, which is why autoregressive still dominates while <strong>text-diffusion (LLaDA, Mercury) is the challenger to watch</strong>. It sits alongside <strong>Mamba (Day 43)</strong> as a serious rethink of the transformer default — Mamba keeps the order and makes it cheap; diffusion throws the order out. <strong>👉 Tomorrow — Day 46: continuing AIFromZero.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+  if (t.dataset.tab === "look") renderAll();
+});
+
+const $ = id => document.getElementById(id);
+
+/* DIFFUSION-ENGINE-START */
+// ===== Day 45 · Diffusion Language Models — client-side, REAL confidence schedule, no ML library =====
+//
+// THE IDEA: start from an all-[MASK] sentence and DENOISE it.
+//   each step scores EVERY masked slot, then unmasks the top-K by confidence (parallel, any-order).
+//   confidence(i) = prior[i] (how predictable alone) + 0.26*revealed-neighbours + tiny noise.
+//   -> easy "anchor" words reveal first; their context then makes neighbours confident -> it spreads.
+//   REFINEMENT: a slot revealed early with no context is a TENTATIVE guess (shows a distractor);
+//   once neighbours arrive its confidence crosses THRESH and it is REVISED to the true word.
+// Contrast: an autoregressive writer reveals slot 0,1,2,... one per step and FREEZES each forever.
+
+// --- seeded RNG so a run is reproducible (mulberry32) ---
+let RND = mulberry32(20260726);
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function rand(){ return RND(); }
+
+// --- the target sentence: each token has a prior (how predictable alone) + a plausible wrong guess ---
+const TOKENS = [
+  { w:"a",         prior:0.90, dist:null      },
+  { w:"diffusion", prior:0.34, dist:"language" },
+  { w:"model",     prior:0.60, dist:"system"   },
+  { w:"fills",     prior:0.44, dist:"writes"   },
+  { w:"in",        prior:0.90, dist:null       },
+  { w:"all",       prior:0.70, dist:"some"     },
+  { w:"the",       prior:0.92, dist:null       },
+  { w:"masked",    prior:0.40, dist:"hidden"   },
+  { w:"words",     prior:0.55, dist:"tokens"   },
+  { w:"at",        prior:0.88, dist:null       },
+  { w:"once",      prior:0.66, dist:"speed"    },
+];
+const N = TOKENS.length;
+const THRESH = 0.72;
+let NOISE = TOKENS.map(() => 0);
+
+// confidence of slot i given a sequence's current reveal state
+function neigh(seq, i){ let n = 0; if (i > 0 && seq[i-1].revealed) n++; if (i < N-1 && seq[i+1].revealed) n++; return n; }
+function conf(seq, i){ return TOKENS[i].prior + 0.26 * neigh(seq, i) + NOISE[i]; }
+
+function freshSeq(){ return TOKENS.map(() => ({ revealed:false, word:"[MASK]", kind:"mask" })); }
+/* DIFFUSION-ENGINE-END */
+
+// generic token-grid renderer
+function renderGrid(el, seq, nextSet){
+  let h = "";
+  for (let i = 0; i < N; i++){
+    const s = seq[i];
+    if (!s.revealed){
+      const c = Math.max(0, Math.min(1, conf(seq, i) / 1.2));
+      const ring = nextSet && nextSet.has(i) ? " tok-next" : "";
+      h += `<div class="tok tok-mask${ring}" title="confidence ${conf(seq,i).toFixed(2)}">[MASK]<div class="meter"><span style="width:${(c*100).toFixed(0)}%"></span></div></div>`;
+    } else {
+      h += `<div class="tok tok-${s.kind}">${s.word}</div>`;
+    }
+  }
+  el.innerHTML = h;
+}
+
+// ============================ CARD A · the denoiser ============================
+const A = { K:2, revise:true, step:0, seq:[], revisions:0, playing:false, timer:null };
+
+function resetA(){
+  stopPlayA();
+  RND = mulberry32(20260726);
+  NOISE = TOKENS.map(() => rand()*0.12 - 0.06);
+  A.step = 0; A.revisions = 0; A.seq = freshSeq();
+}
+
+function nextSetA(){
+  const masked = [];
+  for (let i = 0; i < N; i++) if (!A.seq[i].revealed) masked.push(i);
+  masked.sort((a,b) => conf(A.seq,b) - conf(A.seq,a));
+  return new Set(masked.slice(0, A.K));
+}
+
+function doneA(){
+  const allRev = A.seq.every(s => s.revealed);
+  const anyTent = A.seq.some(s => s.kind === "tentative");
+  return allRev && !anyTent;
+}
+
+function stepA(){
+  if (doneA()) return;
+  // 1) refinement pass — revise tentative slots whose context now makes them confident
+  if (A.revise){
+    for (let i = 0; i < N; i++){
+      if (A.seq[i].kind === "tentative" && conf(A.seq, i) >= THRESH){
+        A.seq[i] = { revealed:true, word:TOKENS[i].w, kind:"revised" };
+        A.revisions++;
+      }
+    }
+  }
+  // 2) unmask pass — reveal top-K most-confident masked slots
+  const masked = [];
+  for (let i = 0; i < N; i++) if (!A.seq[i].revealed) masked.push(i);
+  masked.sort((a,b) => conf(A.seq,b) - conf(A.seq,a));
+  for (const i of masked.slice(0, A.K)){
+    const sure = conf(A.seq, i) >= THRESH;
+    if (A.revise && !sure && TOKENS[i].dist){
+      A.seq[i] = { revealed:true, word:TOKENS[i].dist, kind:"tentative" };  // a guess in the dark
+    } else {
+      A.seq[i] = { revealed:true, word:TOKENS[i].w, kind:"confident" };
+    }
+  }
+  A.step++;
+}
+
+function renderCardA(){
+  $("aKVal").textContent = A.K;
+  const btn = $("aRevise");
+  if (A.revise){ btn.textContent = "✓ ON — can revise early guesses"; btn.className = "w-full px-3 py-1.5 rounded-lg font-semibold text-xs bg-emerald-600 text-white hover:bg-emerald-500"; }
+  else { btn.textContent = "✗ OFF — commit on first reveal"; btn.className = "w-full px-3 py-1.5 rounded-lg font-semibold text-xs bg-slate-300 text-slate-700 hover:bg-slate-400"; }
+
+  const filled = A.seq.filter(s => s.revealed).length;
+  const done = doneA();
+  renderGrid($("denoiseGrid"), A.seq, done ? null : nextSetA());
+  $("stepLbl").textContent = A.step;
+  $("filledVal").textContent = filled + " / " + N;
+  $("revVal").textContent = A.revisions;
+
+  const v = $("lookVerdict");
+  const tent = A.seq.filter(s => s.kind === "tentative").length;
+  if (A.step === 0){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-slate-100 border border-slate-200 text-slate-700";
+    v.innerHTML = `<b>All 11 slots are [MASK].</b> The indigo meters show the model's confidence per slot — the <b>ringed</b> ones reveal next. Press <b>+1 denoise step</b> to start clearing the fog.`;
+  } else if (done){
+    const cmp = A.step < N;
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = `✅ <b>Denoised in ${A.step} step${A.step===1?"":"s"}.</b> ${cmp ? `A left-to-right writer needs <b>11</b> — that's <b>${(N/A.step).toFixed(1)}×</b> fewer steps here.` : ``} ${A.revisions>0 ? `Along the way <b>${A.revisions}</b> early guess${A.revisions===1?" was":"es were"} revised once context arrived — something a frozen left-to-right token can never do.` : `Every reveal was confident on the first try.`}`;
+  } else if (tent > 0){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-amber-50 border border-amber-200 text-amber-800";
+    v.innerHTML = `⚠️ <b>${tent} tentative guess${tent===1?"":"es"} on the board.</b> A hard word was revealed with little context (amber). Keep stepping — as its neighbours land, its confidence will cross the line and it'll be <b>revised</b> to the right word (green).`;
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-indigo-50 border border-indigo-200 text-indigo-800";
+    v.innerHTML = `🌫️ <b>${filled} / ${N} filled after ${A.step} step${A.step===1?"":"s"}.</b> Notice the order isn't left-to-right — the <b>most-confident</b> slots win, and each reveal boosts its neighbours' confidence for the next step.`;
+  }
+}
+
+function stopPlayA(){ if (A.timer){ clearInterval(A.timer); A.timer = null; } A.playing = false; const b = $("btnPlayA"); if (b) b.textContent = "▶ Play"; }
+$("btnPlayA").onclick = () => {
+  if (A.playing){ stopPlayA(); return; }
+  if (doneA()) resetA();
+  A.playing = true; $("btnPlayA").textContent = "⏸ Pause";
+  A.timer = setInterval(() => { if (doneA()){ stopPlayA(); renderCardA(); return; } stepA(); renderCardA(); }, 620);
+};
+$("btnStepA").onclick = () => { stopPlayA(); if (doneA()) resetA(); else stepA(); renderCardA(); };
+$("btnResetA").onclick = () => { resetA(); renderCardA(); };
+$("aRevise").onclick = () => { A.revise = !A.revise; resetA(); renderCardA(); };
+$("aK").oninput = e => { A.K = +e.target.value; resetA(); renderCardA(); };
+
+// ============================ CARD B · diffusion vs autoregressive race ============================
+const R = { K:2, dSeq:[], aSeq:[], dStep:0, aStep:0, cursor:0, playing:false, timer:null };
+
+function resetR(){
+  stopPlayR();
+  // independent noise so the race schedule is its own real run
+  const save = RND; RND = mulberry32(424242);
+  NOISE_R = TOKENS.map(() => rand()*0.12 - 0.06);
+  RND = save;
+  R.dSeq = freshSeq(); R.aSeq = freshSeq();
+  R.dStep = 0; R.aStep = 0; R.cursor = 0;
+}
+let NOISE_R = TOKENS.map(() => 0);
+function confR(seq, i){ return TOKENS[i].prior + 0.26 * neigh(seq, i) + NOISE_R[i]; }
+
+function dDoneR(){ return R.dSeq.every(s => s.revealed); }
+function aDoneR(){ return R.aSeq.every(s => s.revealed); }
+function raceDone(){ return dDoneR() && aDoneR(); }
+
+function stepR(){
+  // diffusion side: reveal top-K most-confident masked (pure parallel, no tentative here)
+  if (!dDoneR()){
+    const masked = [];
+    for (let i = 0; i < N; i++) if (!R.dSeq[i].revealed) masked.push(i);
+    masked.sort((a,b) => confR(R.dSeq,b) - confR(R.dSeq,a));
+    for (const i of masked.slice(0, R.K)) R.dSeq[i] = { revealed:true, word:TOKENS[i].w, kind:"confident" };
+    R.dStep++;
+  }
+  // autoregressive side: reveal exactly one slot, strictly left-to-right, frozen
+  if (!aDoneR()){
+    R.aSeq[R.cursor] = { revealed:true, word:TOKENS[R.cursor].w, kind:"frozen" };
+    R.cursor++; R.aStep++;
+  }
+}
+
+function renderCardB(){
+  $("bKVal").textContent = R.K;
+  // highlight the diffusion side's next winners
+  let nextD = null;
+  if (!dDoneR()){
+    const masked = [];
+    for (let i = 0; i < N; i++) if (!R.dSeq[i].revealed) masked.push(i);
+    masked.sort((a,b) => confR(R.dSeq,b) - confR(R.dSeq,a));
+    nextD = new Set(masked.slice(0, R.K));
+  }
+  renderGrid($("raceDGrid"), R.dSeq, nextD);
+  // NOTE: renderGrid uses conf() for mask meters; refresh NOISE to race noise for a faithful meter
+  renderGrid($("raceAGrid"), R.aSeq, null);
+  $("dStepLbl").textContent = R.dStep;
+  $("aStepLbl").textContent = R.aStep;
+
+  const v = $("raceVerdict");
+  if (R.dStep === 0){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-slate-100 border border-slate-200 text-slate-700";
+    v.innerHTML = `Both start from all-[MASK]. Press <b>+1 step</b> and watch the diffusion side fill <b>${R.K}</b> at a time in confidence order, while the autoregressive side crawls one slot left-to-right.`;
+  } else if (raceDone()){
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800";
+    v.innerHTML = `🏁 <b>Diffusion finished in ${R.dStep} steps; autoregressive took ${R.aStep}.</b> Same sentence — the diffusion writer committed several confident tokens per step in any order (≈⌈${N}/${R.K}⌉), the autoregressive writer was locked to one-per-step, left-to-right, each token 🔒 frozen the moment it appeared.`;
+  } else {
+    v.className = "rounded-lg px-3 py-2 text-[12px] bg-indigo-50 border border-indigo-200 text-indigo-800";
+    v.innerHTML = `🌫️ Diffusion has filled <b>${R.dSeq.filter(s=>s.revealed).length}/${N}</b> in <b>${R.dStep}</b> step${R.dStep===1?"":"s"}; autoregressive <b>${R.aSeq.filter(s=>s.revealed).length}/${N}</b> in <b>${R.aStep}</b>. The gap is parallelism.`;
+  }
+}
+
+// the race grid needs its mask-meters computed with race noise; wrap render to swap NOISE briefly
+function renderRaceGrids(){
+  const save = NOISE; NOISE = NOISE_R;   // so renderGrid's conf() meter matches the race
+  renderCardB();
+  NOISE = save;
+}
+
+function stopPlayR(){ if (R.timer){ clearInterval(R.timer); R.timer = null; } R.playing = false; const b = $("btnRacePlay"); if (b) b.textContent = "▶ Play race"; }
+$("btnRacePlay").onclick = () => {
+  if (R.playing){ stopPlayR(); return; }
+  if (raceDone()) resetR();
+  R.playing = true; $("btnRacePlay").textContent = "⏸ Pause";
+  R.timer = setInterval(() => { if (raceDone()){ stopPlayR(); renderRaceGrids(); return; } stepR(); renderRaceGrids(); }, 650);
+};
+$("btnRaceStep").onclick = () => { stopPlayR(); if (raceDone()) resetR(); else stepR(); renderRaceGrids(); };
+$("btnRaceReset").onclick = () => { resetR(); renderRaceGrids(); };
+$("bK").oninput = e => { R.K = +e.target.value; resetR(); renderRaceGrids(); };
+
+function renderAll(){ renderCardA(); renderRaceGrids(); }
+resetA(); resetR(); renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. The usual way: left-to-right, one token at a time", why:"Almost every LLM you've used — GPT, Claude, Llama — is <strong>autoregressive</strong>. It generates text like a person typing: predict the next token, append it, then predict the next one from everything written so far. One token per forward pass, strictly left-to-right, start to finish. It's simple, it parallelises cleanly during training, and a KV-cache makes each new token cheap. This left-to-right assumption is so standard that most people think it's just <em>what generating text means</em> — but it's a design choice, not a law.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">step 1:  The __ __ __ __<br>step 2:  The cat __ __ __<br>step 3:  The cat sat __ __<br>step 4:  The cat sat on __<br>step 5:  The cat sat on it<br><br>one token · left → right · N steps</div>`, code:`# autoregressive generation: append one token at a time
+tokens = ["<start>"]
+for step in range(N):
+    logits = model(tokens)          # look ONLY at what's written so far
+    tokens.append(sample(logits))   # commit the next token, move right
+# exactly N passes for N tokens, in fixed order.` },
+ { title:"2. The catch: you can't unsee a bad token", why:"Because it's strictly left-to-right, an autoregressive model must commit token <em>t</em> using only tokens <em>1…t-1</em> — it has <strong>no access to the future</strong>. If a later word would have implied a better choice earlier, too bad: the earlier token is already written and <strong>frozen</strong>. There's no going back to edit it. (Sampling tricks like beam search only shuffle which greedy path you keep; they don't let a committed token change once the sentence moves on.) That one-way, no-eraser property is the specific limitation diffusion sets out to remove.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">wrote:  "I saw her duck __"<br>          🔒        🔒<br>meant a bird? or crouch?<br>the later word decides —<br>but "duck" is already frozen<br><br>❌ no edit · no undo</div>`, code:`# token t can only condition on tokens < t
+p(token_t) = model(token_1 ... token_{t-1})
+# it CANNOT see token_{t+1}, token_{t+2}, ...
+# once sampled, token_t is fixed for the rest of the run.
+# -> early commitments can't be revised by later context.` },
+ { title:"3. A different idea: start from all-[MASK]", why:"Diffusion flips the setup. Instead of building the sentence up from nothing, you begin with the <strong>whole sequence already there</strong> — but every position is <strong>noise</strong>, represented by a special <span class='mono'>[MASK]</span> token. Generation is no longer 'append the next word'; it's 'take this fully-corrupted sequence and <strong>clean it up</strong>.' This is exactly how image diffusion works — start from a screen of static and remove noise until a picture appears — ported to text, where 'noise' means masked tokens. The model was trained by masking real sentences and learning to fill them back in.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">start:  [M][M][M][M][M][M]<br>            ↓ denoise<br>        [M][cat][M][M][M][M]<br>            ↓ denoise<br>        [the][cat][M][on][M][M]<br>            ↓ …<br>        the cat sat on the mat</div>`, code:`# diffusion starts FULL but corrupted, then denoises
+seq = ["[MASK]"] * N          # the whole sentence, all noise
+for step in range(T):         # a handful of denoise steps
+    seq = denoise(seq)        # replace some masks with real tokens
+# generation = removing noise, not appending words.` },
+ { title:"4. Denoise = predict every masked slot at once", why:"The core move. At each step the model looks at the <em>entire</em> current sequence — masks and revealed words together — and predicts a token (with a confidence) for <strong>every masked position simultaneously</strong>. Crucially it's <strong>bidirectional</strong>: each blank is predicted using context on <em>both</em> sides, not just the left. So unlike the autoregressive model, a slot in the middle already 'sees' hints from words to its right. One forward pass gives you a best guess for all the blanks at once.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">[the][M][sat][M][the][mat]<br>         ↑         ↑<br>predict BOTH blanks at once,<br>each using LEFT + RIGHT context<br><br>→ "cat" (0.81) · "on" (0.74)</div>`, code:`# one pass predicts a distribution for EVERY masked slot
+preds = model(seq)                 # bidirectional: sees both sides
+for i in masked_positions(seq):
+    guess[i]      = argmax(preds[i])
+    confidence[i] = max(softmax(preds[i]))   # how sure, per slot` },
+ { title:"5. Keep only the confident ones (confidence-based unmasking)", why:"If you accepted <em>all</em> the guesses at once you'd get garbage — the hard slots are still unsure. So the schedule only <strong>commits the most-confident K predictions</strong> this step and leaves the rest masked for next time. This is the heart of the method: the model reveals the words it's <em>sure</em> about first (the easy anchors — function words, obvious continuations) and defers the genuinely ambiguous ones. It's parallel (many tokens per step) and <strong>any-order</strong> (confidence, not position, decides who goes next).", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">guesses + confidence:<br>"the"0.95  "cat"0.62  "on"0.91<br>       ↓ keep top-2, remask rest<br>"the"✓    [M]        "on"✓<br><br>most-confident-first, not left-first</div>`, code:`def denoise_step(seq, K):
+    preds = model(seq)
+    masked = [i for i in range(N) if seq[i]=="[MASK]"]
+    masked.sort(key=lambda i: -confidence(preds,i)) # surest first
+    for i in masked[:K]:                # commit only the top K
+        seq[i] = argmax(preds[i])       # the rest stay masked
+    return seq                          # K tokens land per step, any order` },
+ { title:"6. Iterate: context makes the rest confident", why:"Why does deferring work? Because every token you reveal becomes <strong>context</strong> for the ones still masked. A content word alone is a coin-flip; the same word surrounded by known neighbours is nearly determined. So the model doesn't guess the hard tokens in the dark — it <strong>waits</strong> until the anchors around them are in place, then they become confident and get revealed. The sentence resolves outward from its certain points, a few tokens at a time, and the whole thing is clean after only a handful of steps.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">step1: [M][M] in the [M] words<br>step2: fills [M] in the [M] words<br>step3: fills all in the [M] words<br>step4: fills all in the masked words<br><br>hard words wait for their context</div>`, code:`# confidence(i) rises as neighbours get revealed
+def confidence(seq, i):
+    return prior[i] + w * revealed_neighbours(seq, i)
+# an isolated hard word: low  -> stays masked
+# once its neighbours land : high -> gets revealed next
+# -> the sequence resolves from certain -> uncertain.` },
+ { title:"7. Revisability: fix an early guess", why:"Here's the property autoregressive can't match. Because tokens aren't frozen on contact, a diffusion model can <strong>re-mask and rewrite</strong> a slot it now believes is wrong. Some samplers do this explicitly — each step they remask the <em>least</em>-confident revealed tokens and predict them again with the newer, richer context. So an early guess made with little information isn't a permanent mistake: when the context arrives, the model goes back and <strong>corrects it</strong>. The LOOK demo shows exactly this — an amber tentative guess flipping green once its neighbours land.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">early: fills in some [M] words<br>              ↑ tentative (guessed early)<br>later: fills in all masked words<br>              ↑ context arrived → revised<br><br>🔓 nothing is frozen until it's sure</div>`, code:`def refine(seq):                 # remask-and-repredict the shaky ones
+    for i in revealed(seq):
+        if confidence(seq, i) < THRESH:
+            seq[i] = "[MASK]"    # un-commit it
+    return denoise_step(seq)     # predict again with fuller context
+# a wrong early token can be REPLACED — impossible for left-to-right.` },
+ { title:"8. Parallel + any-order = fewer steps", why:"Add it up. An N-token sentence costs an autoregressive model <strong>N</strong> forward passes — one per token, no exceptions. A diffusion model commits several tokens per step, so it needs only about <strong>⌈N/K⌉</strong> steps, and a big-K schedule can draft a whole sentence in a handful of passes. That's the headline pitch behind fast text-diffusion like <strong>Mercury</strong>. The honest catch: each diffusion pass predicts <em>all</em> positions (more compute per step), and because positions aren't generated left-to-right it can't reuse a KV-cache the way a decoder does — so 'fewer steps' doesn't automatically mean 'less total compute', but it often does mean <strong>lower latency</strong>.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">autoregressive:  N steps  (N=100 → 100)<br>diffusion K=4 : ⌈N/4⌉    (100 → 25)<br>diffusion K=8 : ⌈N/8⌉    (100 → 13)<br><br>fewer passes → lower latency<br>(but more compute per pass)</div>`, code:`# steps to generate an N-token sequence:
+autoregressive = N                 # one token per pass, always
+diffusion      = ceil(N / K)       # K tokens per pass
+# trade-off: diffusion does MORE work per pass (all positions)
+#   and gets NO free KV-cache (order isn't left-to-right)
+#   -> wins on latency/parallelism, not always on total FLOPs.` },
+ { title:"9. Trade-offs — vs autoregressive, and vs Mamba (Day 43)", why:"So why isn't everything diffusion? Autoregressive still leads on raw quality-per-FLOP and has a decade of tooling and the KV-cache behind it; diffusion LMs (<strong>LLaDA</strong>, an 8B open model; <strong>Mercury</strong>, a fast commercial one) are newer and close the gap but pay for all-position prediction. It's worth lining up against <strong>Mamba (Day 43)</strong>, the other big challenger to the transformer default: Mamba keeps the left-to-right order but replaces n² attention with a linear-time running state — cheaper <em>sequential</em> generation. Diffusion attacks a different axis entirely: it <strong>keeps attention but drops the left-to-right order</strong>, buying parallelism and revisability. Two different bets against 'autoregressive transformer' being the only way.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">              order        cost/‌step   revise?<br>Transformer   L→R          n² attn     no<br>Mamba (D43)   L→R          linear      no<br>Diffusion     ANY-order    all-pos     YES<br><br>Mamba: cheaper order · Diffusion: no order</div>`, code:`# three bets against "autoregressive transformer":
+# Transformer-AR : left-to-right, n^2 attention, frozen tokens
+# Mamba (Day 43) : left-to-right, LINEAR-time state, frozen tokens
+# Diffusion LM   : ANY-order, all-position denoise, REVISABLE
+#   real models: LLaDA (8B, open), Mercury (fast, commercial)
+# no single winner yet — different trade-offs, active research.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
