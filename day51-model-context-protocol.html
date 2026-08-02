@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 51 — Model Context Protocol (MCP)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .stat { font-variant-numeric:tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  /* ===== MCP demo ===== */
+  .node { position:relative; border:2px solid #e2e8f0; border-radius:16px; background:#fff; padding:14px 14px 16px;
+          transition:box-shadow .25s, border-color .25s, transform .25s; }
+  .node.lit { border-color:#6366f1; box-shadow:0 0 0 4px rgba(99,102,241,.18); transform:translateY(-2px); }
+  .node .role { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }
+  .node .who  { font-size:15px; font-weight:800; color:#0f172a; margin-top:1px; }
+  .node .sub  { font-size:10px; color:#64748b; margin-top:2px; line-height:1.35; }
+  .n-host   { border-left:6px solid #6366f1; }
+  .n-client { border-left:6px solid #0ea5e9; }
+  .n-server { border-left:6px solid #10b981; }
+
+  .brain { margin-top:10px; border:1.5px dashed #c7d2fe; border-radius:11px; background:#eef2ff; padding:7px 9px;
+           font-size:11px; color:#4338ca; font-weight:700; transition:all .25s; }
+  .brain.think { background:#6366f1; color:#fff; border-color:#6366f1; box-shadow:0 4px 14px rgba(99,102,241,.4); }
+
+  .rail { position:relative; flex:1; height:64px; display:flex; align-items:center; justify-content:center; min-width:90px; }
+  .wire { position:absolute; left:0; right:0; top:50%; height:3px; background:#e2e8f0; border-radius:3px; }
+  .wire.hot { background:linear-gradient(90deg,#6366f1,#10b981); }
+  .wirelbl { position:absolute; top:calc(50% + 8px); left:50%; transform:translateX(-50%);
+             font-size:9px; color:#94a3b8; font-weight:700; white-space:nowrap; background:#f1f5f9; padding:0 5px; border-radius:5px; }
+  .packet { position:absolute; top:50%; transform:translate(-50%,-50%); z-index:5;
+            font-family:ui-monospace,Menlo,Consolas,monospace; font-size:10px; font-weight:800;
+            padding:3px 8px; border-radius:8px; white-space:nowrap; box-shadow:0 3px 10px rgba(15,23,42,.25); opacity:0; }
+  .packet.req { background:#6366f1; color:#fff; }
+  .packet.res { background:#10b981; color:#fff; }
+  .packet.show { opacity:1; }
+  .packet.moveR { animation: slideR .62s ease forwards; }
+  .packet.moveL { animation: slideL .62s ease forwards; }
+  @keyframes slideR { from { left:6%; opacity:0; } 15%{opacity:1;} 85%{opacity:1;} to { left:94%; opacity:1; } }
+  @keyframes slideL { from { left:94%; opacity:0; } 15%{opacity:1;} 85%{opacity:1;} to { left:6%; opacity:1; } }
+
+  .cap { border:1.5px solid #e2e8f0; border-radius:10px; padding:8px 9px; background:#fff; transition:all .2s; }
+  .cap.on { border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,.12); }
+  .capitem { display:flex; align-items:center; gap:6px; font-size:11px; padding:2px 0; }
+  .capitem.hi { background:#ecfdf5; border-radius:6px; padding:2px 6px; margin:0 -6px; font-weight:700; }
+  .pill { display:inline-flex; align-items:center; padding:1px 7px; border-radius:999px; font-size:10px; font-weight:800; }
+
+  .beat { display:flex; gap:8px; align-items:flex-start; padding:7px 9px; border-radius:9px; font-size:11px; }
+  .beat.cur  { background:#0f172a; color:#fff; }
+  .beat.past { background:#eef2ff; color:#4338ca; }
+  .beat.fut  { color:#94a3b8; }
+  .beat .b-n { width:18px; height:18px; border-radius:999px; display:flex; align-items:center; justify-content:center;
+               font-size:10px; font-weight:800; flex:none; background:#e2e8f0; color:#475569; }
+  .beat.cur .b-n  { background:#6366f1; color:#fff; }
+  .beat.past .b-n { background:#c7d2fe; color:#4338ca; }
+
+  .kv { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11.5px; line-height:1.55; }
+  .jk { color:#93c5fd; } .js { color:#86efac; } .jn { color:#fca5a5; } .jm { color:#c4b5fd; } .jp { color:#e2e8f0; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 51</div>
+      <h1 class="text-xl font-bold">🔌 Model Context Protocol — <strong>one open standard that lets any AI app plug into any tool or data source, the way USB-C lets any laptop plug into any device.</strong> Before MCP, every AI app had to hand-write a bespoke integration for every tool it wanted to reach — <strong>M</strong> apps × <strong>N</strong> tools = <strong>M×N</strong> connectors, none reusable. MCP (an open standard from Anthropic, 2024) collapses that to <strong>M+N</strong>: an <strong>MCP host</strong> (the AI app — Claude Desktop, an IDE, an agent) runs one <strong>MCP client</strong> per connection, and each client speaks a uniform <strong>JSON-RPC</strong> protocol to an <strong>MCP server</strong> that exposes its capabilities. Write a server once and <em>every</em> MCP host can use it; write a client once and it can talk to <em>every</em> server. A server exposes three kinds of thing — <strong>tools</strong> (actions the model can invoke), <strong>resources</strong> (read-only data addressed by URI), and <strong>prompts</strong> (reusable templates). This is <em>not</em> a replacement for plain function-calling (Day 28) — MCP is the interoperable <strong>transport and discovery standard</strong> built <em>around</em> it, so the same tool works across apps without rewriting glue. Below, pick a server, watch its client handshake and <span class="mono">tools/list</span> to discover what it offers, then watch a live request flow: the model decides to call a tool → the client sends a <span class="mono">tools/call</span> over the wire → the server runs real code → the result comes back → the model answers. Every JSON-RPC message is shown as it flies.</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Pick an MCP server, watch it advertise its tools, then watch one request flow host&nbsp;↔&nbsp;client&nbsp;↔&nbsp;server</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">The <span style="color:#4338ca;font-weight:700">🖥️ host</span> is the AI app; inside it a <span style="color:#0369a1;font-weight:700">🔗 client</span> holds a 1:1 connection to one <span style="color:#047857;font-weight:700">🧰 server</span>. Choose a server below — <b>filesystem</b>, <b>github</b>, or <b>database</b>. Press <b>Step</b> to advance one JSON-RPC message, or <b>Run</b> to watch the whole exchange: <span class="mono">initialize</span> handshake → <span class="mono">tools/list</span> discovery → the user asks a question → the model decides to call a tool → the client sends <span class="mono">tools/call</span> → the server runs real code and returns a result → the model writes the answer. Every message is a real JSON-RPC 2.0 envelope, shown as it crosses the wire. It all runs in your browser — no network, just the protocol.</p>
+      </div>
+
+      <!-- ===================== CARD A · server picker + stage ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+
+        <!-- controls -->
+        <div class="flex flex-wrap items-center gap-3 mb-4">
+          <div class="inline-flex rounded-xl border border-slate-200 overflow-hidden" id="serverPick">
+            <button data-srv="filesystem" class="px-4 py-2 text-sm font-bold">📁 filesystem</button>
+            <button data-srv="github"     class="px-4 py-2 text-sm font-bold">🐙 github</button>
+            <button data-srv="database"   class="px-4 py-2 text-sm font-bold">🗄️ database</button>
+          </div>
+          <div class="flex-1"></div>
+          <button id="step" class="bg-indigo-600 text-white px-5 py-2 rounded-lg font-semibold text-sm">Step ▷</button>
+          <button id="run"  class="bg-slate-900 text-white px-5 py-2 rounded-lg font-semibold text-sm">▶ Run</button>
+          <button id="rst"  class="bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm">⟲ Reset</button>
+        </div>
+
+        <p id="viewNote" class="text-[11px] mb-4 rounded-lg px-3 py-2 bg-indigo-50 border border-indigo-200 text-indigo-800"></p>
+
+        <!-- the three nodes + wires -->
+        <div class="flex items-stretch gap-1 mb-5">
+          <div class="node n-host w-[190px]" id="nHost">
+            <div class="role text-indigo-600">🖥️ Host</div>
+            <div class="who" id="hostName">Claude Desktop</div>
+            <div class="sub">the AI app — runs one client per server</div>
+            <div class="brain" id="nModel">🧠 model — idle</div>
+          </div>
+
+          <div class="rail" id="railHC">
+            <div class="wire" id="wireHC"></div>
+            <span class="wirelbl">in-process</span>
+          </div>
+
+          <div class="node n-client w-[170px]" id="nClient">
+            <div class="role text-sky-600">🔗 Client</div>
+            <div class="who">MCP client</div>
+            <div class="sub">one per server · speaks JSON-RPC</div>
+            <div class="mt-2 text-[10px] text-slate-400" id="clientState">not connected</div>
+          </div>
+
+          <div class="rail" id="railCS">
+            <div class="wire" id="wireCS"></div>
+            <div class="packet" id="packet"></div>
+            <span class="wirelbl" id="transportLbl">stdio</span>
+          </div>
+
+          <div class="node n-server w-[190px]" id="nServer">
+            <div class="role text-emerald-600">🧰 Server</div>
+            <div class="who" id="serverName">filesystem</div>
+            <div class="sub" id="serverBlurb">read & write files on disk</div>
+            <div class="mt-2 text-[10px] text-slate-400" id="serverState">idle</div>
+          </div>
+        </div>
+
+        <!-- narration + the live JSON-RPC message -->
+        <div class="grid md:grid-cols-2 gap-4">
+          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div class="text-[10px] uppercase font-bold text-indigo-600 mb-1">What's happening</div>
+            <div id="narr" class="text-sm text-slate-700 min-h-[92px]">Press <b>Run</b> — the client will connect to the server and discover its tools.</div>
+          </div>
+          <div class="rounded-xl border border-slate-700 bg-slate-900 p-4">
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-[10px] uppercase font-bold text-slate-300">JSON-RPC message on the wire</div>
+              <div id="dir" class="text-[10px] font-bold"></div>
+            </div>
+            <pre id="msg" class="kv" style="background:transparent;padding:0;min-height:76px;">—</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD B · server capabilities ===================== -->
+      <div class="grid lg:grid-cols-3 gap-4 mb-5">
+        <div class="cap lg:col-span-1" id="capTools">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-bold text-slate-700">🔧 Tools <span class="text-slate-400 font-normal">— model-controlled</span></div>
+            <span class="pill bg-indigo-50 text-indigo-700" id="toolsBadge">tools/list</span>
+          </div>
+          <div id="toolsList" class="mt-2"></div>
+        </div>
+        <div class="cap lg:col-span-1" id="capRes">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-bold text-slate-700">📄 Resources <span class="text-slate-400 font-normal">— app-controlled</span></div>
+            <span class="pill bg-sky-50 text-sky-700">resources/list</span>
+          </div>
+          <div id="resList" class="mt-2"></div>
+        </div>
+        <div class="cap lg:col-span-1" id="capPrompts">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-bold text-slate-700">💬 Prompts <span class="text-slate-400 font-normal">— user-controlled</span></div>
+            <span class="pill bg-purple-50 text-purple-700">prompts/list</span>
+          </div>
+          <div id="promptList" class="mt-2"></div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD C · the flow timeline ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">The exchange, step by step <span class="text-slate-400 normal-case font-normal">— the lit beat is where we are now</span></div>
+        <p class="text-[11px] text-slate-400 mb-3">A full request-response cycle: a one-time <b>lifecycle handshake</b> (<span class="mono">initialize</span>), a <b>discovery</b> round (<span class="mono">tools/list</span>), then the <b>use</b> loop that repeats every time the model needs the tool. Notice discovery happens once — after that the host knows what the server can do and just issues <span class="mono">tools/call</span> whenever the model decides to.</p>
+        <div id="beats" class="grid sm:grid-cols-2 gap-1.5"></div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto"><strong>MCP</strong> is an open standard that puts a uniform, JSON-RPC client-server protocol between AI apps and the tools/data they use — so any <strong>host</strong> can use any <strong>server</strong> without bespoke glue, turning an <strong>M×N</strong> integration mess into <strong>M+N</strong>. A server exposes <strong>tools</strong> (model-invoked actions), <strong>resources</strong> (URI-addressed read-only data), and <strong>prompts</strong> (reusable templates); the client discovers them with <span class="mono">*/list</span> and invokes them with <span class="mono">*/call</span> or <span class="mono">*/read</span>. It's built <em>on</em> function-calling (Day 28), not instead of it: the model still emits a structured call, but MCP standardises how that call is discovered, transported (over <strong>stdio</strong> locally or <strong>HTTP</strong> remotely), and answered — which is why one server works in Claude Desktop, an IDE, and a custom agent alike.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">From "M×N bespoke connectors" to "one plug that fits everything"</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">MESSAGE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build an MCP exchange from the wire up</h2>
+    <p class="text-slate-500 mb-8">Reproduce the whole LOOK engine as real MCP messages: a server that declares tools, resources, and prompts; a client that handshakes with <span class="mono">initialize</span>, discovers capabilities with <span class="mono">tools/list</span>, and invokes them with <span class="mono">tools/call</span>; and the model loop that turns a user question into a tool call and a result into an answer. Every block below is a genuine JSON-RPC 2.0 envelope — the exact shapes flowing across the wire in LOOK — followed by how you'd wire it with a real SDK.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Everything is JSON-RPC 2.0</h3></div>
+        <p class="text-sm text-slate-600 mb-3">MCP is just <strong>JSON-RPC 2.0</strong> between a client and a server. A <strong>request</strong> carries an <span class="mono">id</span>, a <span class="mono">method</span>, and <span class="mono">params</span>; the matching <strong>response</strong> echoes the <span class="mono">id</span> and carries a <span class="mono">result</span> (or an <span class="mono">error</span>). One-way <strong>notifications</strong> have a method but no <span class="mono">id</span>. That's the entire envelope — tools, resources, and prompts are all just methods.</p>
+        <div class="relative"><pre>// request  (client → server) — has an id, expects a reply
+{ "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {} }
+
+// response (server → client) — echoes the id
+{ "jsonrpc": "2.0", "id": 1, "result": { "tools": [ /* … */ ] } }
+
+// notification (either direction) — no id, no reply
+{ "jsonrpc": "2.0", "method": "notifications/initialized" }</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">The lifecycle — <span class="mono">initialize</span> handshake</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Every connection opens with <span class="mono">initialize</span>: the client announces its protocol version and capabilities, the server replies with <em>its</em> capabilities and <span class="mono">serverInfo</span>. This is capability <strong>negotiation</strong> — both sides learn what the other supports before any real work. The client then sends the <span class="mono">notifications/initialized</span> notification and the session is live.</p>
+        <div class="relative"><pre>// → client announces itself
+{ "jsonrpc":"2.0", "id":0, "method":"initialize", "params":{
+    "protocolVersion":"2025-06-18",
+    "capabilities":{ "roots":{}, "sampling":{} },
+    "clientInfo":{ "name":"claude-desktop", "version":"1.0" } } }
+
+// ← server replies with what IT can do
+{ "jsonrpc":"2.0", "id":0, "result":{
+    "protocolVersion":"2025-06-18",
+    "capabilities":{ "tools":{}, "resources":{}, "prompts":{} },
+    "serverInfo":{ "name":"filesystem", "version":"0.6" } } }</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Discovery — <span class="mono">tools/list</span> advertises the catalog</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Now the client asks what the server offers. Each tool comes back with a <span class="mono">name</span>, a <span class="mono">description</span> (the model reads this to decide when to use it), and an <span class="mono">inputSchema</span> (JSON-Schema for its arguments). <span class="mono">resources/list</span> and <span class="mono">prompts/list</span> work identically. The host injects these tool definitions into the model's context — this is the bridge to function-calling (Day 28).</p>
+        <div class="relative"><pre>// → what can you do?
+{ "jsonrpc":"2.0", "id":1, "method":"tools/list", "params":{} }
+
+// ← the advertised tools (schema drives the model's call)
+{ "jsonrpc":"2.0", "id":1, "result":{ "tools":[
+  { "name":"read_file",
+    "description":"Return the contents of a file",
+    "inputSchema":{ "type":"object",
+      "properties":{ "path":{ "type":"string" } },
+      "required":["path"] } },
+  { "name":"list_directory", "description":"List a folder", /* … */ }
+]}}</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">The model decides &amp; the client sends <span class="mono">tools/call</span></h3></div>
+        <p class="text-sm text-slate-600 mb-3">The user asks a question. The model — seeing the advertised tools — emits a structured call: a tool <span class="mono">name</span> and its <span class="mono">arguments</span> (exactly like function-calling). The host's client packages that decision as a <span class="mono">tools/call</span> request and sends it to the server over the transport. The model doesn't run anything itself; it only <em>asks</em>.</p>
+        <div class="relative"><pre>// model's decision, packaged by the client and sent to the server
+{ "jsonrpc":"2.0", "id":2, "method":"tools/call", "params":{
+    "name":"read_file",
+    "arguments":{ "path":"/project/README.md" } } }
+// name + arguments come straight from the model's tool call.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">The server runs real code &amp; returns a result</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The server executes the tool — actually reading the file, hitting the GitHub API, or running the SQL — and returns a <span class="mono">result</span> whose <span class="mono">content</span> is a list of blocks (text, image, etc.), plus an <span class="mono">isError</span> flag. The result flows back over the wire to the client, which hands it to the model as the tool's output.</p>
+        <div class="relative"><pre>// ← the server's answer for id:2
+{ "jsonrpc":"2.0", "id":2, "result":{
+    "content":[ { "type":"text",
+                  "text":"# AIFromZero\nOne big AI idea a day…" } ],
+    "isError": false } }
+// on failure: isError:true and content describes what went wrong.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Resources &amp; prompts — the other two primitives</h3></div>
+        <p class="text-sm text-slate-600 mb-3"><strong>Resources</strong> are read-only data addressed by <span class="mono">URI</span> (a file, a DB row, a wiki page) — the <em>app</em> chooses which to pull into context. <strong>Prompts</strong> are reusable, parameterised templates the <em>user</em> invokes (like slash-commands). Same list/fetch shape as tools, different control: tools are model-controlled, resources app-controlled, prompts user-controlled.</p>
+        <div class="relative"><pre>// resources: addressed by URI, read (not called)
+{ "jsonrpc":"2.0", "id":3, "method":"resources/read",
+  "params":{ "uri":"file:///project/README.md" } }
+
+// prompts: a named template with arguments
+{ "jsonrpc":"2.0", "id":4, "method":"prompts/get",
+  "params":{ "name":"summarize_file",
+             "arguments":{ "path":"/project/README.md" } } }</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">7</div><h3 class="font-bold text-lg">Transports — stdio vs HTTP</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The messages are the same; only the pipe differs. <strong>stdio</strong>: the host launches the server as a local subprocess and talks over stdin/stdout — perfect for local tools (a filesystem, a git repo). <strong>Streamable HTTP</strong>: the server is a remote web endpoint — for hosted/shared servers. A host wires up servers in a small config; each entry becomes one client.</p>
+        <div class="relative"><pre>// a host config: each server → one client connection
+{ "mcpServers": {
+    "filesystem": {                      // local, over stdio
+      "command": "npx",
+      "args": ["-y","@modelcontextprotocol/server-filesystem","/project"] },
+    "github": {                          // remote, over HTTP
+      "type": "http",
+      "url": "https://api.example.com/mcp" }
+} }</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">8</div><h3 class="font-bold text-lg">In practice — an SDK server &amp; a host</h3></div>
+        <p class="text-sm text-slate-600 mb-3">You don't hand-write JSON-RPC — an SDK (Python <span class="mono">mcp</span>, TypeScript <span class="mono">@modelcontextprotocol/sdk</span>) turns a decorated function into a fully-advertised tool, handling <span class="mono">initialize</span>, <span class="mono">tools/list</span>, and <span class="mono">tools/call</span> for you. On the host side, apps like Claude Desktop and IDEs are MCP clients out of the box — point them at your server and the model can use it. Write the server once; every MCP host benefits.</p>
+        <div class="relative"><pre># server side — Python MCP SDK (FastMCP)
+from mcp.server.fastmcp import FastMCP
+mcp = FastMCP("filesystem")
+
+@mcp.tool()                                   # auto-advertised via tools/list
+def read_file(path: str) -> str:
+    """Return the contents of a file."""      # ← becomes the description
+    return open(path).read()                  # ← runs on tools/call
+
+@mcp.resource("file://{path}")                # a URI-addressed resource
+def file_resource(path: str) -> str:
+    return open(path).read()
+
+mcp.run()            # speaks MCP over stdio; any host can now connect
+# host side: add it to the app's mcpServers config — that's the whole wiring.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 51 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2"><strong>MCP</strong> is the open, JSON-RPC standard that lets any AI <strong>host</strong> plug into any <strong>tool or data source</strong> through a uniform client-server protocol — "USB-C for AI tools." It collapses <strong>M×N</strong> bespoke integrations into <strong>M+N</strong>: write a <strong>server</strong> once and every host can use it. A server exposes <strong>tools</strong> (model-controlled actions), <strong>resources</strong> (app-controlled, URI-addressed data), and <strong>prompts</strong> (user-controlled templates); the client discovers them via <span class="mono">initialize</span> + <span class="mono">*/list</span> and invokes them via <span class="mono">*/call</span>, over <strong>stdio</strong> locally or <strong>HTTP</strong> remotely. It's the interoperable transport-and-discovery layer built <em>on</em> function-calling (Day 28), not a replacement for it — which is why one server works across Claude Desktop, IDEs, and custom agents alike. <strong>👉 Tomorrow — Day 52: continuing AIFromZero.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* MCP-ENGINE-START */
+// ===== Day 51 · Model Context Protocol — a real host↔client↔server exchange, client-side, no network =====
+//
+// MCP is an open JSON-RPC standard: an MCP HOST (the AI app) runs one MCP CLIENT per connection, and each client
+// talks to one MCP SERVER that exposes tools, resources, and prompts. Below, three real-ish servers each define
+// their capabilities plus a scripted "use" flow (user question → model tool call → server result → answer). The
+// engine walks a fixed sequence of BEATS; every wire message is a genuine JSON-RPC 2.0 envelope, rendered live.
+
+const SERVERS = {
+  filesystem: {
+    icon:'📁', name:'filesystem', version:'0.6.2', transport:'stdio', host:'Claude Desktop',
+    blurb:'read & write files on disk',
+    tools:[
+      {name:'read_file',      desc:'Return the contents of a file',        args:{path:'string'}},
+      {name:'write_file',     desc:'Create or overwrite a file',           args:{path:'string', content:'string'}},
+      {name:'list_directory', desc:'List the entries in a folder',         args:{path:'string'}},
+      {name:'search_files',   desc:'Glob-search files under a root',        args:{pattern:'string'}},
+    ],
+    resources:[
+      {uri:'file:///project/README.md', name:'README.md', desc:'project readme (text)'},
+      {uri:'file:///project/src/',      name:'src/',      desc:'source directory listing'},
+    ],
+    prompts:[ {name:'summarize_file', desc:'Summarize a file in N bullets', args:['path','n']} ],
+    ask:'What does the project README say?',
+    call:{name:'read_file', args:{path:'/project/README.md'}},
+    result:{content:[{type:'text', text:'# AIFromZero\\nOne big AI idea a day, explained interactively…'}], isError:false},
+    answer:'The README says AIFromZero explains one big AI idea a day — interactively, with a LOOK / UNDERSTAND / BUILD walkthrough for each.'
+  },
+  github: {
+    icon:'🐙', name:'github', version:'1.2.0', transport:'http', host:'Cursor IDE',
+    blurb:'issues, PRs & repo search',
+    tools:[
+      {name:'create_issue',        desc:'Open a new issue on a repo',       args:{repo:'string', title:'string', body:'string'}},
+      {name:'list_issues',         desc:'List open issues on a repo',       args:{repo:'string'}},
+      {name:'get_pull_request',    desc:'Fetch a pull request by number',   args:{repo:'string', number:'number'}},
+      {name:'search_repositories', desc:'Search public repositories',       args:{query:'string'}},
+    ],
+    resources:[
+      {uri:'repo://dev48v/ai/issues',  name:'issues',  desc:'open issues (json)'},
+      {uri:'repo://dev48v/ai/readme',  name:'readme',  desc:'repo README (markdown)'},
+    ],
+    prompts:[ {name:'triage_issue', desc:'Label & prioritise an issue', args:['repo','number']} ],
+    ask:'Open a bug: the login button crashes on submit.',
+    call:{name:'create_issue', args:{repo:'dev48v/ai', title:'Login button crashes on submit', body:'Clicking Submit throws a null-ref.'}},
+    result:{content:[{type:'text', text:'Created issue #42 → https://github.com/dev48v/ai/issues/42'}], isError:false},
+    answer:'Done — I filed issue #42 "Login button crashes on submit" on dev48v/ai. You can track it at github.com/dev48v/ai/issues/42.'
+  },
+  database: {
+    icon:'🗄️', name:'postgres', version:'0.9.1', transport:'stdio', host:'Custom agent',
+    blurb:'query a Postgres database',
+    tools:[
+      {name:'query',          desc:'Run a read-only SQL query',        args:{sql:'string'}},
+      {name:'list_tables',    desc:'List tables in the public schema', args:{}},
+      {name:'describe_table', desc:'Show a table\'s columns & types',  args:{table:'string'}},
+    ],
+    resources:[
+      {uri:'schema://public/users',  name:'users',  desc:'users table schema'},
+      {uri:'schema://public/orders', name:'orders', desc:'orders table schema'},
+    ],
+    prompts:[ {name:'explain_query', desc:'Explain what a SQL query does', args:['sql']} ],
+    ask:'How many users signed up today?',
+    call:{name:'query', args:{sql:"SELECT count(*) FROM users WHERE created_at::date = CURRENT_DATE"}},
+    result:{content:[{type:'text', text:'{ "rows": [ { "count": 128 } ] }'}], isError:false},
+    answer:'128 users signed up today.'
+  },
+};
+
+// beat kinds: 'proto' (a wire message on client↔server), 'host' (host/model internal), 'discover' (reveal caps)
+function buildBeats(s){
+  return [
+    { k:'proto', dir:'req', from:'client', to:'server', label:'initialize',
+      lit:['host','client','server'], clientState:'connecting…', serverState:'handshake',
+      narr:'The host launches the <b>'+s.name+'</b> server and opens a client to it. First message: <span class="mono">initialize</span> — the client announces its protocol version and capabilities.',
+      msg:{ jsonrpc:'2.0', id:0, method:'initialize', params:{ protocolVersion:'2025-06-18',
+            capabilities:{roots:{}, sampling:{}}, clientInfo:{name:s.host.toLowerCase().replace(/ /g,'-'), version:'1.0'} } } },
+
+    { k:'proto', dir:'res', from:'server', to:'client', label:'initialize result',
+      lit:['client','server'], clientState:'connected ✓', serverState:'ready',
+      narr:'The server replies with <b>its</b> capabilities — it supports tools, resources, and prompts — plus its <span class="mono">serverInfo</span>. Handshake done; the session is live.',
+      msg:{ jsonrpc:'2.0', id:0, result:{ protocolVersion:'2025-06-18',
+            capabilities:{tools:{}, resources:{}, prompts:{}}, serverInfo:{name:s.name, version:s.version} } } },
+
+    { k:'proto', dir:'req', from:'client', to:'server', label:'tools/list',
+      lit:['client','server'], clientState:'discovering', serverState:'ready',
+      narr:'Now the client asks: <span class="mono">tools/list</span> — <em>what tools do you have?</em> (resources and prompts are discovered the same way, with <span class="mono">resources/list</span> and <span class="mono">prompts/list</span>.)',
+      msg:{ jsonrpc:'2.0', id:1, method:'tools/list', params:{} } },
+
+    { k:'discover', dir:'res', from:'server', to:'client', label:'tools/list result',
+      lit:['client','server'], clientState:'tools discovered', serverState:'ready',
+      narr:'The server advertises its tools — each with a <b>name</b>, a <b>description</b> the model reads, and an <b>inputSchema</b>. The host injects these into the model\'s context (this is the bridge to function-calling, Day&nbsp;28).',
+      msg:{ jsonrpc:'2.0', id:1, result:{ tools: s.tools.map(t => ({
+              name:t.name, description:t.desc,
+              inputSchema:{ type:'object', properties:Object.fromEntries(Object.entries(t.args).map(([k,v])=>[k,{type:v}])),
+                            required:Object.keys(t.args) } })) } } },
+
+    { k:'host', dir:'', label:'user asks',
+      lit:['host'], think:false,
+      narr:'The user asks the app a question:<br><span class="mono text-slate-700">“'+esc(s.ask)+'”</span>',
+      msg:null, brain:'🧠 model — reading the question' },
+
+    { k:'host', dir:'', label:'model decides',
+      lit:['host'], think:true,
+      narr:'The <b>model</b> sees the advertised tools and decides one is needed. It emits a structured tool call — a <b>name</b> and <b>arguments</b> — exactly like function-calling (Day&nbsp;28).',
+      msg:null, brain:'🧠 model → call '+s.call.name+'(…)' },
+
+    { k:'proto', dir:'req', from:'client', to:'server', label:'tools/call',
+      lit:['host','client','server'], hiTool:s.call.name, clientState:'calling tool', serverState:'executing',
+      narr:'The client packages the model\'s decision as a <span class="mono">tools/call</span> request and sends it over the <b>'+s.transport+'</b> transport to the server.',
+      msg:{ jsonrpc:'2.0', id:2, method:'tools/call', params:{ name:s.call.name, arguments:s.call.args } } },
+
+    { k:'proto', dir:'res', from:'server', to:'client', label:'tools/call result',
+      lit:['client','server'], hiTool:s.call.name, clientState:'got result', serverState:'ready',
+      narr:'The server runs <b>real code</b> — reading the file / hitting the API / running the SQL — and returns a structured <span class="mono">result</span>: a list of content blocks plus <span class="mono">isError:false</span>.',
+      msg:{ jsonrpc:'2.0', id:2, result:s.result } },
+
+    { k:'host', dir:'', label:'model answers',
+      lit:['host'], think:true,
+      narr:'The result is fed back into the model\'s context; the model writes the final answer for the user:<br><span class="text-emerald-700 font-semibold">“'+esc(s.answer)+'”</span>',
+      msg:null, brain:'🧠 model — composing answer ✓' },
+  ];
+}
+
+const BEAT_LABELS = [
+  'initialize (handshake)', 'server capabilities', 'tools/list (discover)', 'tools advertised',
+  'user asks a question', 'model decides to call a tool', 'client sends tools/call',
+  'server returns a result', 'model writes the answer'
+];
+
+const state = { srv:'filesystem', beats:[], i:-1, run:null, discovered:false };
+/* MCP-ENGINE-END */
+
+// ============================ rendering ============================
+function renderServerMeta(){
+  const s = SERVERS[state.srv];
+  $("serverName").textContent = s.name;
+  $("serverBlurb").textContent = s.blurb;
+  $("hostName").textContent = s.host;
+  $("transportLbl").textContent = s.transport === 'http' ? 'Streamable HTTP' : 'stdio';
+  document.querySelectorAll("#serverPick button").forEach(b => {
+    const on = b.dataset.srv === state.srv;
+    b.className = "px-4 py-2 text-sm font-bold " + (on ? "bg-emerald-600 text-white" : "bg-white text-slate-500");
+  });
+}
+
+function renderCaps(){
+  const s = SERVERS[state.srv];
+  const disc = state.discovered;
+  const hiTool = state.i >= 0 ? state.beats[state.i].hiTool : null;
+
+  $("capTools").className = "cap lg:col-span-1" + (disc ? " on" : "");
+  $("toolsBadge").textContent = disc ? "✓ discovered" : "tools/list";
+  $("toolsList").innerHTML = disc
+    ? s.tools.map(t => `<div class="capitem ${t.name===hiTool?'hi':''}"><span>🔧</span><span class="mono font-bold">${esc(t.name)}</span><span class="text-slate-400 text-[10px]">${esc(t.desc)}</span></div>`).join("")
+    : `<div class="text-[11px] text-slate-400 py-2">not discovered yet — run <span class="mono">tools/list</span></div>`;
+
+  $("capRes").className = "cap lg:col-span-1" + (disc ? " on" : "");
+  $("resList").innerHTML = disc
+    ? s.resources.map(r => `<div class="capitem"><span>📄</span><span class="mono font-bold">${esc(r.name)}</span><span class="text-slate-400 text-[10px] break-all">${esc(r.uri)}</span></div>`).join("")
+    : `<div class="text-[11px] text-slate-400 py-2">read-only data addressed by URI</div>`;
+
+  $("capPrompts").className = "cap lg:col-span-1" + (disc ? " on" : "");
+  $("promptList").innerHTML = disc
+    ? s.prompts.map(p => `<div class="capitem"><span>💬</span><span class="mono font-bold">${esc(p.name)}</span><span class="text-slate-400 text-[10px]">args: ${p.args.join(', ')}</span></div>`).join("")
+    : `<div class="text-[11px] text-slate-400 py-2">reusable parameterised templates</div>`;
+}
+
+function renderBeats(){
+  $("beats").innerHTML = BEAT_LABELS.map((lbl,i) => {
+    let c = "beat fut";
+    if (i === state.i) c = "beat cur";
+    else if (i < state.i) c = "beat past";
+    return `<div class="${c}"><div class="b-n">${i+1}</div><div>${esc(lbl)}</div></div>`;
+  }).join("");
+}
+
+// JSON pretty-printer with syntax colour
+function renderJSON(obj){
+  if (obj === null) return `<span class="text-slate-500">— (no wire message; this happens inside the host)</span>`;
+  const j = JSON.stringify(obj, null, 2);
+  const html = esc(j)
+    .replace(/&quot;(\w[\w\/]*)&quot;(\s*:)/g, '<span class="jk">&quot;$1&quot;</span>$2')      // keys
+    .replace(/:\s&quot;([^&]*)&quot;/g, ': <span class="js">&quot;$1&quot;</span>')             // string values
+    .replace(/:\s(-?\d+\.?\d*)/g, ': <span class="jm">$1</span>')                                // numbers
+    .replace(/:\s(true|false|null)/g, ': <span class="jn">$1</span>');                           // literals
+  return html;
+}
+
+function renderStage(){
+  const b = state.i >= 0 ? state.beats[state.i] : null;
+  const lit = b ? (b.lit||[]) : [];
+  $("nHost").className   = "node n-host w-[190px]"   + (lit.includes('host')   ? " lit" : "");
+  $("nClient").className = "node n-client w-[170px]" + (lit.includes('client') ? " lit" : "");
+  $("nServer").className = "node n-server w-[190px]" + (lit.includes('server') ? " lit" : "");
+  $("wireCS").className  = "wire" + (b && b.k==='proto' ? " hot" : "");
+
+  $("nModel").className = "brain" + (b && b.think ? " think" : "");
+  $("nModel").textContent = b && b.brain ? b.brain : (state.i>=0 ? '🧠 model — waiting' : '🧠 model — idle');
+
+  $("clientState").textContent = b && b.clientState ? b.clientState : (state.i>=0 ? '' : 'not connected');
+  $("serverState").textContent = b && b.serverState ? b.serverState : (state.i>=0 ? '' : 'idle');
+
+  $("narr").innerHTML = b ? b.narr : 'Press <b>Run</b> — the client will connect to the server and discover its tools.';
+
+  // message panel
+  const msg = b ? b.msg : null;
+  $("msg").innerHTML = b ? renderJSON(msg) : '—';
+  const d = $("dir");
+  if (b && b.k === 'proto'){
+    d.className = "text-[10px] font-bold " + (b.dir==='req' ? "text-indigo-300" : "text-emerald-300");
+    d.textContent = b.dir==='req' ? '▶ client → server (request)' : '◀ server → client (response)';
+  } else { d.textContent = ''; }
+
+  // packet animation on the client↔server rail
+  const p = $("packet");
+  p.className = "packet";
+  if (b && b.k === 'proto'){
+    void p.offsetWidth; // reflow to restart animation
+    p.textContent = b.label;
+    p.classList.add(b.dir === 'req' ? 'req' : 'res', 'show', b.dir === 'req' ? 'moveR' : 'moveL');
+  }
+}
+
+function renderAll(){ renderServerMeta(); renderCaps(); renderBeats(); renderStage(); }
+
+// ============================ stepping ============================
+function stepForward(){
+  if (state.i >= state.beats.length - 1) return false;
+  state.i++;
+  if (state.beats[state.i].k === 'discover') state.discovered = true;
+  renderAll();
+  return true;
+}
+
+function resetFlow(keepServer){
+  if (state.run){ clearInterval(state.run); state.run = null; $("run").textContent = "▶ Run"; }
+  state.beats = buildBeats(SERVERS[state.srv]);
+  state.i = -1; state.discovered = false;
+  renderAll();
+  $("viewNote").innerHTML = `Server selected: <b>${SERVERS[state.srv].icon} ${SERVERS[state.srv].name}</b> — transport <span class="mono">${SERVERS[state.srv].transport==='http'?'Streamable HTTP':'stdio'}</span>, host <b>${esc(SERVERS[state.srv].host)}</b>. Step through the exchange, or press Run.`;
+}
+
+// ============================ controls ============================
+$("step").onclick = () => { if (state.run){ clearInterval(state.run); state.run=null; $("run").textContent="▶ Run"; } stepForward(); };
+$("run").onclick = () => {
+  if (state.run){ clearInterval(state.run); state.run = null; $("run").textContent = "▶ Run"; return; }
+  if (state.i >= state.beats.length - 1) resetFlow(true);
+  $("run").textContent = "⏸ Pause";
+  state.run = setInterval(() => {
+    if (!stepForward()){ clearInterval(state.run); state.run = null; $("run").textContent = "▶ Replay"; }
+  }, 1250);
+};
+$("rst").onclick = () => resetFlow(true);
+document.querySelectorAll("#serverPick button").forEach(b => b.onclick = () => { state.srv = b.dataset.srv; resetFlow(false); });
+
+// boot: land on filesystem, then auto-run once so the exchange is visible immediately
+resetFlow(false);
+$("run").textContent = "⏸ Pause";
+state.run = setInterval(() => {
+  if (!stepForward()){ clearInterval(state.run); state.run = null; $("run").textContent = "▶ Replay"; }
+}, 1250);
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. The problem: M×N bespoke integrations", why:"Every AI app that wants to reach a tool — your files, GitHub, a database — has to hand-write a custom integration for it. With <strong>M</strong> apps and <strong>N</strong> tools, that's <strong>M×N</strong> connectors, each written, tested, and maintained separately, none reusable. Add a new tool and every app must integrate it; add a new app and it must integrate every tool. The glue code, not the models, becomes the bottleneck.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">3 apps × 4 tools = 12 connectors<br><br>Claude─┐ ┌─files &nbsp; each line =<br>IDE────┼─┼─github &nbsp; custom glue<br>Agent──┘ └─db · api<br><br>add 1 tool ⇒ +3 connectors 😖</div>`, code:`# every app writes its own client for every tool
+class ClaudeGitHubClient: ...   # bespoke
+class IDEGitHubClient:    ...   # bespoke, again
+class AgentGitHubClient:  ...   # and again
+# N tools × M apps = M×N of these. None reusable.` },
+ { title:"2. MCP's answer: one protocol → M+N", why:"MCP puts a single, uniform protocol between apps and tools. Each tool is wrapped <em>once</em> as an <strong>MCP server</strong>; each app implements the <strong>MCP client</strong> side <em>once</em>. Now any client can talk to any server — <strong>M+N</strong> pieces instead of M×N. It's the 'USB-C for AI tools' idea: one connector standard, and everything that speaks it interoperates. Write a filesystem server once and Claude Desktop, your IDE, and a custom agent can all use it unchanged.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">3 apps + 4 tools = 7 pieces<br><br>Claude ┐ &nbsp; ┌ files<br>IDE ───┼─MCP─┼ github<br>Agent ─┘ &nbsp; └ db · api<br><br>add 1 tool ⇒ +1 server, all apps get it ✨</div>`, code:`# write the server ONCE
+@mcp.tool()
+def read_file(path: str) -> str: ...
+# every MCP host (Claude Desktop, IDE, agent)
+# can now use it — zero per-app glue.` },
+ { title:"3. Three roles: host, client, server", why:"The <strong>host</strong> is the AI application (Claude Desktop, an IDE, an agent) — it's what the user talks to and where the model runs. Inside the host live <strong>clients</strong>: one per connection, each holding a <strong>1:1</strong> session with a <strong>server</strong>. The server is a separate program that exposes capabilities. This separation is the whole point — the host manages the model and the conversation; each server is an independent, reusable unit that only knows how to expose its tools.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">┌──────── HOST (the AI app) ───────┐<br>│ &nbsp;🧠 model &nbsp; ┌ client ─╌╌╌╌ server A│<br>│ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ├ client ─╌╌╌╌ server B│<br>│ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; └ client ─╌╌╌╌ server C│<br>└──────────────────────────────────┘<br>one client ⇄ one server (1:1)</div>`, code:`# host wiring: each server entry → one client
+{ "mcpServers": {
+    "filesystem": { "command": "npx", "args": [...] },
+    "github":     { "type": "http", "url": "..." }
+} }  # the host spawns one client per entry.` },
+ { title:"4. Three primitives: tools, resources, prompts", why:"A server exposes three kinds of thing, distinguished by <em>who controls them</em>. <strong>Tools</strong> are actions the <em>model</em> chooses to invoke (read a file, create an issue) — they can have side effects. <strong>Resources</strong> are read-only data addressed by a <span class='mono'>URI</span> that the <em>app</em> decides to pull into context (a file, a DB row). <strong>Prompts</strong> are reusable, parameterised templates the <em>user</em> triggers (like slash-commands). Same discovery shape (<span class='mono'>*/list</span>), different control model.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">🔧 tools &nbsp; &nbsp;→ model-controlled (actions)<br>📄 resources → app-controlled (URI data)<br>💬 prompts &nbsp;→ user-controlled (templates)<br><br>all discovered via tools/list,<br>resources/list, prompts/list</div>`, code:`tools/list      → [{name, description, inputSchema}]
+resources/list  → [{uri, name, mimeType}]
+prompts/list    → [{name, description, arguments}]
+# tools/call · resources/read · prompts/get to use them` },
+ { title:"5. The wire: JSON-RPC messages", why:"Everything is <strong>JSON-RPC 2.0</strong>. A <strong>request</strong> has an <span class='mono'>id</span>, a <span class='mono'>method</span> (<span class='mono'>tools/list</span>, <span class='mono'>tools/call</span>…) and <span class='mono'>params</span>; the <strong>response</strong> echoes the <span class='mono'>id</span> and carries a <span class='mono'>result</span> or <span class='mono'>error</span>. One-way <strong>notifications</strong> have a method but no id. That's the entire protocol surface — a handful of methods over a simple envelope, which is exactly why it's easy for any language to implement.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">→ {id:2, method:"tools/call",<br>&nbsp; &nbsp; params:{name, arguments}}<br><br>← {id:2, result:{content:[…],<br>&nbsp; &nbsp; isError:false}}<br><br>id links request ⇄ response</div>`, code:`// request
+{ "jsonrpc":"2.0", "id":2, "method":"tools/call",
+  "params": { "name":"read_file",
+              "arguments": { "path":"/README.md" } } }
+// response echoes id:2 with result` },
+ { title:"6. The lifecycle: initialize → discover → use", why:"A connection follows a fixed arc. <strong>Initialize</strong>: the client and server exchange protocol versions and capabilities (negotiation) and the client sends <span class='mono'>notifications/initialized</span>. <strong>Discover</strong>: the client lists tools/resources/prompts once. <strong>Use</strong>: the model issues <span class='mono'>tools/call</span> whenever it needs to — repeatedly, without re-discovering. Discovery happens once; the use loop runs as many times as the task needs.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">1. initialize &nbsp;(handshake, once)<br>2. tools/list &nbsp;(discover, once)<br>3. tools/call &nbsp;(use, repeat ↻)<br>&nbsp; &nbsp; ↑ every time the model<br>&nbsp; &nbsp; &nbsp; needs the tool</div>`, code:`initialize            # negotiate capabilities
+notifications/initialized
+tools/list            # discover once
+# then, each time the model decides:
+tools/call → result → tools/call → result → …` },
+ { title:"7. vs plain function-calling (Day 28)", why:"MCP does <em>not</em> replace function-calling — it's built <strong>on</strong> it. The model still emits a structured tool call (name + arguments), same as Day 28. What MCP adds is the <strong>standard around</strong> that call: how tools are <em>discovered</em> (<span class='mono'>tools/list</span>), <em>transported</em> (stdio/HTTP), and <em>answered</em> — as a reusable client-server protocol. Raw function-calling is app-specific glue; MCP makes the same tool work across every host without rewriting it.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">function-calling (D28): model → {name, args}<br>&nbsp; &nbsp; ↳ app-specific, hand-wired per app<br><br>MCP: SAME call, wrapped in a standard<br>&nbsp; &nbsp; ↳ discover + transport + reuse<br>&nbsp; &nbsp; ↳ one server, every host</div>`, code:`# function-calling: you wire each tool into each app
+tools = [ {"name":"read_file", "input_schema":{...}} ]
+# MCP: the SERVER declares it once; every host
+# discovers it via tools/list — no per-app wiring.` },
+ { title:"8. Transports & the ecosystem", why:"Same messages, two pipes. <strong>stdio</strong>: the host launches the server as a local subprocess and talks over stdin/stdout — ideal for local tools. <strong>Streamable HTTP</strong>: the server is a remote endpoint — for hosted/shared servers. Around this sits a growing ecosystem: official SDKs (Python <span class='mono'>mcp</span>, TypeScript <span class='mono'>@modelcontextprotocol/sdk</span>), reference servers (filesystem, git, github, postgres…), and MCP-client hosts (Claude Desktop, IDEs, agent frameworks). Write a server once; it plugs into all of them.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">stdio &nbsp;→ local subprocess (stdin/stdout)<br>HTTP &nbsp;→ remote endpoint (shared)<br><br>SDKs: mcp (py) · @modelcontextprotocol/sdk<br>hosts: Claude Desktop · IDEs · agents<br>servers: filesystem · git · github · postgres</div>`, code:`# local (stdio): host spawns the process
+{ "command":"npx", "args":["…server-filesystem","/"] }
+# remote (http): host connects to a URL
+{ "type":"http", "url":"https://api.example.com/mcp" }
+# the JSON-RPC messages are identical either way.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
