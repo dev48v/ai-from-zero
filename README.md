@@ -53,6 +53,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 44 — Model Collapse](https://dev48v.infy.uk/ai/days/day44-model-collapse.html) — `day44-model-collapse.html`
 - [AIFromZero · Day 45 — Diffusion Language Models](https://dev48v.infy.uk/ai/days/day45-diffusion-language-models.html) — `day45-diffusion-language-models.html`
 - [AIFromZero · Day 51 — Model Context Protocol (MCP)](https://dev48v.infy.uk/ai/days/day51-model-context-protocol.html) — `day51-model-context-protocol.html`
+- [AIFromZero · Day 52 — GraphRAG](https://dev48v.infy.uk/ai/days/day52-graphrag.html) — `day52-graphrag.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

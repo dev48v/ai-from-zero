@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 52 — GraphRAG</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .triple { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; font-weight:700; background:#eef2ff; color:#4338ca; padding:1px 6px; border-radius:6px; white-space:nowrap; }
+  .qbig { display:inline-block; margin-top:4px; font-size:15px; font-weight:800; color:#0f172a; }
+
+  /* ===== GraphRAG graph canvas ===== */
+  #graphWrap svg { width:100%; height:auto; display:block; }
+  .gnode { transition: opacity .4s; }
+  .gnode.hidden { opacity:0; }
+  .gnode-c { fill:#fff; stroke:#cbd5e1; stroke-width:2.5; transition: stroke .3s, fill .3s, filter .3s, stroke-width .3s; }
+  .gnode-c.commA { fill:#eef2ff; stroke:#6366f1; }
+  .gnode-c.commB { fill:#ecfdf5; stroke:#10b981; }
+  .gnode-c.bridge { fill:#fef3c7; stroke:#f59e0b; }
+  .gnode-c.path { stroke:#6366f1; stroke-width:4; filter: drop-shadow(0 0 7px rgba(99,102,241,.55)); }
+  .gnode-c.seed { stroke:#4338ca; stroke-width:4.5; filter: drop-shadow(0 0 9px rgba(67,56,202,.6)); }
+  .gnode-c.flat { stroke:#f59e0b; stroke-dasharray:5 3; stroke-width:3.5; }
+  .gnode-icon { font-size:19px; }
+  .gnode-lbl { font-size:11px; font-weight:800; fill:#0f172a; }
+  .gnode-kind { font-size:8.5px; font-weight:700; fill:#94a3b8; text-transform:uppercase; letter-spacing:.04em; }
+
+  .gedge { stroke:#e2e8f0; stroke-width:2.5; transition: stroke .3s, stroke-width .3s, opacity .35s; }
+  .gedge.live { stroke:#cbd5e1; }
+  .gedge.dim  { opacity:.12; }
+  .gedge.path { stroke:#6366f1; stroke-width:4.5; stroke-dasharray:9 5; animation: flow 1s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset:-28; } }
+  .gedge-lblwrap.hidden { opacity:0; }
+  .gedge-lblwrap { transition:opacity .3s; }
+  .gedge-lbl { font-size:9px; font-weight:800; fill:#475569; }
+  .gedge-lbl.path { fill:#4338ca; }
+
+  .cbubble { border-left:5px solid; border-radius:11px; padding:9px 11px; font-size:11.5px; transition:all .3s; opacity:.35; }
+  .cbubble.on { opacity:1; }
+  .cbubble.cA { border-color:#6366f1; background:#eef2ff; }
+  .cbubble.cB { border-color:#10b981; background:#ecfdf5; }
+
+  .doc { border:1.5px solid #e2e8f0; border-radius:10px; padding:8px 10px; background:#fff; transition:all .25s; }
+  .doc.hot { border-color:#f59e0b; box-shadow:0 0 0 3px rgba(245,158,11,.15); background:#fffbeb; }
+  .doc.ex  { border-color:#c7d2fe; background:#f5f7ff; }
+  .doc-id { font-size:10px; font-weight:800; color:#6366f1; }
+  .doc-t  { font-size:11.5px; color:#334155; line-height:1.4; }
+  .doc-triple { margin-top:4px; }
+
+  .ans { border-radius:12px; padding:12px 13px; border:1.5px solid #e2e8f0; transition:all .3s; min-height:150px; }
+  .verdict { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:10px; font-weight:800; }
+  .v-good { background:#ecfdf5; color:#047857; }
+  .v-fail { background:#fef2f2; color:#dc2626; }
+  .v-part { background:#fffbeb; color:#b45309; }
+
+  .beat { display:flex; gap:8px; align-items:flex-start; padding:6px 8px; border-radius:9px; font-size:11px; }
+  .beat.cur  { background:#0f172a; color:#fff; }
+  .beat.past { background:#eef2ff; color:#4338ca; }
+  .beat.fut  { color:#94a3b8; }
+  .beat .b-n { width:18px; height:18px; border-radius:999px; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; flex:none; background:#e2e8f0; color:#475569; }
+  .beat.cur .b-n  { background:#6366f1; color:#fff; }
+  .beat.past .b-n { background:#c7d2fe; color:#4338ca; }
+
+  .qpick.on { background:#6366f1; color:#fff; border-color:#6366f1; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 52</div>
+      <h1 class="text-xl font-bold">🕸️ GraphRAG — <strong>retrieval that reasons over a knowledge graph instead of a pile of text chunks.</strong> Plain RAG (Day&nbsp;15) chops your documents into chunks, embeds them, and at query time returns the handful of chunks whose vectors sit <em>nearest</em> the question. That's great for "look up one fact," but it fails on <strong>connect-the-dots</strong> questions — "how is A related to C?" — because the answer isn't in any single chunk; it's spread across many, none of which is individually close to the question. <strong>GraphRAG</strong> (Microsoft Research, 2024) adds an <em>indexing</em> step: an LLM reads every chunk and extracts <strong>entities</strong> (people, orgs, models) as <strong>nodes</strong> and <strong>relationships</strong> as <strong>edges</strong>, merging repeated mentions of the same thing into one node — building the connective tissue plain RAG never has. It then clusters densely-linked nodes into <strong>communities</strong> and has the LLM write a short <strong>summary</strong> of each. At query time it answers two ways: a <strong>local</strong>/multi-hop query <em>traverses</em> the graph — walking edge by edge from a seed entity to find a connecting path — while a <strong>global</strong> query map-reduces the community summaries to describe the whole corpus. Below: watch a graph get <em>built</em> from six documents, then run a 5-hop query that lights up a path plain RAG can't see, and a global query that plain RAG can only half-answer.</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Build a knowledge graph from documents, then answer by <span style="color:#4338ca">walking the relationships</span></h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Pick a question — a simple <b>local</b> fact, a hard <b>multi-hop</b> connection, or a <b>global</b> big-picture. Press <b>Run</b> to watch the whole pipeline: an LLM extracts <span class="mono">(entity)–[relation]→(entity)</span> triples from each chunk, the triples merge into one graph, communities get summarized, then the query is answered. For every question you'll see the <span style="color:#4338ca;font-weight:700">GraphRAG</span> path light up on the graph <em>and</em> what plain <span style="color:#b45309;font-weight:700">flat RAG</span> returns from the same corpus — so the gap is visible. It all runs in your browser, no network.</p>
+      </div>
+
+      <!-- ===================== CARD A · query picker + controls ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="flex flex-wrap items-center gap-3 mb-4">
+          <div class="inline-flex flex-wrap rounded-xl border border-slate-200 overflow-hidden" id="qPick">
+            <button data-q="local"    class="qpick px-4 py-2 text-sm font-bold border-r border-slate-200">🎯 Local</button>
+            <button data-q="multihop" class="qpick px-4 py-2 text-sm font-bold border-r border-slate-200">🔗 Multi-hop</button>
+            <button data-q="global"   class="qpick px-4 py-2 text-sm font-bold">🌍 Global</button>
+          </div>
+          <div class="flex-1"></div>
+          <button id="step" class="bg-indigo-600 text-white px-5 py-2 rounded-lg font-semibold text-sm">Step ▷</button>
+          <button id="run"  class="bg-slate-900 text-white px-5 py-2 rounded-lg font-semibold text-sm">▶ Run</button>
+          <button id="rst"  class="bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm">⟲ Reset</button>
+        </div>
+        <p id="viewNote" class="text-[11px] rounded-lg px-3 py-2 bg-indigo-50 border border-indigo-200 text-indigo-800"></p>
+      </div>
+
+      <!-- ===================== CARD B · the graph + narration ===================== -->
+      <div class="grid lg:grid-cols-3 gap-5 mb-5">
+        <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-4">
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-xs uppercase font-bold text-indigo-600">🕸️ The knowledge graph</div>
+            <div class="text-[10px] text-slate-400">nodes = entities · edges = relationships</div>
+          </div>
+          <div id="graphWrap"></div>
+          <!-- community summaries -->
+          <div id="commWrap" class="grid sm:grid-cols-2 gap-3 mt-2"></div>
+        </div>
+        <div class="lg:col-span-1 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div class="text-[10px] uppercase font-bold text-indigo-600 mb-1">What's happening</div>
+          <div id="narr" class="text-sm text-slate-700 min-h-[120px]">Press <b>Run</b> — the pipeline will build a graph from the documents, then answer the question.</div>
+          <div class="mt-3 pt-3 border-t border-slate-200">
+            <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Legend</div>
+            <div class="text-[11px] text-slate-600 space-y-1">
+              <div><span class="inline-block w-3 h-3 rounded-full align-middle" style="background:#6366f1"></span> traversal path (GraphRAG)</div>
+              <div><span class="inline-block w-3 h-3 rounded-full align-middle border-2" style="border-color:#f59e0b;border-style:dashed;background:#fff"></span> chunk retrieved by flat RAG</div>
+              <div><span class="inline-block w-3 h-3 rounded-full align-middle" style="background:#f59e0b"></span> bridge node (links two communities)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD C · the corpus ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-2">The corpus <span class="text-slate-400 normal-case font-normal">— 6 plain-text chunks. Flat RAG stores these as vectors; GraphRAG also extracts a triple from each.</span></div>
+        <div id="docList" class="grid md:grid-cols-2 gap-2"></div>
+      </div>
+
+      <!-- ===================== CARD D · the contrast ===================== -->
+      <div class="grid md:grid-cols-2 gap-5 mb-5">
+        <div class="ans" id="flatAns" style="border-color:#fde68a;background:#fffdf5;">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-bold text-amber-700">📄 Flat RAG <span class="text-slate-400 font-normal">— top-k chunks by vector similarity</span></div>
+            <div id="flatVerdict"></div>
+          </div>
+          <div id="flatChunks" class="text-[11px] text-slate-500 mb-2"></div>
+          <div id="flatText" class="text-sm text-slate-700">Run the pipeline to see what flat RAG returns.</div>
+        </div>
+        <div class="ans" id="graphAns" style="border-color:#c7d2fe;background:#f8f9ff;">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-bold text-indigo-700">🕸️ GraphRAG <span class="text-slate-400 font-normal">— traverse relationships / summarize communities</span></div>
+            <div id="graphVerdict"></div>
+          </div>
+          <div id="graphPath" class="text-[11px] text-slate-500 mb-2"></div>
+          <div id="graphText" class="text-sm text-slate-700">Run the pipeline to see how GraphRAG answers.</div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD E · beats ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-1">The pipeline, step by step <span class="text-slate-400 normal-case font-normal">— the lit beat is where we are now</span></div>
+        <p class="text-[11px] text-slate-400 mb-3">Index once (extract → merge → summarize communities), then answer each query by traversal (local/multi-hop) or by map-reducing community summaries (global).</p>
+        <div id="beats" class="grid sm:grid-cols-2 gap-1.5"></div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto"><strong>GraphRAG</strong> turns a document set into a <strong>knowledge graph</strong> (entities as nodes, relations as edges) plus <strong>community summaries</strong>, so it can answer questions that span many documents — <strong>multi-hop</strong> "how is A connected to C?" by <em>traversing</em> edges, and <strong>global</strong> "what's the big picture?" by reducing over community summaries. Plain vector RAG (Day&nbsp;15) only ever returns the top-k chunks nearest the query, so it nails local lookups but misses connections that live <em>between</em> chunks and can't see the whole corpus at once. GraphRAG isn't free — indexing costs an LLM call per chunk plus summarization — so it's worth it when relationships and global structure matter; for simple fact lookup, vector RAG is cheaper. In practice the two are often combined.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">From "nearest chunks" to "walk the relationships"</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / RULE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build GraphRAG — index a corpus, then traverse &amp; answer</h2>
+    <p class="text-slate-500 mb-8">Reproduce the whole LOOK engine as real code: extract entities and relations with an LLM, merge them into a graph, detect and summarize communities, then answer a local/multi-hop query by <em>traversing</em> the graph and a global query by <em>map-reducing</em> community summaries. Every block is the exact idea flowing through LOOK, followed by the library you'd reach for.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">The corpus — and why flat RAG can't connect it</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Six chunks. No single chunk says "Ada is connected to SonarNet" — that fact is spread across five of them. Flat RAG (Day&nbsp;15) embeds each chunk and, for the question, returns the <em>k</em> nearest by cosine similarity. The chunk about Ada and the chunk about SonarNet both come back, but they're <strong>disconnected</strong>: nothing in the retrieved set bridges them, so the LLM says "no connection found."</p>
+        <div class="relative"><pre>DOCS = [
+  "Ada founded Nauticore, a startup that maps the ocean floor with sonar.",
+  "In 2021, Beluga Corp acquired Nauticore to expand into marine data.",
+  "Beluga Corp is led by Rasmus, a veteran ocean-tech executive.",
+  "Before Beluga, Rasmus founded the research lab DeepCurrentAI.",
+  "DeepCurrentAI built SonarNet, a model that reads sonar imagery.",
+  "SonarNet was trained on the Marlin dataset, curated by DeepCurrentAI.",
+]
+# Q: "How is Ada connected to SonarNet?"  → needs docs 1+2+3+4+5 chained.
+# Flat RAG grabs doc 1 (Ada) and doc 5 (SonarNet) — disconnected. No path.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Extract entities &amp; relations with an LLM</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The heart of indexing: ask the LLM to read each chunk and emit <strong>(subject, relation, object)</strong> triples plus an entity <em>type</em>. This is a structured-output job — constrain the model to JSON. Do it once per chunk at index time; it's the expensive part.</p>
+        <div class="relative"><pre>import anthropic, json
+client = anthropic.Anthropic()
+
+PROMPT = """Extract entities and relationships from the text.
+Return JSON: {"entities":[{"name","type"}],
+              "relations":[{"source","relation","target"}]}.
+Text: {chunk}"""
+
+def extract(chunk: str) -> dict:
+    msg = client.messages.create(
+        model="claude-opus-5", max_tokens=1024,
+        messages=[{"role": "user", "content": PROMPT.format(chunk=chunk)}],
+        output_config={"format": {"type": "json_schema", "schema": TRIPLE_SCHEMA}},
+    )
+    return json.loads(next(b.text for b in msg.content if b.type == "text"))
+
+# extract(DOCS[0]) ->
+# {"entities":[{"name":"Ada","type":"person"},
+#              {"name":"Nauticore","type":"company"}],
+#  "relations":[{"source":"Ada","relation":"founded","target":"Nauticore"}]}</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Merge triples into one graph</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Add every triple to a graph. The crucial move: the same entity mentioned in different chunks becomes <strong>one node</strong> — "Nauticore" from doc&nbsp;1 and doc&nbsp;2 collapse into a single node. That de-duplication is what stitches the corpus together; it's the connective tissue plain RAG never builds. Track which source chunk each edge came from so you can cite it.</p>
+        <div class="relative"><pre>import networkx as nx
+G = nx.DiGraph()
+
+for doc_id, chunk in enumerate(DOCS):
+    data = extract(chunk)
+    for e in data["entities"]:
+        # normalize the name → repeated mentions land on the SAME node
+        key = e["name"].strip().lower()
+        G.add_node(key, label=e["name"], type=e["type"])
+    for r in data["relations"]:
+        G.add_edge(r["source"].strip().lower(),
+                   r["target"].strip().lower(),
+                   relation=r["relation"], source_doc=doc_id)
+
+# G now has 7 nodes and 7 edges — Ada … Nauticore … Beluga …
+#   Rasmus … DeepCurrentAI … SonarNet … Marlin</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Detect communities &amp; summarize each</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Cluster densely-connected nodes into <strong>communities</strong> (Microsoft's GraphRAG uses the <span class="mono">Leiden</span> algorithm), then have the LLM write a short summary of each community from its nodes and edges. These summaries are pre-computed at index time and are what <em>global</em> queries reduce over — so you never have to stuff the whole corpus into one prompt.</p>
+        <div class="relative"><pre>import networkx.algorithms.community as nx_comm
+
+# Leiden/Louvain over the undirected view
+communities = nx_comm.louvain_communities(G.to_undirected(), seed=7)
+
+def summarize_community(nodes) -> str:
+    sub = G.subgraph(nodes)
+    facts = [f'{G.nodes[u]["label"]} {d["relation"]} {G.nodes[v]["label"]}'
+             for u, v, d in sub.edges(data=True)]
+    msg = client.messages.create(
+        model="claude-opus-5", max_tokens=512,
+        messages=[{"role": "user",
+                   "content": "Summarize this cluster in 2 sentences:\n"
+                              + "\n".join(facts)}],
+    )
+    return next(b.text for b in msg.content if b.type == "text")
+
+summaries = {i: summarize_community(c) for i, c in enumerate(communities)}
+# Community A: Ada's startup Nauticore, acquired by Beluga (led by Rasmus).
+# Community B: Rasmus's lab DeepCurrentAI built SonarNet on the Marlin dataset.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Local / multi-hop query — find the seed, traverse</h3></div>
+        <p class="text-sm text-slate-600 mb-3">For "how is A connected to C?", identify the entities named in the question, then <strong>walk the graph</strong> — a shortest-path / BFS between them. The path <em>is</em> the answer: every edge is a relationship, and each edge remembers its source chunk. Feed that path (not raw chunks) to the LLM to phrase the final answer, grounded and citable.</p>
+        <div class="relative"><pre>def answer_multihop(question, a, c):
+    # a, c = entities linked to the question (via embeddings or the LLM)
+    path = nx.shortest_path(G.to_undirected(), a, c)   # the traversal
+    hops = []
+    for u, v in zip(path, path[1:]):
+        d = G.get_edge_data(u, v) or G.get_edge_data(v, u)
+        hops.append(f'{G.nodes[u]["label"]} —{d["relation"]}→ {G.nodes[v]["label"]}')
+    context = " ; ".join(hops)                          # the connecting chain
+    return client.messages.create(
+        model="claude-opus-5", max_tokens=512,
+        messages=[{"role": "user",
+                   "content": f"Q: {question}\nRelationship chain: {context}\n"
+                              "Answer using the chain."}],
+    )
+
+answer_multihop("How is Ada connected to SonarNet?", "ada", "sonarnet")
+# path: ada → nauticore → beluga corp → rasmus → deepcurrentai → sonarnet
+# "Ada founded Nauticore, acquired by Beluga (led by Rasmus, who founded
+#  DeepCurrentAI, which built SonarNet)." — 5 hops flat RAG could never join.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Global query — map-reduce the community summaries</h3></div>
+        <p class="text-sm text-slate-600 mb-3">"What's the big picture?" has no single source chunk and can't be answered by top-k similarity. GraphRAG answers it by <strong>map-reduce over the pre-computed community summaries</strong>: each summary yields a partial answer (map), then a final call combines them (reduce). It sees the entire structure — including the <strong>Rasmus</strong> bridge that ties the two clusters together.</p>
+        <div class="relative"><pre>def answer_global(question):
+    partials = []                                   # MAP
+    for cid, summ in summaries.items():
+        p = client.messages.create(
+            model="claude-opus-5", max_tokens=400,
+            messages=[{"role": "user",
+                       "content": f"Q: {question}\nCommunity summary: {summ}\n"
+                                  "What does this contribute to the answer?"}],
+        )
+        partials.append(next(b.text for b in p.content if b.type == "text"))
+    return client.messages.create(                  # REDUCE
+        model="claude-opus-5", max_tokens=700,
+        messages=[{"role": "user",
+                   "content": f"Q: {question}\nPartial answers:\n"
+                              + "\n".join(partials) + "\nCombine into one answer."}],
+    )
+
+answer_global("What's the big picture across all documents?")
+# "Two clusters bridged by Rasmus: an ocean-mapping acquisition
+#  (Ada→Nauticore→Beluga) and an AI research lab (DeepCurrentAI→SonarNet)."</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">7</div><h3 class="font-bold text-lg">When to use which — and the cost</h3></div>
+        <p class="text-sm text-slate-600 mb-3">GraphRAG's power isn't free: indexing spends an LLM call <em>per chunk</em> for extraction plus a call per community for summaries — often 10–100× the index cost of plain embedding-only RAG. So route by query type. Vector RAG wins on cheap local fact lookup; GraphRAG wins on multi-hop connections and global sensemaking. Many production systems run <strong>both</strong> and pick per question (or blend the retrieved context).</p>
+        <div class="relative"><pre>def route(question):
+    kind = classify(question)          # local | multihop | global
+    if kind == "local":
+        return vector_rag(question)    # cheap: top-k nearest chunks (Day 15)
+    if kind == "multihop":
+        a, c = entities_in(question)
+        return answer_multihop(question, a, c)   # traverse the graph
+    return answer_global(question)     # map-reduce community summaries
+
+# Rule of thumb:
+#   "What did Ada found?"                  -> vector RAG (one chunk answers)
+#   "How is Ada connected to SonarNet?"    -> GraphRAG traversal
+#   "Summarize this whole ecosystem"       -> GraphRAG global
+# Index cost: embeddings-only ~1x  ·  GraphRAG ~10-100x (LLM per chunk).</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">8</div><h3 class="font-bold text-lg">In practice — the real toolkit</h3></div>
+        <p class="text-sm text-slate-600 mb-3">You rarely hand-roll all of this. Microsoft's <span class="mono">graphrag</span> package runs the whole pipeline (extraction → graph → Leiden communities → summaries → local &amp; global search). Graph stores like <span class="mono">Neo4j</span> and frameworks like <span class="mono">LlamaIndex</span> / <span class="mono">LangChain</span> ship property-graph indexes. The concepts above are exactly what they automate — extract, merge, summarize, traverse.</p>
+        <div class="relative"><pre># Microsoft GraphRAG — full pipeline, config-driven
+pip install graphrag
+graphrag index --root ./project      # extract + build + community summaries
+graphrag query --method local  --query "How is Ada connected to SonarNet?"
+graphrag query --method global --query "What's the big picture?"
+
+# LlamaIndex property graph (alternative)
+from llama_index.core import PropertyGraphIndex
+index = PropertyGraphIndex.from_documents(docs)      # LLM extracts the graph
+index.as_query_engine().query("How is Ada connected to SonarNet?")</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 52 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2"><strong>GraphRAG</strong> indexes your documents into a <strong>knowledge graph</strong> — an LLM extracts entities (nodes) and relationships (edges), merging repeated mentions into single nodes — plus <strong>community summaries</strong>. At query time it <em>traverses</em> the graph to answer multi-hop "how is A connected to C?" questions that no single chunk contains, and <em>map-reduces</em> community summaries to answer global "big-picture" questions across the whole corpus. That's the leap over plain vector RAG (Day&nbsp;15), which only ever returns the top-k chunks nearest the query — great for local facts, blind to connections that live <em>between</em> chunks. The tradeoff is index cost (an LLM call per chunk), so use GraphRAG when relationships and global structure matter, vector RAG when they don't, and often both together. <strong>👉 Tomorrow — Day 53: continuing AIFromZero.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* GRAPHRAG-ENGINE-START */
+// ===== Day 52 · GraphRAG — build a knowledge graph, then traverse it, client-side, no network =====
+//
+// Six documents describe a small world. An LLM (simulated here) extracts (entity)-[relation]->(entity)
+// triples; they merge into one graph (repeated entities become ONE node); communities get summarized.
+// Then three query types show the payoff: a local fact (vector RAG is fine), a 5-hop connection (only
+// GraphRAG can join it), and a global big-picture (GraphRAG reduces community summaries; flat RAG can't).
+
+const ENTITIES = {
+  ada:         { label:'Ada',           kind:'person',  icon:'👤', x:95,  y:88,  comm:'A' },
+  nauticore:   { label:'Nauticore',     kind:'company', icon:'🏢', x:255, y:60,  comm:'A' },
+  beluga:      { label:'Beluga Corp',   kind:'company', icon:'🏢', x:430, y:112, comm:'A' },
+  rasmus:      { label:'Rasmus',        kind:'person',  icon:'👤', x:478, y:250, comm:'AB' },
+  deepcurrent: { label:'DeepCurrentAI', kind:'lab',     icon:'🔬', x:648, y:178, comm:'B' },
+  sonarnet:    { label:'SonarNet',      kind:'model',   icon:'🤖', x:738, y:328, comm:'B' },
+  marlin:      { label:'Marlin',        kind:'dataset', icon:'📊', x:548, y:388, comm:'B' },
+};
+// each edge remembers the source doc (1-indexed to match the corpus list)
+const EDGES = [
+  { s:'ada',         t:'nauticore',   rel:'founded',      doc:1 }, // 0
+  { s:'nauticore',   t:'beluga',      rel:'acquired by',  doc:2 }, // 1
+  { s:'beluga',      t:'rasmus',      rel:'led by',       doc:3 }, // 2
+  { s:'rasmus',      t:'deepcurrent', rel:'founded',      doc:4 }, // 3
+  { s:'deepcurrent', t:'sonarnet',    rel:'built',        doc:5 }, // 4
+  { s:'deepcurrent', t:'marlin',      rel:'curated',      doc:6 }, // 5
+  { s:'sonarnet',    t:'marlin',      rel:'trained on',   doc:6 }, // 6
+];
+const DOCS = [
+  { id:1, text:'Ada founded Nauticore, a startup that maps the ocean floor with sonar.', triple:'Ada –founded→ Nauticore', edge:0 },
+  { id:2, text:'In 2021, Beluga Corp acquired Nauticore to expand into marine data.',    triple:'Nauticore –acquired by→ Beluga Corp', edge:1 },
+  { id:3, text:'Beluga Corp is led by Rasmus, a veteran ocean-tech executive.',          triple:'Beluga Corp –led by→ Rasmus', edge:2 },
+  { id:4, text:'Before Beluga, Rasmus founded the research lab DeepCurrentAI.',           triple:'Rasmus –founded→ DeepCurrentAI', edge:3 },
+  { id:5, text:'DeepCurrentAI built SonarNet, a model that reads sonar imagery.',         triple:'DeepCurrentAI –built→ SonarNet', edge:4 },
+  { id:6, text:'SonarNet was trained on the Marlin dataset, curated by DeepCurrentAI.',   triple:'SonarNet –trained on→ Marlin', edge:6 },
+];
+const COMMUNITIES = {
+  A: { name:'Community A · the Nauticore acquisition', color:'cA',
+       text:'Ada’s ocean-mapping startup <b>Nauticore</b> was acquired by <b>Beluga Corp</b>, now led by <b>Rasmus</b>.' },
+  B: { name:'Community B · the DeepCurrentAI lab', color:'cB',
+       text:'<b>Rasmus’s</b> lab <b>DeepCurrentAI</b> built the <b>SonarNet</b> model, trained on its <b>Marlin</b> dataset.' },
+};
+
+const QUERIES = {
+  local: {
+    icon:'🎯', label:'Local',
+    q:'What did Ada found?',
+    note:'A simple, local fact — it lives inside one chunk, so plain vector RAG handles it fine.',
+    path:['ada','nauticore'], pathEdges:[0],
+    flatChunks:[1], flatNodes:['ada','nauticore'], flatVerdict:'good',
+    flatText:'Ada founded Nauticore, a sonar ocean-mapping startup.',
+    graphText:'Ada <b>founded Nauticore</b> — a one-hop lookup. Here GraphRAG and flat RAG agree; the graph earns nothing extra.',
+    compareNarr:'Both win. The answer sits inside a single chunk, so flat RAG retrieves it directly and GraphRAG’s one-hop traversal says the same thing. <b>For local facts, plain vector RAG is the cheaper choice</b> — save the graph for the hard questions.'
+  },
+  multihop: {
+    icon:'🔗', label:'Multi-hop',
+    q:'How is Ada connected to SonarNet?',
+    note:'A connect-the-dots question. The answer spans FIVE documents — no single chunk contains it.',
+    path:['ada','nauticore','beluga','rasmus','deepcurrent','sonarnet'], pathEdges:[0,1,2,3,4],
+    flatChunks:[1,5], flatNodes:['ada','sonarnet'], flatVerdict:'fail',
+    flatText:'The documents mention Ada founding Nauticore and DeepCurrentAI building SonarNet, but I see <b>no direct connection</b> between Ada and SonarNet.',
+    graphText:'Connected via a <b>5-hop chain</b>: Ada founded Nauticore → Nauticore was acquired by Beluga Corp → Beluga is led by Rasmus → Rasmus founded DeepCurrentAI → DeepCurrentAI built SonarNet.',
+    compareNarr:'This is the whole point of GraphRAG. Flat RAG grabs the two chunks nearest the words "Ada" and "SonarNet" — but they’re <b>disconnected</b>, so it declares no link. GraphRAG walks the merged graph edge by edge and <b>finds the path plain RAG can’t see</b>, because the connecting facts live BETWEEN the chunks.'
+  },
+  global: {
+    icon:'🌍', label:'Global',
+    q:'What’s the big picture across all documents?',
+    note:'A whole-corpus question. No chunk answers it, and top-k similarity only sees a fraction.',
+    path:[], pathEdges:[], comms:['A','B'],
+    flatChunks:[1,3,5], flatNodes:['ada','beluga','sonarnet'], flatVerdict:'part',
+    flatText:'I can see a few facts — Ada founded Nauticore, Beluga is led by Rasmus, DeepCurrentAI built SonarNet — but I only get the <b>3 most similar chunks</b>, so the overall structure is unclear.',
+    graphText:'<b>Two clusters bridged by Rasmus.</b> Cluster A: Ada’s startup Nauticore was acquired by Beluga (led by Rasmus). Cluster B: Rasmus’s lab DeepCurrentAI built SonarNet on its Marlin dataset. Rasmus links the acquisition world to the AI-research world.',
+    compareNarr:'Global "sensemaking" questions have no single source chunk. Flat RAG can only return top-k, so it gives a <b>fragmented, partial</b> answer. GraphRAG map-reduces the pre-computed <b>community summaries</b> and sees the entire structure — including the <b>Rasmus bridge</b> that ties both communities together.'
+  },
+};
+
+const ALLN = Object.keys(ENTITIES);
+const ALLE = EDGES.map((_,i)=>i);
+const NAME = k => ENTITIES[k].label;
+
+function chain(nodes){
+  const parts = [];
+  for (let i=0;i<nodes.length-1;i++){
+    const a=nodes[i], b=nodes[i+1];
+    const e = EDGES.find(x => (x.s===a&&x.t===b)||(x.s===b&&x.t===a));
+    parts.push(`<b>${esc(NAME(a))}</b> <span class="mono">–${esc(e?e.rel:'?')}→</span> <b>${esc(NAME(b))}</b>`);
+  }
+  return parts.join(' , ');
+}
+
+function buildBeats(qk){
+  const Q = QUERIES[qk];
+  const B = [];
+
+  B.push({ label:'The corpus (raw text)', focus:'corpus',
+    narr:'We start with <b>'+DOCS.length+' plain-text chunks</b>. Flat RAG would just embed these into a vector DB and stop. GraphRAG does more — it builds structure.',
+    docsHi:[], nodesLit:[], edgesLit:[], showEdges:[] });
+
+  B.push({ label:'Extract triples · docs 1–2', focus:'extract',
+    narr:'An LLM reads each chunk and pulls out <b>(entity)–[relation]→(entity)</b> triples. From D1–D2: <span class="triple">Ada –founded→ Nauticore</span> and <span class="triple">Nauticore –acquired by→ Beluga Corp</span>.',
+    docsHi:[1,2], nodesLit:['ada','nauticore','beluga'], edgesLit:[0,1], showEdges:[0,1] });
+
+  B.push({ label:'Extract triples · docs 3–4', focus:'extract',
+    narr:'From D3–D4: <span class="triple">Beluga Corp –led by→ Rasmus</span> and <span class="triple">Rasmus –founded→ DeepCurrentAI</span>. Notice <b>Rasmus</b> ties the business world to a research lab.',
+    docsHi:[3,4], nodesLit:['ada','nauticore','beluga','rasmus','deepcurrent'], edgesLit:[0,1,2,3], showEdges:[2,3] });
+
+  B.push({ label:'Extract triples · docs 5–6', focus:'extract',
+    narr:'From D5–D6: <span class="triple">DeepCurrentAI –built→ SonarNet</span>, plus the <b>Marlin</b> dataset. Every chunk contributed a few nodes and edges.',
+    docsHi:[5,6], nodesLit:ALLN.slice(), edgesLit:ALLE.slice(), showEdges:[4,5,6] });
+
+  B.push({ label:'Merge → one knowledge graph', focus:'graph',
+    narr:'The triples merge into a single graph. Crucially, the same entity from different chunks becomes <b>one node</b> — "Nauticore" appeared in D1 and D2 but is a <b>single node</b>, so the graph now KNOWS they are the same thing. <b>This is the connective tissue plain RAG never builds.</b>',
+    docsHi:[], nodesLit:ALLN.slice(), edgesLit:ALLE.slice(), showEdges:[] });
+
+  if (Q.comms){
+    B.push({ label:'Detect & summarize communities', focus:'comm',
+      narr:'GraphRAG clusters densely-linked nodes into <b>communities</b> and has the LLM write a short <b>summary</b> of each — here <b>Community A</b> (the Nauticore acquisition) and <b>Community B</b> (the DeepCurrentAI lab), bridged by <b>Rasmus</b>. These summaries are pre-computed once.',
+      docsHi:[], nodesLit:ALLN.slice(), edgesLit:ALLE.slice(), showEdges:[], comms:['A','B'] });
+  }
+
+  B.push({ label:'The question arrives', focus:'query',
+    narr:'The user asks:<br><span class="qbig">“'+esc(Q.q)+'”</span><br><span class="text-slate-500">'+esc(Q.note)+'</span>',
+    docsHi:[], nodesLit:ALLN.slice(), edgesLit:ALLE.slice(), showEdges:[], comms:Q.comms?['A','B']:[] });
+
+  B.push({ label:'Flat RAG: embed & grab top-k', focus:'flat',
+    narr:'<b>Flat RAG</b> embeds the question and pulls the <b>top-'+Q.flatChunks.length+'</b> most similar chunks — '+Q.flatChunks.map(c=>'D'+c).join(', ')+' — highlighted in amber. It never looks at the graph.',
+    docsHi:Q.flatChunks.slice(), nodesLit:ALLN.slice(), edgesLit:ALLE.slice(), showEdges:[],
+    comms:Q.comms?['A','B']:[], flatNodes:Q.flatNodes.slice(),
+    flat:{ chunks:Q.flatChunks, text:Q.flatText, verdict:Q.flatVerdict } });
+
+  if (Q.comms){
+    B.push({ label:'GraphRAG: map-reduce community summaries', focus:'global',
+      narr:'<b>GraphRAG</b> doesn’t grab chunks — it feeds the two <b>community summaries</b> to the LLM and reduces them into one global answer. It sees the whole structure, including the <b>Rasmus bridge</b> that joins both clusters.',
+      docsHi:[], nodesLit:ALLN.slice(), edgesLit:ALLE.slice(), showEdges:[], comms:['A','B'],
+      flatNodes:Q.flatNodes.slice(),
+      flat:{ chunks:Q.flatChunks, text:Q.flatText, verdict:Q.flatVerdict },
+      graph:{ comms:['A','B'], text:Q.graphText, verdict:'good' } });
+  } else {
+    const path = Q.path;
+    for (let h=1; h<path.length; h++){
+      const litN = path.slice(0, h+1);
+      const litE = Q.pathEdges.slice(0, h);
+      const last = h === path.length-1;
+      B.push({ label:'GraphRAG hop '+h+' → '+NAME(path[h]), focus:'traverse',
+        narr:'GraphRAG finds the seed entity <b>'+esc(NAME(path[0]))+'</b> in the question and <b>walks the edges</b>: '+chain(litN)+'.'+(last?' Reached <b>'+esc(NAME(path[h]))+'</b> — the connecting path is found.':''),
+        docsHi:litE.map(e=>EDGES[e].doc), nodesLit:ALLN.slice(), edgesLit:ALLE.slice(), showEdges:[],
+        seed:path[0], pathNodes:litN, pathEdges:litE, flatNodes:Q.flatNodes.slice(),
+        flat:{ chunks:Q.flatChunks, text:Q.flatText, verdict:Q.flatVerdict },
+        graph: last ? { path:path.slice(), text:Q.graphText, verdict:'good' } : null });
+    }
+  }
+
+  B.push({ label:'Compare: chunks vs connections', focus:'both',
+    narr:Q.compareNarr,
+    docsHi:[], nodesLit:ALLN.slice(), edgesLit:ALLE.slice(), showEdges:[],
+    comms:Q.comms?['A','B']:[], seed:Q.comms?null:Q.path[0],
+    pathNodes:Q.comms?[]:Q.path.slice(), pathEdges:Q.comms?[]:Q.pathEdges.slice(), flatNodes:Q.flatNodes.slice(),
+    flat:{ chunks:Q.flatChunks, text:Q.flatText, verdict:Q.flatVerdict },
+    graph:Q.comms ? { comms:['A','B'], text:Q.graphText, verdict:'good' } : { path:Q.path.slice(), text:Q.graphText, verdict:'good' } });
+
+  return B;
+}
+
+const state = { q:'multihop', beats:[], i:-1, run:null };
+/* GRAPHRAG-ENGINE-END */
+
+// ============================ rendering ============================
+function trim(x1,y1,x2,y2,r){ const dx=x2-x1, dy=y2-y1, L=Math.hypot(dx,dy)||1, ux=dx/L, uy=dy/L;
+  return [x1+ux*r, y1+uy*r, x2-ux*r, y2-uy*r]; }
+
+function renderGraph(){
+  const b = state.i>=0 ? state.beats[state.i] : null;
+  const nodesLit = new Set(b ? b.nodesLit : []);
+  const edgesLit = new Set(b ? b.edgesLit : []);
+  const pathN    = new Set(b && b.pathNodes ? b.pathNodes : []);
+  const pathE    = new Set(b && b.pathEdges ? b.pathEdges : []);
+  const flatN    = new Set(b && b.flatNodes ? b.flatNodes : []);
+  const comms    = new Set(b && b.comms ? b.comms : []);
+  const showE    = new Set(b && b.showEdges ? b.showEdges : []);
+  const seed     = b ? b.seed : null;
+  const anyPath  = pathE.size>0;
+
+  let svg = '<svg viewBox="0 0 830 440" role="img" aria-label="knowledge graph">';
+  svg += '<defs>'
+    + '<marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#cbd5e1"/></marker>'
+    + '<marker id="arp" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#6366f1"/></marker>'
+    + '</defs>';
+
+  // edges
+  EDGES.forEach((e,i) => {
+    const A = ENTITIES[e.s], Bn = ENTITIES[e.t];
+    const [x1,y1,x2,y2] = trim(A.x, A.y, Bn.x, Bn.y, 30);
+    let cls = 'gedge', marker = 'ar';
+    const live = edgesLit.has(i);
+    if (pathE.has(i)) { cls += ' path'; marker = 'arp'; }
+    else if (live) { cls += ' live'; if (anyPath) cls += ' dim'; }
+    else { cls += ' dim'; }
+    svg += `<line class="${cls}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" marker-end="url(#${marker})"/>`;
+    // edge label — show for path edges (traversal) or freshly-extracted edges
+    const showLbl = pathE.has(i) || showE.has(i);
+    const mx = (A.x+Bn.x)/2, my = (A.y+Bn.y)/2;
+    const w = e.rel.length*5.4 + 8;
+    svg += `<g class="gedge-lblwrap ${showLbl?'':'hidden'}">`
+      + `<rect x="${mx-w/2}" y="${my-8}" width="${w}" height="14" rx="4" fill="#fff" opacity="0.92"/>`
+      + `<text class="gedge-lbl ${pathE.has(i)?'path':''}" x="${mx}" y="${my+2}" text-anchor="middle">${esc(e.rel)}</text></g>`;
+  });
+
+  // nodes
+  ALLN.forEach(k => {
+    const n = ENTITIES[k];
+    const vis = nodesLit.has(k);
+    let cls = 'gnode-c';
+    if (comms.size){
+      if (n.comm === 'AB') cls += ' bridge';
+      else if (comms.has(n.comm)) cls += (n.comm==='A'?' commA':' commB');
+    }
+    if (flatN.has(k) && !pathN.has(k)) cls += ' flat';
+    if (k === seed) cls += ' seed';
+    else if (pathN.has(k)) cls += ' path';
+    svg += `<g class="gnode ${vis?'':'hidden'}">`
+      + `<circle class="${cls}" cx="${n.x}" cy="${n.y}" r="26"/>`
+      + `<text class="gnode-icon" x="${n.x}" y="${n.y+6}" text-anchor="middle">${n.icon}</text>`
+      + `<text class="gnode-kind" x="${n.x}" y="${n.y+40}" text-anchor="middle">${esc(n.kind)}</text>`
+      + `<text class="gnode-lbl" x="${n.x}" y="${n.y+52}" text-anchor="middle">${esc(n.label)}</text>`
+      + `</g>`;
+  });
+
+  svg += '</svg>';
+  $("graphWrap").innerHTML = svg;
+
+  // community bubbles
+  const showComms = b && b.comms && b.comms.length;
+  $("commWrap").innerHTML = ['A','B'].map(c => {
+    const C = COMMUNITIES[c];
+    return `<div class="cbubble ${C.color} ${showComms?'on':''}"><div class="font-bold text-[11px] mb-0.5">${esc(C.name)}</div><div>${C.text}</div></div>`;
+  }).join('');
+}
+
+function renderDocs(){
+  const b = state.i>=0 ? state.beats[state.i] : null;
+  const hi = new Set(b ? b.docsHi : []);
+  const edgesLit = new Set(b ? b.edgesLit : []);
+  $("docList").innerHTML = DOCS.map(d => {
+    const extracted = edgesLit.has(d.edge);
+    let cls = 'doc';
+    if (hi.has(d.id)) cls += ' hot';
+    else if (extracted) cls += ' ex';
+    const triple = extracted ? `<div class="doc-triple"><span class="triple">${esc(d.triple)}</span></div>` : '';
+    return `<div class="${cls}"><span class="doc-id">D${d.id}</span> <span class="doc-t">${esc(d.text)}</span>${triple}</div>`;
+  }).join('');
+}
+
+const VMAP = { good:['v-good','✓ connects the dots'], fail:['v-fail','✗ misses the connection'], part:['v-part','~ partial / fragmented'] };
+function verdictHTML(v){ const m=VMAP[v]; return `<span class="verdict ${m[0]}">${m[1]}</span>`; }
+
+function renderContrast(){
+  // walk backwards to the latest flat/graph state so it persists after its beat
+  let flat=null, graph=null;
+  for (let j=0; j<=state.i; j++){ const bb=state.beats[j]; if(bb.flat) flat=bb.flat; if(bb.graph) graph=bb.graph; }
+
+  if (flat){
+    $("flatVerdict").innerHTML = verdictHTML(flat.verdict);
+    $("flatChunks").innerHTML = 'retrieved: ' + flat.chunks.map(c=>`<span class="mono font-bold text-amber-700">D${c}</span>`).join(', ');
+    $("flatText").innerHTML = flat.text;
+  } else {
+    $("flatVerdict").innerHTML = ''; $("flatChunks").innerHTML = '';
+    $("flatText").innerHTML = 'Run the pipeline to see what flat RAG returns.';
+  }
+  if (graph){
+    $("graphVerdict").innerHTML = verdictHTML(graph.verdict);
+    if (graph.path){
+      $("graphPath").innerHTML = 'path: ' + graph.path.map(k=>`<span class="mono font-bold text-indigo-700">${esc(NAME(k))}</span>`).join(' <span class="text-indigo-400">→</span> ');
+    } else {
+      $("graphPath").innerHTML = 'used: ' + graph.comms.map(c=>`<span class="mono font-bold text-indigo-700">Community ${c}</span>`).join(' + ');
+    }
+    $("graphText").innerHTML = graph.text;
+  } else {
+    $("graphVerdict").innerHTML = ''; $("graphPath").innerHTML = '';
+    $("graphText").innerHTML = 'Run the pipeline to see how GraphRAG answers.';
+  }
+}
+
+function renderBeats(){
+  $("beats").innerHTML = state.beats.map((bt,i) => {
+    let c = "beat fut";
+    if (i === state.i) c = "beat cur";
+    else if (i < state.i) c = "beat past";
+    return `<div class="${c}"><div class="b-n">${i+1}</div><div>${esc(bt.label)}</div></div>`;
+  }).join("");
+}
+
+function renderNarr(){
+  const b = state.i>=0 ? state.beats[state.i] : null;
+  $("narr").innerHTML = b ? b.narr : 'Press <b>Run</b> — the pipeline will build a graph from the documents, then answer the question.';
+}
+
+function renderAll(){ renderGraph(); renderDocs(); renderContrast(); renderBeats(); renderNarr(); }
+
+// ============================ stepping ============================
+function stepForward(){
+  if (state.i >= state.beats.length-1) return false;
+  state.i++;
+  renderAll();
+  return true;
+}
+function resetFlow(){
+  if (state.run){ clearInterval(state.run); state.run=null; $("run").textContent="▶ Run"; }
+  state.beats = buildBeats(state.q);
+  state.i = -1;
+  document.querySelectorAll("#qPick button").forEach(x => x.classList.toggle('on', x.dataset.q===state.q));
+  const Q = QUERIES[state.q];
+  $("viewNote").innerHTML = `Question selected: <b>${Q.icon} ${Q.label}</b> — “${esc(Q.q)}”. ${esc(Q.note)} Press <b>Run</b>, or <b>Step</b> through the pipeline.`;
+  renderAll();
+}
+
+// ============================ controls ============================
+$("step").onclick = () => { if (state.run){ clearInterval(state.run); state.run=null; $("run").textContent="▶ Run"; } stepForward(); };
+$("run").onclick = () => {
+  if (state.run){ clearInterval(state.run); state.run=null; $("run").textContent="▶ Run"; return; }
+  if (state.i >= state.beats.length-1) resetFlow();
+  $("run").textContent = "⏸ Pause";
+  state.run = setInterval(() => { if (!stepForward()){ clearInterval(state.run); state.run=null; $("run").textContent="▶ Replay"; } }, 1500);
+};
+$("rst").onclick = () => resetFlow();
+document.querySelectorAll("#qPick button").forEach(bn => bn.onclick = () => { state.q = bn.dataset.q; resetFlow(); });
+
+// boot: land on multi-hop (the money demo) and auto-run once
+resetFlow();
+$("run").textContent = "⏸ Pause";
+state.run = setInterval(() => { if (!stepForward()){ clearInterval(state.run); state.run=null; $("run").textContent="▶ Replay"; } }, 1500);
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. The problem: flat RAG returns disconnected chunks", why:"Plain RAG (Day&nbsp;15) chops documents into chunks, embeds them, and at query time returns the <strong>top-k chunks nearest the question</strong> in vector space. Perfect for “look up one fact.” But a <em>connect-the-dots</em> question — “how is A related to C?” — has an answer that lives in <strong>no single chunk</strong>; it's spread across many, and each of those bridging chunks is individually far from the question in embedding space. So similarity search grabs the endpoints and misses the middle.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">Q: "How is Ada linked to SonarNet?"<br><br>flat RAG → [chunk: Ada…] &nbsp; [chunk: SonarNet…]<br>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ╲ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ╱<br>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;❓ no bridge between them<br><br>the connecting facts sit in OTHER chunks</div>`, code:`# flat RAG: similarity only
+chunks = retrieve_topk(embed(question), k=3)
+# returns the chunks most SIMILAR to the words in Q —
+# not the chunks that CONNECT the entities in Q.` },
+ { title:"2. Step 1 of GraphRAG: extract entities & relations", why:"GraphRAG adds an <strong>indexing</strong> step. An LLM reads every chunk and extracts <strong>(entity)–[relation]→(entity)</strong> triples — people, orgs, models as nodes; verbs as edges. This is where the raw text becomes structure. It's the expensive part (an LLM call per chunk), and it's done once, offline.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">"Ada founded Nauticore"<br>&nbsp; &nbsp; &nbsp; &nbsp; ↓ &nbsp;LLM extract<br>(Ada) —[founded]→ (Nauticore)<br><br>entity &nbsp; relation &nbsp; entity<br>+ a type per entity (person / company / …)</div>`, code:`def extract(chunk):
+    # LLM → strict JSON
+    return {"entities": [{"name","type"}, ...],
+            "relations":[{"source","relation","target"}, ...]}
+# one call per chunk, at index time.` },
+ { title:"3. Merge into one graph — the key move", why:"Add every triple to a graph. The decisive step: the <strong>same entity mentioned in different chunks becomes ONE node</strong>. “Nauticore” from chunk&nbsp;1 and chunk&nbsp;2 collapse into a single node, so the graph now <em>knows</em> they're the same thing. That de-duplication is the <strong>connective tissue plain RAG never builds</strong> — it's what lets you walk from one document's facts into another's.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">Ada→Nauticore &nbsp;(from D1)<br>Nauticore→Beluga (from D2)<br>&nbsp; &nbsp; &nbsp; ↓ merge on "Nauticore"<br>Ada → Nauticore → Beluga<br><br>one node, two chunks — now they CONNECT</div>`, code:`G = DiGraph()
+for triple in all_triples:
+    key = triple.name.lower()      # normalize
+    G.add_node(key)                # same name → same node
+    G.add_edge(src, tgt, relation=..., source_doc=id)
+# repeated mentions unify → a connected graph.` },
+ { title:"4. Communities & summaries", why:"GraphRAG clusters densely-linked nodes into <strong>communities</strong> (Microsoft uses the <span class='mono'>Leiden</span> algorithm) and has the LLM write a short <strong>summary</strong> of each. These summaries are pre-computed at index time. They're the secret to <em>global</em> questions: instead of stuffing the whole corpus into one prompt, you reduce over a handful of community summaries.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">┌ Community A ┐ &nbsp; ┌ Community B ┐<br>│ Ada·Nauticore│─Rasmus─│ DeepCurrent │<br>│ Beluga·Rasmus│bridge &nbsp;│ SonarNet·… &nbsp;│<br>└──────────────┘ &nbsp; └─────────────┘<br>each → a 2-sentence LLM summary</div>`, code:`comms = leiden(G.to_undirected())
+summaries = {c: llm_summarize(G.subgraph(c)) for c in comms}
+# "Community A: Ada's startup Nauticore, acquired by Beluga…"
+# pre-computed once; reused by every global query.` },
+ { title:"5. Local vs global queries", why:"GraphRAG answers two kinds of question differently. A <strong>local</strong> (or multi-hop) query is about specific entities — it <em>traverses</em> the graph from a seed entity. A <strong>global</strong> query is about the whole corpus (“what are the main themes?”) — it <em>map-reduces</em> the community summaries. Same index, two retrieval modes. Picking the right one is most of the art.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">LOCAL &nbsp;→ traverse from seed entity<br>&nbsp; &nbsp; "how is Ada linked to SonarNet?"<br><br>GLOBAL → map-reduce community summaries<br>&nbsp; &nbsp; "what's the big picture?"</div>`, code:`if kind == "local":     # entity-anchored
+    return traverse(G, entities_in(q))
+if kind == "global":    # whole-corpus
+    return map_reduce(summaries, q)` },
+ { title:"6. Multi-hop traversal is the answer", why:"For “how is A connected to C?”, find the entities named in the question, then <strong>walk the graph</strong> — a shortest-path / BFS between them. The path <em>is</em> the answer: each edge is a relationship, and each edge remembers its source chunk (so the answer is grounded and citable). GraphRAG feeds the <em>path</em>, not raw chunks, to the LLM to phrase the reply. This is exactly what flat RAG cannot do — it has no edges to walk.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">Ada → Nauticore → Beluga → Rasmus<br>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; → DeepCurrentAI → SonarNet<br><br>5 hops · spans 5 documents<br>flat RAG returns only the 2 endpoints</div>`, code:`path = shortest_path(G, "ada", "sonarnet")
+hops = [f'{u} —{rel(u,v)}→ {v}' for u,v in edges(path)]
+answer = llm(f"Q + relationship chain: {hops}")
+# the chain no single chunk contained.` },
+ { title:"7. GraphRAG vs vector RAG — when each wins", why:"Neither is strictly better. <strong>Vector RAG</strong> wins on <em>local fact lookup</em> — cheap, fast, one chunk answers. <strong>GraphRAG</strong> wins on <em>multi-hop connections</em> and <em>global sensemaking</em> — questions whose answers live between chunks or span the whole corpus. Because they're complementary, production systems often run <strong>both</strong> and route (or blend) by query type.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">local fact &nbsp; &nbsp; → vector RAG &nbsp;(cheap ✓)<br>multi-hop link → GraphRAG traverse<br>global picture &nbsp;→ GraphRAG global<br><br>best systems: route between the two</div>`, code:`route = {
+  "local":    vector_rag,       # Day 15 — top-k chunks
+  "multihop": graph_traverse,   # walk edges
+  "global":   graph_global,     # reduce summaries
+}[classify(question)]` },
+ { title:"8. Cost — why it's not the default", why:"GraphRAG's index is <strong>expensive</strong>: an LLM call per chunk for extraction, plus a call per community for summaries — often <strong>10–100×</strong> the index cost of embedding-only RAG, and it must be re-run when documents change. Queries are also heavier (traversal + multiple LLM calls for global map-reduce). That's the whole tradeoff: pay more at index and query time to answer questions plain RAG simply can't. Reach for it when relationships and global structure matter; stick with vector RAG when they don't.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">INDEX cost<br>vector RAG &nbsp;≈ 1x &nbsp;(just embed)<br>GraphRAG &nbsp; ≈ 10–100x (LLM per chunk<br>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; + community summaries)<br><br>worth it for connections & big-picture Qs</div>`, code:`# rough index budget
+vector_rag: embed(each_chunk)            # ~1x
+graphrag:   llm_extract(each_chunk)      # ~Nx
+          + llm_summarize(each_community)
+# more to build → answers vector RAG can't reach.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
