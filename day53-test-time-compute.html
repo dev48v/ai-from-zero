@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 53 — Test-Time Compute</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .triple { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; font-weight:700; background:#eef2ff; color:#4338ca; padding:1px 6px; border-radius:6px; white-space:nowrap; }
+
+  /* ===== controls ===== */
+  .seg { display:inline-flex; border:1px solid #e2e8f0; border-radius:11px; overflow:hidden; }
+  .seg button { padding:7px 14px; font-size:12.5px; font-weight:800; background:#fff; color:#475569; border-right:1px solid #e2e8f0; transition:all .18s; }
+  .seg button:last-child { border-right:0; }
+  .seg button.on { background:#6366f1; color:#fff; }
+  .seg.amber button.on { background:#f59e0b; }
+  .seg.emer  button.on { background:#10b981; }
+
+  input[type=range] { -webkit-appearance:none; appearance:none; height:7px; border-radius:999px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:999px; background:#6366f1; cursor:pointer; border:3px solid #fff; box-shadow:0 2px 8px rgba(99,102,241,.5); }
+  input[type=range]::-moz-range-thumb { width:20px; height:20px; border-radius:999px; background:#6366f1; cursor:pointer; border:3px solid #fff; }
+
+  /* ===== chart ===== */
+  #chartWrap svg { width:100%; height:auto; display:block; }
+  .c-grid { stroke:#eef2f7; stroke-width:1; }
+  .c-axis { stroke:#cbd5e1; stroke-width:1.5; }
+  .c-lbl  { font-size:10px; fill:#94a3b8; font-weight:700; }
+  .c-base { stroke:#94a3b8; stroke-width:2; stroke-dasharray:5 4; }
+  .c-maj  { fill:none; stroke:#6366f1; stroke-width:3.5; }
+  .c-bo   { fill:none; stroke:#10b981; stroke-width:3.5; }
+  .c-mark { stroke:#0f172a; stroke-width:1.5; stroke-dasharray:3 3; }
+  .c-dotmaj { fill:#6366f1; stroke:#fff; stroke-width:2; }
+  .c-dotbo  { fill:#10b981; stroke:#fff; stroke-width:2; }
+
+  /* ===== stat tiles ===== */
+  .tile { border:1.5px solid #e2e8f0; border-radius:13px; padding:11px 13px; background:#fff; }
+  .tile .k { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; }
+  .tile .v { font-size:24px; font-weight:900; color:#0f172a; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .tile .s { font-size:10.5px; color:#64748b; margin-top:1px; }
+
+  /* ===== question grid ===== */
+  .qcell { border:1.5px solid #e2e8f0; border-radius:10px; padding:7px 8px; background:#fff; transition:all .25s; }
+  .qcell.solved { border-color:#10b981; background:#ecfdf5; }
+  .qcell.unsolved { border-color:#fecaca; background:#fff5f5; }
+  .qcell.hq { box-shadow:0 0 0 3px rgba(99,102,241,.22); border-color:#6366f1; }
+  .qbar { height:6px; border-radius:999px; background:#e2e8f0; overflow:hidden; margin-top:5px; }
+  .qbar > i { display:block; height:100%; border-radius:999px; transition:width .3s; }
+
+  /* ===== sample chips ===== */
+  .chip { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:7px; font-size:12px; font-weight:800; font-family:ui-monospace,Menlo,Consolas,monospace; transition:all .18s; }
+  .chip.correct { background:#dcfce7; color:#047857; border:1px solid #86efac; }
+  .chip.wrong   { background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; }
+  .tallybar { height:22px; border-radius:7px; display:flex; overflow:hidden; border:1px solid #e2e8f0; }
+  .tallybar > span { display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; color:#fff; min-width:0; transition:flex-basis .3s; }
+
+  .verdict { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:10px; font-weight:800; }
+  .v-good { background:#ecfdf5; color:#047857; }
+  .v-fail { background:#fef2f2; color:#dc2626; }
+
+  .qpick.on { background:#6366f1; color:#fff; border-color:#6366f1; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 53</div>
+      <h1 class="text-xl font-bold">🧮 Test-Time Compute — <strong>spend more compute at <em>answer time</em> to get a better answer, without training a bigger model.</strong> A single sample from a model is a noisy guess: on a hard question it is right only part of the time. The insight behind <strong>inference-time scaling</strong> is that you can trade extra compute <em>at inference</em> for accuracy. Draw the model's answer <strong>N times</strong> instead of once and <strong>aggregate</strong>: <strong>self-consistency</strong> takes the majority vote across the samples, and <strong>best-of-N</strong> uses a <em>verifier</em> to keep the single best one. Or let the model <strong>"think longer"</strong> — o1 and DeepSeek-R1 spend thousands of hidden reasoning tokens exploring, checking, and backtracking before committing, which is <em>search inside one long chain of thought</em>. Accuracy climbs with compute — steeply at first, then it <strong>plateaus</strong> (diminishing returns), and the two methods plateau in different places: majority vote can never beat the fraction of questions the model is right about <em>on average</em>, while best-of-N keeps climbing toward 100% because it only needs <em>one</em> correct sample the verifier can spot. This trades off against <strong>pretraining scale</strong>: a small model given a big test-time budget can match a much larger model answering once — sometimes it's cheaper to think harder than to train bigger. Below: a toy task where one sample is often wrong. Slide the <strong>compute budget</strong> up and watch the accuracy curve climb and level off — no network, a baked-in probability model, deterministic and reproducible.</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">One sample is a guess. Spend more compute, <span style="color:#4338ca">sample many times</span>, and aggregate.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Pick how you spend the compute — <b style="color:#4338ca">self-consistency</b> (majority vote, no verifier) or <b style="color:#047857">best-of-N</b> (a verifier keeps the best sample) — then drag the <b>compute budget</b> up from 1 sample to 64 and watch accuracy climb on the curve. Twelve toy questions of mixed difficulty run in your browser with a baked-in probability model — no LLM, no network, deterministic seed. Notice where each method <em>plateaus</em>, which hard questions each one can and can't fix, and how bumping the <b>base model size</b> (more pretraining) shifts the whole curve up.</p>
+      </div>
+
+      <!-- ===================== CARD A · controls ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="grid md:grid-cols-2 gap-5">
+          <div>
+            <div class="text-[10px] uppercase font-bold text-indigo-600 mb-1.5">How to spend the compute</div>
+            <div class="seg" id="stratPick">
+              <button data-s="single"   >1× Single</button>
+              <button data-s="majority"  class="on">🗳️ Self-consistency</button>
+              <button data-s="bestof"    >🏅 Best-of-N</button>
+            </div>
+            <div class="text-[10px] uppercase font-bold text-indigo-600 mb-1.5 mt-4">Base model (pretraining scale)</div>
+            <div class="seg emer" id="modelPick">
+              <button data-m="small"  class="on">Small</button>
+              <button data-m="medium" >Medium</button>
+              <button data-m="large"  >Large</button>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-[10px] uppercase font-bold text-indigo-600">Compute budget · <span id="nLbl">8</span> samples</div>
+              <button id="sweep" class="bg-slate-900 text-white px-3 py-1 rounded-lg font-semibold text-[11px]">▶ Sweep budget</button>
+            </div>
+            <input id="nSlider" type="range" min="1" max="64" step="1" value="8" class="w-full" />
+            <div class="flex justify-between text-[9px] text-slate-400 font-bold mt-1 mono"><span>1</span><span>8</span><span>16</span><span>32</span><span>64</span></div>
+            <div id="viewNote" class="text-[11px] rounded-lg px-3 py-2 bg-indigo-50 border border-indigo-200 text-indigo-800 mt-3"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD B · chart + narration ===================== -->
+      <div class="grid lg:grid-cols-3 gap-5 mb-5">
+        <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-4">
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-xs uppercase font-bold text-indigo-600">📈 Accuracy vs compute</div>
+            <div class="text-[10px] text-slate-400">x = samples (log scale) · y = accuracy</div>
+          </div>
+          <div id="chartWrap"></div>
+          <div class="grid grid-cols-3 gap-2 mt-2" id="tiles"></div>
+        </div>
+        <div class="lg:col-span-1 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div class="text-[10px] uppercase font-bold text-indigo-600 mb-1">What's happening</div>
+          <div id="narr" class="text-sm text-slate-700 min-h-[140px]"></div>
+          <div class="mt-3 pt-3 border-t border-slate-200">
+            <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Legend</div>
+            <div class="text-[11px] text-slate-600 space-y-1">
+              <div><span class="inline-block w-4 h-1.5 rounded-full align-middle" style="background:#6366f1"></span> self-consistency (majority vote)</div>
+              <div><span class="inline-block w-4 h-1.5 rounded-full align-middle" style="background:#10b981"></span> best-of-N (verifier)</div>
+              <div><span class="inline-block w-4 h-0.5 align-middle" style="background:#94a3b8;border-top:2px dashed #94a3b8"></span> single sample (baseline)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD C · per-question grid ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-2">The 12 questions <span class="text-slate-400 normal-case font-normal">— each has a fixed <b>single-sample accuracy</b> (how often one guess is right). Green = solved at the current budget (expected accuracy ≥ 50%). The <span style="color:#4338ca;font-weight:700">outlined</span> one is the sample-roll question below.</span></div>
+        <div id="qGrid" class="grid sm:grid-cols-3 md:grid-cols-4 gap-2"></div>
+      </div>
+
+      <!-- ===================== CARD D · sample roll ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-2">Watch the samples accumulate <span class="text-slate-400 normal-case font-normal">— one hard question, the model's actual (seeded, deterministic) answers</span></div>
+        <div class="grid md:grid-cols-2 gap-5">
+          <div>
+            <div class="text-[13px] text-slate-700 mb-1"><b>Q.</b> A bat and a ball cost <b>$1.10</b> together. The bat costs <b>$1.00 more</b> than the ball. How much is the ball?</div>
+            <div class="text-[11px] text-slate-500 mb-2">A = $0.10 (the intuitive trap) &nbsp;·&nbsp; B = $0.15 &nbsp;·&nbsp; <b class="text-emerald-700">C = $0.05 (correct)</b> &nbsp;·&nbsp; D = $1.00</div>
+            <div id="chips" class="flex flex-wrap gap-1.5 mb-3"></div>
+            <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Vote tally over the <span id="rollN">8</span> samples</div>
+            <div id="tally" class="tallybar mb-1"></div>
+          </div>
+          <div class="grid grid-cols-1 gap-3">
+            <div class="rounded-xl border p-3" id="majBox" style="border-color:#c7d2fe;background:#f8f9ff;">
+              <div class="flex items-center justify-between mb-1"><div class="text-xs font-bold text-indigo-700">🗳️ Self-consistency picks</div><div id="majV"></div></div>
+              <div id="majTxt" class="text-sm text-slate-700"></div>
+            </div>
+            <div class="rounded-xl border p-3" id="boBox" style="border-color:#a7f3d0;background:#f0fdf4;">
+              <div class="flex items-center justify-between mb-1"><div class="text-xs font-bold text-emerald-700">🏅 Best-of-N (verifier) picks</div><div id="boV"></div></div>
+              <div id="boTxt" class="text-sm text-slate-700"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto"><strong>Test-time compute</strong> buys accuracy at inference instead of at training. <strong>Self-consistency</strong> (majority vote over N samples) is verifier-free but plateaus at the fraction of questions the model is right about <em>on average</em> — it can even lock in a confident wrong answer. <strong>Best-of-N</strong> keeps climbing toward 100% because a verifier only needs <em>one</em> correct sample among the N — but it needs a verifier, and a weak verifier caps the gain. Both curves are <strong>concave</strong>: the first extra samples help a lot, later ones barely move the needle — that's the <strong>compute–accuracy tradeoff</strong>. And it trades against <strong>pretraining scale</strong>: a small model with a big test-time budget can match a bigger model answering once, which is why o1 / DeepSeek-R1 "think longer" and why labs now scale <em>inference</em> compute, not just parameters.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">From one noisy guess to spending compute for accuracy</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / MATH FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build test-time compute — sample, vote, verify, scale</h2>
+    <p class="text-slate-500 mb-8">Reproduce the LOOK engine as real code: model one noisy sample, draw N of them, aggregate by majority vote and by best-of-N with a verifier, plot the accuracy-vs-compute curve, and see the o1-style "think longer" knob. Every block is the exact idea flowing through LOOK, followed by the library or API you'd reach for.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">One sample is a coin-flip on hard questions</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Model each question by its <strong>single-sample accuracy</strong> <span class="mono">p</span> — the probability one sampled answer is correct. Easy questions have <span class="mono">p</span> near 1; hard ones sit below 0.5, so a single guess is more often wrong than right. This <span class="mono">p</span> is what a real model gives you when you sample at temperature &gt; 0.</p>
+        <div class="relative"><pre>import random
+
+# 12 toy questions, each with its own single-sample accuracy p.
+# (In reality p comes from the model itself, sampled at temperature > 0.)
+QUESTIONS = [0.92, 0.85, 0.78, 0.70, 0.62, 0.58,
+             0.54, 0.48, 0.42, 0.35, 0.25, 0.15]
+
+def one_sample(p: float) -> bool:
+    "A single sampled answer: correct with probability p."
+    return random.random() &lt; p
+
+# Single-sample accuracy of the whole set = just the average p.
+baseline = sum(QUESTIONS) / len(QUESTIONS)      # ~0.55 — barely a coin flip</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Spend compute: draw N samples instead of one</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Test-time compute means calling the model <strong>N times</strong> on the same prompt at temperature &gt; 0, so each call is an independent draw. N is the <strong>compute budget</strong> — cost and latency scale roughly linearly with it. The whole game is turning those N noisy draws into one better answer.</p>
+        <div class="relative"><pre>def draw_samples(question, n, temperature=0.8):
+    "Call the model n times on the same prompt — n independent guesses."
+    return [sample_answer(question, temperature) for _ in range(n)]
+
+# With a real model this is n API calls (or one call with n=... where supported):
+#   client.messages.create(model="claude-opus-5", messages=[...])  # x N
+# Cost & latency grow ~linearly in n — that's the compute you're spending.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Self-consistency — take the majority vote</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The cheapest aggregation (Wang et al., 2022): draw N samples, <strong>keep the most common answer</strong>. No verifier needed. Analytically, if the correct answer beats the model's favourite wrong answer with probability <span class="mono">p</span>, majority-vote accuracy is the binomial tail <span class="mono">P(correct votes &gt; N/2)</span>. That rises toward 1 when <span class="mono">p &gt; 0.5</span> — and toward <strong>0</strong> when <span class="mono">p &lt; 0.5</span>, because voting only amplifies whatever the model believes most often.</p>
+        <div class="relative"><pre>from collections import Counter
+from math import comb
+
+def majority_vote(samples):
+    "Self-consistency: the answer that appears most often wins."
+    return Counter(samples).most_common(1)[0][0]
+
+def majority_accuracy(p, n):
+    "P(correct is the majority) for a binary correct-vs-wrong contest."
+    acc = 0.0
+    for c in range(n + 1):                       # c = # correct votes
+        pm = comb(n, c) * p**c * (1 - p)**(n - c)
+        if   2 * c &gt;  n: acc += pm               # correct wins
+        elif 2 * c == n: acc += 0.5 * pm         # tie, break 50/50
+    return acc
+# p=0.62, n=1 -> 0.62 ; n=15 -> 0.84 ; n=63 -> 0.94  (climbs, then plateaus)
+# p=0.42, n=63 -> ~0.10  (LOCKS IN the wrong answer — voting can't save it)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Best-of-N — let a verifier keep the best sample</h3></div>
+        <p class="text-sm text-slate-600 mb-3">If you have a <strong>verifier</strong> — a reward model, a unit test, a checker — you don't need the majority; you need <em>one</em> good sample the verifier can recognize. With a perfect verifier, accuracy is <span class="mono">1 − (1 − p)<sup>N</sup></span> (a.k.a. <strong>pass@N</strong>): the chance that at least one of N samples is correct. That climbs toward 1 for <em>any</em> <span class="mono">p &gt; 0</span> — it fixes even the hard questions majority vote gives up on. The catch: a real verifier is imperfect, and its accuracy caps the gain.</p>
+        <div class="relative"><pre>def best_of_n(samples, verifier):
+    "Keep the sample the verifier scores highest."
+    return max(samples, key=verifier)
+
+def best_of_n_accuracy(p, n):
+    "pass@N with a perfect verifier: P(at least one of n samples correct)."
+    return 1 - (1 - p) ** n
+# p=0.42, n=1 -> 0.42 ; n=8 -> 0.98 ; n=16 -> 0.9997
+# One correct sample is enough — the verifier finds the needle in the haystack.
+# Reality check: a verifier with accuracy v &lt; 1 caps this well below pass@N.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">The accuracy-vs-compute curve — and why it plateaus</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Sweep N and average over the question set — exactly the LOOK chart. Both curves are <strong>concave</strong>: the first few extra samples buy a lot of accuracy, later ones almost nothing (<strong>diminishing returns</strong>). Plotting N on a log axis makes the tail visibly flatten. The gap between the two plateaus is the value of having a verifier.</p>
+        <div class="relative"><pre>def curve(questions, strategy, budgets):
+    acc_fn = {"majority": majority_accuracy,
+              "best_of_n": best_of_n_accuracy}[strategy]
+    return {n: sum(acc_fn(p, n) for p in questions) / len(questions)
+            for n in budgets}
+
+budgets = [1, 2, 4, 8, 16, 32, 64]
+print(curve(QUESTIONS, "majority",  budgets))  # 0.55 -> ~0.66 then flat
+print(curve(QUESTIONS, "best_of_n", budgets))  # 0.55 -> ~0.98, keeps climbing
+# Majority plateaus below 100% (bounded by the frac. of questions with p>0.5);
+# best-of-N keeps climbing because it only needs one correct sample per question.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">"Think longer" — search inside one chain of thought (o1 / R1)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Sampling-and-voting is <em>parallel</em> test-time compute. o1 and DeepSeek-R1 add <em>sequential</em> test-time compute: one long chain of thought that explores, self-checks, and backtracks before answering — thousands of hidden reasoning tokens. It's implicit search inside a single sample, and it's exposed as a simple knob rather than an N-of-samples loop.</p>
+        <div class="relative"><pre>import anthropic
+client = anthropic.Anthropic()
+
+# Claude: adaptive thinking + an effort knob = "how long to think".
+msg = client.messages.create(
+    model="claude-opus-5", max_tokens=8000,
+    thinking={"type": "adaptive"},          # let the model decide how much to think
+    output_config={"effort": "high"},       # low | medium | high | xhigh | max
+    messages=[{"role": "user", "content": "Prove or disprove: ..."}],
+)
+
+# OpenAI o1 exposes the same idea as reasoning_effort:
+#   client.chat.completions.create(model="o1", reasoning_effort="high", ...)
+# DeepSeek-R1 emits a long &lt;think&gt;...&lt;/think&gt; trace before the final answer.
+# More thinking tokens = more test-time compute = better answers on hard problems.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">7</div><h3 class="font-bold text-lg">Test-time compute vs training a bigger model</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The tradeoff DeepMind made concrete (Snell et al., 2024): on many problems, giving a <em>small</em> model more test-time compute beats using a <em>much larger</em> model that answers once — up to a point. A bigger base model raises every sample's <span class="mono">p</span>, which shifts the whole curve up (bump the model size in LOOK to see it). So the question isn't "bigger or think-harder" — it's how to split a fixed budget between the two.</p>
+        <div class="relative"><pre># A bigger base model raises single-sample accuracy p on every question.
+def scale_params(questions, boost):           # "boost" ~ more pretraining
+    return [min(p + boost, 0.985) for p in questions]
+
+small = QUESTIONS                              # small model, cheap per sample
+large = scale_params(QUESTIONS, boost=0.15)   # big model, expensive per sample
+
+# small model + N samples  vs  large model + 1 sample, at matched FLOPs:
+small_ttc = curve(small, "best_of_n", [16])[16]   # think harder
+large_1x  = sum(large) / len(large)               # train bigger, answer once
+# Often small_ttc >= large_1x — cheaper to add inference compute than params.
+# Compute-optimal test-time scaling picks N per question by difficulty.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">8</div><h3 class="font-bold text-lg">In practice — the real toolkit</h3></div>
+        <p class="text-sm text-slate-600 mb-3">You rarely hand-roll all of this. Reasoning models (<span class="mono">o1</span>, <span class="mono">o3</span>, DeepSeek-<span class="mono">R1</span>, Claude with extended thinking / <span class="mono">effort</span>) bake sequential test-time compute into the model. For parallel scaling, sample N completions and aggregate — majority vote for free-form reasoning, or a trained <strong>reward model</strong> / <strong>process reward model</strong> for best-of-N. Serving stacks (<span class="mono">vLLM</span>, <span class="mono">SGLang</span>) make the N parallel samples cheap.</p>
+        <div class="relative"><pre># Parallel test-time compute with any chat model: self-consistency in ~10 lines.
+from collections import Counter
+
+def self_consistent_answer(client, prompt, n=16):
+    outs = [client.messages.create(
+                model="claude-opus-5", max_tokens=2000,
+                messages=[{"role": "user", "content": prompt}],
+            ).content[0].text
+            for _ in range(n)]
+    finals = [extract_final_answer(o) for o in outs]   # your parser
+    return Counter(finals).most_common(1)[0][0]        # majority vote
+
+# Sequential test-time compute: just pick a reasoning model + turn the knob up.
+#   Claude:   effort="xhigh" / adaptive thinking
+#   OpenAI:   model="o3", reasoning_effort="high"
+#   DeepSeek: model="deepseek-reasoner"  (R1-style long CoT)
+# Best-of-N with a verifier: score N samples with a reward model, keep argmax.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 53 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2"><strong>Test-time compute</strong> (inference-time scaling) buys answer quality by spending more compute at <em>inference</em> rather than training a bigger model. Sample the model N times and aggregate: <strong>self-consistency</strong> (majority vote) is verifier-free but plateaus at the fraction of questions the model is right about on average; <strong>best-of-N</strong> uses a verifier and climbs toward 100% because it only needs one correct sample. o1 / DeepSeek-R1 add <em>sequential</em> compute — one long chain of thought that searches, checks, and backtracks. Accuracy rises with compute but with sharp <strong>diminishing returns</strong>, and it trades off against <strong>pretraining scale</strong>: a small model given a big test-time budget can match a bigger model answering once. <strong>👉 Tomorrow — Day 54: continuing AIFromZero.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+const clamp = (x,lo,hi) => Math.max(lo, Math.min(hi, x));
+const mean  = a => a.reduce((s,x)=>s+x,0) / a.length;
+const pct   = a => Math.round(a*100) + '%';
+
+/* TTC-ENGINE-START */
+// ===== Day 53 · Test-time compute — sample, vote/verify, watch accuracy climb & plateau. No network. =====
+//
+// Twelve toy questions, each with a fixed single-sample accuracy p (how often ONE guess is right).
+// Spend compute by drawing N samples, then aggregate: self-consistency = majority vote (binomial tail),
+// best-of-N = pass@N with a perfect verifier = 1-(1-p)^N. Bump the base model to raise every p.
+
+const NMAX = 64;
+const BASE_P = [0.92, 0.85, 0.78, 0.70, 0.62, 0.58, 0.54, 0.48, 0.42, 0.35, 0.25, 0.15];
+const MODEL_BOOST = { small:0.0, medium:0.08, large:0.15 };
+const HQ = 8;                       // highlighted (sample-roll) question: BASE_P[8] = 0.42
+const HQ_CORRECT = 'C';             // the bat-and-ball question; C = $0.05
+
+// log-factorials for a numerically-safe binomial pmf (no overflow, no NaN)
+const logFact = [0];
+for (let i=1;i<=NMAX;i++) logFact[i] = logFact[i-1] + Math.log(i);
+
+function binomPmf(n, k, p){
+  if (p <= 0) return k === 0 ? 1 : 0;
+  if (p >= 1) return k === n ? 1 : 0;
+  const logC = logFact[n] - logFact[k] - logFact[n-k];
+  return Math.exp(logC + k*Math.log(p) + (n-k)*Math.log(1-p));
+}
+// self-consistency: correct is chosen iff it out-votes the model's favourite wrong answer
+function majorityAcc(p, n){
+  let acc = 0;
+  for (let c=0;c<=n;c++){
+    const pm = binomPmf(n, c, p);
+    if (2*c > n) acc += pm;
+    else if (2*c === n) acc += 0.5*pm;
+  }
+  return acc;
+}
+// best-of-N with a perfect verifier = pass@N
+function bestOfN(p, n){ return 1 - Math.pow(1-p, n); }
+
+function probs(){ const b = MODEL_BOOST[state.model]; return BASE_P.map(p => clamp(p + b, 0.03, 0.985)); }
+function qAcc(p, n, strat){ return strat==='single' ? p : strat==='majority' ? majorityAcc(p,n) : bestOfN(p,n); }
+function aggAcc(P, n, strat){ return mean(P.map(p => qAcc(p, n, strat))); }
+
+// deterministic, seeded per-sample answers for the highlighted question
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function sampleRoll(p){
+  const rng = mulberry32(0xC0FFEE);          // fixed seed → increasing N reveals more of one fixed run
+  const out = [];
+  for (let i=0;i<NMAX;i++){
+    const u = rng();
+    if (u < p) out.push('C');                 // correct
+    else { const v = (u - p) / (1 - p); out.push(v < 0.62 ? 'A' : v < 0.82 ? 'B' : 'D'); } // 'A' = intuitive trap
+  }
+  return out;
+}
+
+const STRAT = {
+  single:   { icon:'1×', label:'Single sample',    color:'#94a3b8' },
+  majority: { icon:'🗳️', label:'Self-consistency', color:'#6366f1' },
+  bestof:   { icon:'🏅', label:'Best-of-N',         color:'#10b981' },
+};
+const state = { strategy:'majority', model:'small', n:8, sweep:null };
+/* TTC-ENGINE-END */
+
+// ============================ chart geometry ============================
+const CW=720, CH=320, PADL=52, PADR=18, PADT=18, PADB=40;
+const PLW = CW-PADL-PADR, PLH = CH-PADT-PADB;
+const xForN = n => PADL + (Math.log2(n)/Math.log2(NMAX)) * PLW;
+const yForA = a => PADT + (1-a) * PLH;
+const TICKS = [1,2,4,8,16,32,64];
+
+function poly(strat, P){
+  let pts = [];
+  for (let n=1;n<=NMAX;n++) pts.push(xForN(n).toFixed(1)+','+yForA(aggAcc(P,n,strat)).toFixed(1));
+  return pts.join(' ');
+}
+
+function renderChart(){
+  const P = probs();
+  const base = mean(P);
+  let svg = '<svg viewBox="0 0 '+CW+' '+CH+'" role="img" aria-label="accuracy versus compute">';
+  // horizontal gridlines + y labels (0..100%)
+  for (let a=0;a<=1.0001;a+=0.25){
+    const y = yForA(a);
+    svg += '<line class="c-grid" x1="'+PADL+'" y1="'+y.toFixed(1)+'" x2="'+(CW-PADR)+'" y2="'+y.toFixed(1)+'"/>';
+    svg += '<text class="c-lbl" x="'+(PADL-8)+'" y="'+(y+3).toFixed(1)+'" text-anchor="end">'+Math.round(a*100)+'%</text>';
+  }
+  // x ticks
+  TICKS.forEach(n => {
+    const x = xForN(n);
+    svg += '<line class="c-grid" x1="'+x.toFixed(1)+'" y1="'+PADT+'" x2="'+x.toFixed(1)+'" y2="'+(CH-PADB)+'"/>';
+    svg += '<text class="c-lbl" x="'+x.toFixed(1)+'" y="'+(CH-PADB+15)+'" text-anchor="middle">'+n+'</text>';
+  });
+  svg += '<text class="c-lbl" x="'+(PADL+PLW/2)+'" y="'+(CH-4)+'" text-anchor="middle">samples N (compute budget)</text>';
+  // axes
+  svg += '<line class="c-axis" x1="'+PADL+'" y1="'+PADT+'" x2="'+PADL+'" y2="'+(CH-PADB)+'"/>';
+  svg += '<line class="c-axis" x1="'+PADL+'" y1="'+(CH-PADB)+'" x2="'+(CW-PADR)+'" y2="'+(CH-PADB)+'"/>';
+  // single-sample baseline
+  const yb = yForA(base);
+  svg += '<line class="c-base" x1="'+PADL+'" y1="'+yb.toFixed(1)+'" x2="'+(CW-PADR)+'" y2="'+yb.toFixed(1)+'"/>';
+  svg += '<text class="c-lbl" x="'+(CW-PADR)+'" y="'+(yb-5).toFixed(1)+'" text-anchor="end" style="fill:#94a3b8">single sample '+pct(base)+'</text>';
+  // curves — dim the one not selected
+  const dimMaj = state.strategy==='bestof'   ? ' opacity="0.32"' : '';
+  const dimBo  = state.strategy==='majority' ? ' opacity="0.32"' : '';
+  const showMaj = state.strategy!=='single', showBo = state.strategy!=='single';
+  if (showMaj) svg += '<polyline class="c-maj" points="'+poly('majority',P)+'"'+dimMaj+'/>';
+  if (showBo)  svg += '<polyline class="c-bo"  points="'+poly('bestof',P)+'"'+dimBo+'/>';
+  // current-N marker
+  const xm = xForN(state.n);
+  svg += '<line class="c-mark" x1="'+xm.toFixed(1)+'" y1="'+PADT+'" x2="'+xm.toFixed(1)+'" y2="'+(CH-PADB)+'"/>';
+  if (state.strategy==='single'){
+    svg += '<circle class="c-dotmaj" cx="'+xm.toFixed(1)+'" cy="'+yForA(base).toFixed(1)+'" r="6" style="fill:#94a3b8"/>';
+  } else if (state.strategy==='majority'){
+    svg += '<circle class="c-dotmaj" cx="'+xm.toFixed(1)+'" cy="'+yForA(aggAcc(P,state.n,'majority')).toFixed(1)+'" r="6"/>';
+  } else {
+    svg += '<circle class="c-dotbo"  cx="'+xm.toFixed(1)+'" cy="'+yForA(aggAcc(P,state.n,'bestof')).toFixed(1)+'" r="6"/>';
+  }
+  svg += '</svg>';
+  $("chartWrap").innerHTML = svg;
+}
+
+// ============================ tiles / narration / grids ============================
+function renderTiles(){
+  const P = probs(), base = mean(P);
+  const cur = aggAcc(P, state.n, state.strategy);
+  const gain = cur - base;
+  $("tiles").innerHTML =
+    tile('Single sample', pct(base), 'accuracy of 1 guess') +
+    tile('At '+state.n+' samples', pct(cur), STRAT[state.strategy].label, STRAT[state.strategy].color) +
+    tile('Compute vs 1×', (state.strategy==='single'?'1':state.n)+'×', (gain>=0?'+':'')+pct(gain)+' accuracy');
+}
+function tile(k,v,s,color){ return '<div class="tile"><div class="k">'+esc(k)+'</div><div class="v"'+(color?' style="color:'+color+'"':'')+'>'+esc(v)+'</div><div class="s">'+esc(s)+'</div></div>'; }
+
+function renderNarr(){
+  const P = probs(), base = mean(P);
+  const majEnd = aggAcc(P, NMAX, 'majority'), boEnd = aggAcc(P, NMAX, 'bestof');
+  let n = '';
+  if (state.strategy==='single'){
+    n = 'A <b>single sample</b> gets <b>'+pct(base)+'</b> right — barely better than a coin flip on this set. The budget slider does nothing here: you’re spending no extra compute. Switch to a strategy that <em>uses</em> the extra samples.';
+  } else if (state.strategy==='majority'){
+    n = '<b>Self-consistency</b> takes the majority vote over your <b>'+state.n+'</b> samples: <b>'+pct(aggAcc(P,state.n,'majority'))+'</b>. It climbs fast at first, then <b>plateaus around '+pct(majEnd)+'</b> — no matter how much compute you add, it can’t exceed the fraction of questions the model is right about <em>on average</em>. The hard questions (p&lt;50%) stay red: voting only amplifies the model’s favourite answer, right or wrong.';
+  } else {
+    n = '<b>Best-of-N</b> lets a verifier keep the single best sample: <b>'+pct(aggAcc(P,state.n,'bestof'))+'</b>. Because it only needs <em>one</em> correct sample among the '+state.n+', it keeps climbing toward <b>'+pct(boEnd)+'</b> and fixes even the hardest questions — the payoff of having a verifier. Notice the steep-then-flat shape: <b>diminishing returns</b>.';
+  }
+  $("narr").innerHTML = n;
+}
+
+function renderNote(){
+  const m = { small:'Small', medium:'Medium', large:'Large' }[state.model];
+  $("viewNote").innerHTML = 'Strategy: <b>'+STRAT[state.strategy].icon+' '+esc(STRAT[state.strategy].label)+'</b> · Base model: <b>'+m+'</b>. Bigger base model → every sample is more likely correct → the whole curve lifts (that’s pretraining scale).';
+}
+
+function renderGrid(){
+  const P = probs();
+  $("qGrid").innerHTML = P.map((p,i) => {
+    const a = qAcc(p, state.n, state.strategy);
+    const solved = a >= 0.5;
+    const cls = 'qcell '+(solved?'solved':'unsolved')+(i===HQ?' hq':'');
+    const barCol = solved ? '#10b981' : '#ef4444';
+    return '<div class="'+cls+'">'
+      + '<div class="flex items-center justify-between"><span class="text-[10px] font-bold text-slate-400">Q'+(i+1)+(i===HQ?' ★':'')+'</span>'
+      + '<span class="text-[11px] font-bold" style="color:'+(solved?'#047857':'#b91c1c')+'">'+pct(a)+'</span></div>'
+      + '<div class="text-[10px] text-slate-500">1-guess '+pct(p)+'</div>'
+      + '<div class="qbar"><i style="width:'+Math.round(a*100)+'%;background:'+barCol+'"></i></div></div>';
+  }).join('');
+}
+
+const OPT = { A:'$0.10', B:'$0.15', C:'$0.05', D:'$1.00' };
+function renderRoll(){
+  const P = probs(), p = P[HQ];
+  const roll = sampleRoll(p).slice(0, state.n);
+  $("rollN").textContent = state.n;
+  $("chips").innerHTML = roll.map(a => '<span class="chip '+(a===HQ_CORRECT?'correct':'wrong')+'" title="'+OPT[a]+'">'+a+'</span>').join('');
+  // tally
+  const cnt = {A:0,B:0,C:0,D:0}; roll.forEach(a=>cnt[a]++);
+  const order = ['A','B','C','D'], colr = {A:'#f59e0b',B:'#a78bfa',C:'#10b981',D:'#64748b'};
+  $("tally").innerHTML = order.map(k => cnt[k] ? '<span style="flex-basis:'+(cnt[k]/state.n*100)+'%;background:'+colr[k]+'">'+k+' '+cnt[k]+'</span>' : '').join('');
+  // majority pick
+  let maj = order[0]; order.forEach(k => { if (cnt[k] > cnt[maj]) maj = k; });
+  const majOK = maj === HQ_CORRECT;
+  $("majV").innerHTML = '<span class="verdict '+(majOK?'v-good':'v-fail')+'">'+(majOK?'✓ correct':'✗ wrong')+'</span>';
+  $("majTxt").innerHTML = 'Most-voted answer is <b class="mono">'+maj+' = '+OPT[maj]+'</b>. '
+    + (majOK ? 'The crowd landed on the right answer.' : 'The crowd locked in the <b>intuitive trap</b> ($0.10) — extra votes just entrench it. A bigger base model would lift p&nbsp;above&nbsp;50% and flip this.');
+  // best-of-N
+  const anyC = roll.includes('C');
+  $("boV").innerHTML = '<span class="verdict '+(anyC?'v-good':'v-fail')+'">'+(anyC?'✓ correct':'✗ none yet')+'</span>';
+  $("boTxt").innerHTML = anyC
+    ? 'At least one sample was <b class="mono">C = $0.05</b>; the verifier picks it and ignores the majority. <b>One good sample is enough.</b>'
+    : 'None of the first '+state.n+' samples was correct — nothing for the verifier to keep. Raise the budget until a <b class="mono">C</b> appears.';
+}
+
+function renderAll(){ renderChart(); renderTiles(); renderNarr(); renderNote(); renderGrid(); renderRoll(); }
+
+// ============================ controls ============================
+function setStrategy(s){ state.strategy = s; document.querySelectorAll('#stratPick button').forEach(b=>b.classList.toggle('on', b.dataset.s===s)); renderAll(); }
+function setModel(m){ state.model = m; document.querySelectorAll('#modelPick button').forEach(b=>b.classList.toggle('on', b.dataset.m===m)); renderAll(); }
+function setN(n){ state.n = n; $("nSlider").value = n; $("nLbl").textContent = n; renderAll(); }
+
+document.querySelectorAll('#stratPick button').forEach(b => b.onclick = () => setStrategy(b.dataset.s));
+document.querySelectorAll('#modelPick button').forEach(b => b.onclick = () => setModel(b.dataset.m));
+$("nSlider").oninput = e => setN(parseInt(e.target.value, 10));
+$("sweep").onclick = () => {
+  if (state.sweep){ clearInterval(state.sweep); state.sweep=null; $("sweep").textContent='▶ Sweep budget'; return; }
+  if (state.strategy==='single') setStrategy('majority');
+  setN(1); $("sweep").textContent='⏸ Sweeping';
+  state.sweep = setInterval(() => {
+    const nxt = state.n >= NMAX ? null : Math.min(NMAX, state.n + Math.max(1, Math.round(state.n*0.35)));
+    if (nxt===null){ clearInterval(state.sweep); state.sweep=null; $("sweep").textContent='▶ Replay sweep'; return; }
+    setN(nxt);
+  }, 550);
+};
+
+// boot
+setStrategy('majority'); setModel('small'); setN(8);
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. One sample is a noisy guess", why:"Sampling an LLM at temperature&nbsp;&gt;&nbsp;0 makes it <em>stochastic</em>: ask the same hard question twice and you can get different answers. Model each question by its <strong>single-sample accuracy</strong> <span class='mono'>p</span> — the probability one sampled answer is correct. On easy questions <span class='mono'>p</span> is near 1; on genuinely hard ones it sits below 0.5, so a single guess is <em>more often wrong than right</em>. That noise is exactly what test-time compute exploits.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">ask once  →  🎲  correct with prob p<br><br>easy Q:  p = 0.9  (usually right)<br>hard Q:  p = 0.35 (usually WRONG)<br><br>one draw = a coin weighted by p</div>`, code:`p = single_sample_accuracy(question)   # 0..1
+answer = sample(model, question, temperature=0.8)
+correct = (random() < p)               # one noisy draw` },
+ { title:"2. Spend compute: draw N samples", why:"Test-time (inference-time) compute means calling the model <strong>N times</strong> on the same prompt instead of once. N is the <strong>compute budget</strong> — cost and latency grow roughly linearly with it. You now hold N independent guesses; the whole art is turning them into one better answer. This is the <em>parallel</em> flavour of test-time compute (the <em>sequential</em> flavour is thinking longer, step&nbsp;6).", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">prompt → [model] → sample₁<br>prompt → [model] → sample₂<br>&nbsp;&nbsp;&nbsp;&nbsp;⋮&nbsp;&nbsp;&nbsp;(N times)&nbsp;&nbsp;&nbsp;&nbsp;⋮<br>prompt → [model] → sampleₙ<br><br>cost ≈ N × one call</div>`, code:`samples = [sample(model, q, temperature=0.8)
+           for _ in range(N)]           # N independent draws
+# N is the knob: more compute at answer-time, same weights.` },
+ { title:"3. Self-consistency = majority vote", why:"The cheapest way to aggregate (Wang et&nbsp;al., 2022): draw N samples and <strong>keep the most common answer</strong>. No verifier required. If the correct answer out-votes the model’s favourite wrong answer with probability <span class='mono'>p</span>, majority accuracy is the <strong>binomial tail</strong> <span class='mono'>P(correct&nbsp;votes&nbsp;&gt;&nbsp;N/2)</span>. It rises toward&nbsp;1 when <span class='mono'>p&nbsp;&gt;&nbsp;0.5</span> and toward&nbsp;<strong>0</strong> when <span class='mono'>p&nbsp;&lt;&nbsp;0.5</span> — voting amplifies whatever the model believes most, right or wrong.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">C A C C B C A C  (8 samples)<br>tally: C×5  A×2  B×1<br>→ majority = C ✓<br><br>p&gt;0.5 → climbs to 1<br>p&lt;0.5 → collapses to 0</div>`, code:`from collections import Counter
+def majority_vote(samples):
+    return Counter(samples).most_common(1)[0][0]
+# accuracy = P(Binomial(N, p) > N/2)  + ½·P(=N/2)` },
+ { title:"4. Best-of-N needs a verifier", why:"If you have a <strong>verifier</strong> — a reward model, a unit test, a proof checker — you don’t need the majority; you need <em>one</em> sample it can recognize as correct. With a perfect verifier, accuracy is <strong>pass@N</strong> = <span class='mono'>1&nbsp;−&nbsp;(1−p)<sup>N</sup></span>: the chance at least one of N samples is right. That climbs toward&nbsp;1 for <em>any</em> <span class='mono'>p&nbsp;&gt;&nbsp;0</span>, fixing even the hard questions majority vote abandons. The catch: real verifiers are imperfect, and verifier accuracy caps the gain.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">samples: A A C A  (only one C)<br>verifier scores each → keeps C ✓<br><br>pass@N = 1 − (1−p)^N<br>p=0.42: N=1 → 0.42 · N=8 → 0.98</div>`, code:`def best_of_n(samples, verifier):
+    return max(samples, key=verifier)   # keep the best
+# perfect-verifier accuracy = 1 - (1 - p)**N   (pass@N)` },
+ { title:"5. Diminishing returns & the plateau", why:"Sweep N and average over the questions — the LOOK curve. Both methods are <strong>concave</strong>: the first extra samples buy a lot of accuracy, later ones almost none. But they plateau in <em>different places</em>. <strong>Majority vote</strong> is capped by the fraction of questions with <span class='mono'>p&nbsp;&gt;&nbsp;0.5</span> — it can never fix a question the model gets wrong more than half the time. <strong>Best-of-N</strong> keeps rising toward 100% because it only needs one correct sample. The gap between the plateaus is the value of a verifier.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">acc ↑<br>best-of-N &nbsp;╱‾‾‾‾‾ (→100%)<br>majority &nbsp;&nbsp;╱‾‾‾‾ (plateau &lt;100%)<br>single &nbsp;&nbsp;&nbsp;––––––––<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;compute N →</div>`, code:`acc = {N: mean(acc_fn(p, N) for p in questions)
+       for N in [1,2,4,8,16,32,64]}
+# concave in N: steep, then flat (log-x makes it obvious)` },
+ { title:"6. “Think longer” — o1 / DeepSeek-R1", why:"Sampling-and-voting is <em>parallel</em> compute. o1 and DeepSeek-R1 add <em>sequential</em> compute: <strong>one long chain of thought</strong> that explores approaches, checks itself, and backtracks before answering — thousands of hidden reasoning tokens. It’s implicit search inside a single sample, learned via RL, and exposed as a simple <span class='mono'>effort</span> / <span class='mono'>reasoning_effort</span> knob rather than an N-of-samples loop. More thinking tokens = more test-time compute = better answers on hard problems.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">Q → &lt;think&gt; try A… wrong,<br>&nbsp;&nbsp;&nbsp;&nbsp;backtrack → try B… check✓ &lt;/think&gt;<br>&nbsp;&nbsp;&nbsp;&nbsp;→ final answer<br><br>knob: effort = low → max</div>`, code:`# Claude: adaptive thinking + effort knob
+client.messages.create(model="claude-opus-5",
+    thinking={"type":"adaptive"},
+    output_config={"effort":"high"}, messages=[...])
+# OpenAI o1: reasoning_effort="high"  ·  R1: long <think>...` },
+ { title:"7. Test-time compute vs bigger models", why:"The tradeoff DeepMind made concrete (Snell et&nbsp;al., 2024): on many problems, a <em>small</em> model with more test-time compute beats a <em>much larger</em> model that answers once — up to a point. A bigger base model raises every sample’s <span class='mono'>p</span>, lifting the whole curve (bump the model size in LOOK). So it isn’t “bigger vs think-harder” in the abstract — it’s how to split a fixed budget: <strong>compute-optimal</strong> test-time scaling even picks N per question by difficulty.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">small model + 16 samples<br>&nbsp;&nbsp;&nbsp;&nbsp;≈ or &gt;<br>big model + 1 sample<br><br>(at matched FLOPs, on many tasks)</div>`, code:`small_ttc = best_of_n_accuracy(mean(small_p), 16)
+large_1x  = mean(large_p)     # bigger model, one shot
+# often small_ttc >= large_1x: cheaper to think than to scale` },
+ { title:"8. When to reach for it", why:"Test-time compute shines when answers are <strong>verifiable or votable</strong> (math, code, structured reasoning) and when quality matters more than latency/cost. It’s wasteful on easy questions (one sample already nails them) and on tasks with no verifier and no clear “majority.” In practice you combine both flavours: pick a reasoning model for sequential depth, and sample-and-aggregate for parallel breadth — spending the extra compute only where it pays.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">verifiable / votable Q → sample N + vote/verify<br>hard reasoning → reasoning model, effort↑<br>easy Q → one sample (don’t overspend)<br><br>best systems: route compute by difficulty</div>`, code:`if easy(q):           answer once           # cheap
+elif verifier_avail:  best_of_n(sample(q,N), verifier)
+elif votable(q):      majority_vote(sample(q,N))
+else:                 reasoning_model(q, effort="high")` },
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
