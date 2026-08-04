@@ -55,6 +55,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 51 — Model Context Protocol (MCP)](https://dev48v.infy.uk/ai/days/day51-model-context-protocol.html) — `day51-model-context-protocol.html`
 - [AIFromZero · Day 52 — GraphRAG](https://dev48v.infy.uk/ai/days/day52-graphrag.html) — `day52-graphrag.html`
 - [AIFromZero · Day 53 — Test-Time Compute](https://dev48v.infy.uk/ai/days/day53-test-time-compute.html) — `day53-test-time-compute.html`
+- [AIFromZero · Day 54 — Lost in the Middle](https://dev48v.infy.uk/ai/days/day54-lost-in-the-middle.html) — `day54-lost-in-the-middle.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

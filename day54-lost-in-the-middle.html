@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 54 — Lost in the Middle</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .triple { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; font-weight:700; background:#eef2ff; color:#4338ca; padding:1px 6px; border-radius:6px; white-space:nowrap; }
+
+  /* ===== controls ===== */
+  .seg { display:inline-flex; border:1px solid #e2e8f0; border-radius:11px; overflow:hidden; }
+  .seg button { padding:7px 14px; font-size:12.5px; font-weight:800; background:#fff; color:#475569; border-right:1px solid #e2e8f0; transition:all .18s; }
+  .seg button:last-child { border-right:0; }
+  .seg button.on { background:#6366f1; color:#fff; }
+  .seg.amber button.on { background:#f59e0b; }
+  .seg.emer  button.on { background:#10b981; }
+
+  input[type=range] { -webkit-appearance:none; appearance:none; height:7px; border-radius:999px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:999px; background:#6366f1; cursor:pointer; border:3px solid #fff; box-shadow:0 2px 8px rgba(99,102,241,.5); }
+  input[type=range]::-moz-range-thumb { width:20px; height:20px; border-radius:999px; background:#6366f1; cursor:pointer; border:3px solid #fff; }
+
+  /* ===== chart ===== */
+  #chartWrap svg { width:100%; height:auto; display:block; }
+  .c-grid { stroke:#eef2f7; stroke-width:1; }
+  .c-axis { stroke:#cbd5e1; stroke-width:1.5; }
+  .c-lbl  { font-size:10px; fill:#94a3b8; font-weight:700; }
+  .c-ghost { fill:none; stroke:#cbd5e1; stroke-width:2; stroke-dasharray:3 4; }
+  .c-cur  { fill:none; stroke-width:3.5; }
+  .c-mark { stroke:#0f172a; stroke-width:1.5; stroke-dasharray:3 3; }
+  .c-dot  { stroke:#fff; stroke-width:2; }
+
+  /* ===== stat tiles ===== */
+  .tile { border:1.5px solid #e2e8f0; border-radius:13px; padding:11px 13px; background:#fff; }
+  .tile .k { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; }
+  .tile .v { font-size:24px; font-weight:900; color:#0f172a; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .tile .s { font-size:10.5px; color:#64748b; margin-top:1px; }
+
+  /* ===== document stack heatmap ===== */
+  #stack { display:flex; flex-wrap:wrap; gap:5px; }
+  .slot { width:34px; height:34px; border-radius:8px; display:flex; align-items:center; justify-content:center;
+          font-size:11px; font-weight:800; color:#fff; font-family:ui-monospace,Menlo,Consolas,monospace;
+          border:2px solid transparent; transition:all .25s; cursor:default; text-shadow:0 1px 2px rgba(0,0,0,.25); }
+  .slot.needle { border-color:#0f172a; box-shadow:0 0 0 3px rgba(15,23,42,.18); transform:scale(1.12); z-index:2; }
+
+  /* ===== retrieval trial chips ===== */
+  .chip { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:7px; font-size:13px; font-weight:800; font-family:ui-monospace,Menlo,Consolas,monospace; transition:all .18s; }
+  .chip.correct { background:#dcfce7; color:#047857; border:1px solid #86efac; }
+  .chip.wrong   { background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; }
+  .tallybar { height:22px; border-radius:7px; display:flex; overflow:hidden; border:1px solid #e2e8f0; }
+  .tallybar > span { display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; color:#fff; min-width:0; transition:flex-basis .3s; }
+
+  .verdict { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:10px; font-weight:800; }
+  .v-good { background:#ecfdf5; color:#047857; }
+  .v-fail { background:#fef2f2; color:#dc2626; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 54</div>
+      <h1 class="text-xl font-bold">🕳️ Lost in the Middle — <strong>an LLM does not read a long context evenly.</strong> Bury a single fact — a <strong>needle</strong> — inside a long stack of documents and ask the model to retrieve it, and how reliably it succeeds depends heavily on <em>where</em> the fact sits. Facts at the very <strong>start</strong> of the context (<em>primacy</em>) or the very <strong>end</strong> (<em>recency</em>) are recalled reliably; a fact in the <strong>middle</strong> is far more likely to be missed. Plot accuracy against needle position and you get a <strong>U-shaped curve</strong> — high at both edges, sagging in the middle — the finding of Liu et&nbsp;al., 2023, <em>"Lost in the Middle: How Language Models Use Long Contexts."</em> And it gets <strong>worse as the context grows</strong>: the more documents you stuff in, the deeper the middle sags — so a 100k-token window does <strong>not</strong> mean 100k tokens of <em>usable</em> attention. Long context ≠ used context. Below: place a needle at any position among <strong>N documents</strong>, slide the <strong>context length</strong> up, and a baked-in, deterministic position-accuracy model shows retrieval collapsing in the middle and worsening as the context grows. Plot the <strong>U-curve</strong>, watch the document heat-map, toggle model profiles, and roll seeded retrieval trials — no network, no LLM, seeded and reproducible.</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">The ends are read. The <span style="color:#dc2626">middle</span> gets lost.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Drop a <b>needle</b> fact into one of <b>N documents</b> and drag it from the <b style="color:#4338ca">start</b> through the <b style="color:#dc2626">middle</b> to the <b style="color:#047857">end</b>. Then grow the <b>context length</b> and watch the U-curve's middle collapse. A baked-in, deterministic model (primacy&nbsp;+&nbsp;recency at the edges, a middle floor that decays as documents pile up) runs entirely in your browser — no LLM, no network, seeded and reproducible. Toggle the model profile to see the U deepen or flatten.</p>
+      </div>
+
+      <!-- ===================== CARD A · controls ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="grid md:grid-cols-2 gap-5">
+          <div>
+            <div class="text-[10px] uppercase font-bold text-indigo-600 mb-1.5">Model profile</div>
+            <div class="seg" id="profPick">
+              <button data-p="standard" class="on">Standard LLM</button>
+              <button data-p="longctx"  >Long-context-tuned</button>
+              <button data-p="small"    >Small / weak</button>
+            </div>
+            <div class="text-[11px] text-slate-500 mt-2" id="profNote"></div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-[10px] uppercase font-bold text-indigo-600">Context length · <span id="ctxLbl">24</span> documents</div>
+              <button id="sweep" class="bg-slate-900 text-white px-3 py-1 rounded-lg font-semibold text-[11px]">▶ Sweep needle</button>
+            </div>
+            <input id="ctxSlider" type="range" min="3" max="60" step="1" value="24" class="w-full" />
+            <div class="flex justify-between text-[9px] text-slate-400 font-bold mt-1 mono"><span>3</span><span>15</span><span>30</span><span>45</span><span>60</span></div>
+
+            <div class="flex items-center justify-between mb-1 mt-4">
+              <div class="text-[10px] uppercase font-bold text-indigo-600">Needle position · doc <span id="posLbl">12</span> of <span id="posMax">24</span></div>
+              <div class="text-[10px] font-bold" id="posZone"></div>
+            </div>
+            <input id="posSlider" type="range" min="1" max="24" step="1" value="12" class="w-full" />
+            <div class="flex justify-between text-[9px] text-slate-400 font-bold mt-1 mono"><span>◀ start</span><span>middle</span><span>end ▶</span></div>
+          </div>
+        </div>
+        <div id="viewNote" class="text-[11px] rounded-lg px-3 py-2 bg-indigo-50 border border-indigo-200 text-indigo-800 mt-4"></div>
+      </div>
+
+      <!-- ===================== CARD B · chart + narration ===================== -->
+      <div class="grid lg:grid-cols-3 gap-5 mb-5">
+        <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-4">
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-xs uppercase font-bold text-indigo-600">📉 Retrieval accuracy vs needle position</div>
+            <div class="text-[10px] text-slate-400">x = position (start → end) · y = accuracy</div>
+          </div>
+          <div id="chartWrap"></div>
+          <div class="grid grid-cols-3 gap-2 mt-2" id="tiles"></div>
+        </div>
+        <div class="lg:col-span-1 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div class="text-[10px] uppercase font-bold text-indigo-600 mb-1">What's happening</div>
+          <div id="narr" class="text-sm text-slate-700 min-h-[140px]"></div>
+          <div class="mt-3 pt-3 border-t border-slate-200">
+            <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Legend</div>
+            <div class="text-[11px] text-slate-600 space-y-1">
+              <div><span class="inline-block w-4 h-1.5 rounded-full align-middle" id="curSwatch" style="background:#6366f1"></span> current context (<span id="legN">24</span> docs)</div>
+              <div><span class="inline-block w-4 h-0.5 align-middle" style="background:#cbd5e1;border-top:2px dashed #cbd5e1"></span> short context (<span id="legShort">5</span> docs) · shallow U</div>
+              <div><span class="inline-block w-4 h-0.5 align-middle" style="background:#cbd5e1;border-top:2px dashed #cbd5e1"></span> long context (<span id="legLong">60</span> docs) · deep U</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD C · document stack heatmap ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="text-xs uppercase font-bold text-indigo-600 mb-2">The document stack <span class="text-slate-400 normal-case font-normal">— each box is a document; colour = how reliably the model retrieves a fact placed there (<span style="color:#047857;font-weight:700">green</span> = high, <span style="color:#dc2626;font-weight:700">red</span> = low). Bright ends, dark middle. The ★ is your needle.</span></div>
+        <div id="stack"></div>
+        <div class="flex items-center gap-3 mt-3 text-[10px] font-bold text-slate-400">
+          <span class="mono">START</span>
+          <div style="flex:1;height:8px;border-radius:999px;background:linear-gradient(90deg,#ef4444,#f59e0b,#22c55e,#f59e0b,#ef4444)"></div>
+          <span class="mono">END</span>
+        </div>
+      </div>
+
+      <!-- ===================== CARD D · seeded retrieval trials ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-xs uppercase font-bold text-indigo-600">Seeded retrieval trials <span class="text-slate-400 normal-case font-normal">— run the same needle 16 times at the current position; deterministic per seed</span></div>
+          <button id="reroll" class="bg-slate-100 text-slate-700 px-3 py-1 rounded-lg font-semibold text-[11px] border border-slate-200">🎲 re-roll seed (<span id="seedLbl">2727</span>)</button>
+        </div>
+        <div class="grid md:grid-cols-2 gap-5">
+          <div>
+            <div class="text-[13px] text-slate-700 mb-2"><b>Q.</b> "What is the passphrase hidden in the documents?" &nbsp;·&nbsp; the needle sentence sits at <b id="trPos">doc 12</b>. The model's model-predicted accuracy there is <b id="trModel">—</b>.</div>
+            <div id="trChips" class="flex flex-wrap gap-1.5 mb-3"></div>
+            <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Found vs missed over 16 trials</div>
+            <div id="trTally" class="tallybar"></div>
+          </div>
+          <div class="rounded-xl border p-3" id="trBox" style="border-color:#c7d2fe;background:#f8f9ff;">
+            <div class="flex items-center justify-between mb-1"><div class="text-xs font-bold text-indigo-700">🔎 Retrieval outcome</div><div id="trVerdict"></div></div>
+            <div id="trTxt" class="text-sm text-slate-700"></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto"><strong>Lost in the middle</strong> is why "it's in the context" is not the same as "the model used it." Retrieval accuracy traces a <strong>U</strong> across position — strong at the <strong>edges</strong> (primacy&nbsp;+&nbsp;recency), weak in the <strong>middle</strong> — and the middle collapses further as the context grows, because the background retrievability of an interior document decays with total length. The fixes are structural, not magical: <strong>reorder by relevance</strong> so the best evidence lands at the top and bottom, <strong>rerank</strong> retrieved chunks with a cross-encoder and keep only the few that matter, and <strong>put the key facts at the edges</strong> of the prompt. Everything above is a deterministic, seedable toy model — no LLM, no network — but the shape is real.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Why long context ≠ used context</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / MATH FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build the lost-in-the-middle model — position, decay, U-curve, mitigations</h2>
+    <p class="text-slate-500 mb-8">Reproduce the LOOK engine as real code: model a document's retrieval accuracy from its <em>position</em>, add primacy + recency to lift the edges, let a length-dependent floor crush the middle, sweep positions to draw the U, roll seeded needle-in-a-haystack trials, and then <em>fix</em> it by reordering retrieved chunks so the best evidence lands at the edges. Every block is the exact idea flowing through LOOK.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Retrieval accuracy is a function of <em>position</em></h3></div>
+        <p class="text-sm text-slate-600 mb-3">Place the needle in document <span class="mono">i</span> of <span class="mono">N</span> and map it to a relative position <span class="mono">r = (i-1)/(N-1)</span> in <span class="mono">[0,1]</span> — 0 = very first document, 1 = very last. The whole phenomenon is: accuracy depends on <span class="mono">r</span>, not just on whether the fact is present.</p>
+        <div class="relative"><pre>def rel_pos(i: int, n: int) -&gt; float:
+    "Document i (1-indexed) of n -&gt; relative position in [0, 1]."
+    return 0.0 if n &lt;= 1 else (i - 1) / (n - 1)
+
+# r = 0.0  -&gt; very start (primacy)
+# r = 0.5  -&gt; dead centre (the danger zone)
+# r = 1.0  -&gt; very end (recency)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Primacy + recency lift the edges</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Two Gaussian bumps: <strong>primacy</strong> peaks at the start and decays inward; <strong>recency</strong> peaks at the end and decays inward. The <em>edge advantage</em> at a position is whichever bump is stronger there. In the middle both have decayed to ~0, so there is no advantage — that is the sag.</p>
+        <div class="relative"><pre>import math
+
+def primacy(r, strength=0.97, width=0.28):
+    "Strong at r=0, fades toward the middle."
+    return strength * math.exp(-(r / width) ** 2)
+
+def recency(r, strength=1.00, width=0.22):
+    "Strong at r=1, fades toward the middle."
+    return strength * math.exp(-((1 - r) / width) ** 2)
+
+def edge_advantage(r):
+    return max(primacy(r), recency(r))   # 0..~1; ~0 in the middle
+# recency &gt; primacy here -&gt; the end edge is a touch higher than the start</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Context length crushes the middle</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A middle document has no edge advantage — its accuracy is just the <strong>background floor</strong>, the odds the model attends to an arbitrary interior chunk. That floor <em>decays</em> as the context grows: more documents means the middle competes for less attention. This is the "worse as context grows" half of the phenomenon.</p>
+        <div class="relative"><pre>def middle_floor(n, floor0=0.85, k=0.055):
+    "Background retrievability of an interior doc; decays with length."
+    return floor0 * math.exp(-k * (n - 1))
+
+middle_floor(5)   # ~0.68  short context -&gt; middle is still findable
+middle_floor(24)  # ~0.30  the middle is sagging
+middle_floor(60)  # ~0.03  the middle has effectively vanished</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">The full position → accuracy U-curve</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Combine them: start at the <span class="mono">floor</span>, then let the edge advantage lift you toward 1. <span class="mono">acc = floor + (1 - floor) · edge</span>. At the edges <span class="mono">edge≈1</span> so <span class="mono">acc≈1</span>; in the middle <span class="mono">edge≈0</span> so <span class="mono">acc≈floor</span>. Deterministic, no NaN, always U-shaped.</p>
+        <div class="relative"><pre>def accuracy(i, n, floor0=0.85, k=0.055):
+    r = rel_pos(i, n)
+    floor = middle_floor(n, floor0, k)
+    acc = floor + (1 - floor) * edge_advantage(r)
+    return max(0.02, min(0.995, acc))       # clamp: never 0, never 1
+
+# n=24: start -&gt; ~0.99, middle -&gt; ~0.30, end -&gt; ~1.00   (a clean U)
+# A bigger base model = higher floor0 + smaller k = a flatter, higher U.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Sweep positions → the U-curve data</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The LOOK chart is just <span class="mono">accuracy</span> evaluated across every position for a fixed <span class="mono">n</span>. Sweep <span class="mono">i</span> from 1 to <span class="mono">n</span> and you get the curve: high, low, high. Sweep across several <span class="mono">n</span> and the middle drops as <span class="mono">n</span> rises — the exact behaviour Liu et&nbsp;al. measured on real models.</p>
+        <div class="relative"><pre>def u_curve(n):
+    return [accuracy(i, n) for i in range(1, n + 1)]
+
+for n in (5, 24, 60):
+    c = u_curve(n)
+    print(n, round(min(c), 2), "at pos", c.index(min(c)) + 1)
+# 5  0.68 ...   24 0.30 ...   60 0.03 ...  -&gt; minimum sits near the centre,
+# and gets deeper as n grows. Edges stay high throughout.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Seeded needle-in-a-haystack trials</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The "needle test" (Kamradt) makes this empirical: hide one fact, ask for it, score hit/miss, repeat across positions and lengths. Our toy version draws Bernoulli(<span class="mono">accuracy</span>) trials from a <em>seeded</em> PRNG so the run is deterministic and reproducible — same seed, same chips.</p>
+        <div class="relative"><pre>import random
+
+def needle_trials(i, n, seed=0xA53, trials=16):
+    rng = random.Random(seed)
+    p = accuracy(i, n)
+    hits = sum(1 for _ in range(trials) if rng.random() &lt; p)
+    return hits, trials, p
+
+needle_trials(12, 24)   # e.g. (5, 16, 0.30)  -&gt; found 5/16, mostly missed
+needle_trials(1, 24)    # e.g. (16, 16, 0.99) -&gt; found every time (edge)
+# Same seed -&gt; identical hit/miss pattern, every run.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">7</div><h3 class="font-bold text-lg">Mitigation: reorder / rerank so the best evidence sits at the edges</h3></div>
+        <p class="text-sm text-slate-600 mb-3">If accuracy depends on position, <em>control the positions</em>. Rerank retrieved chunks by relevance (a cross-encoder scores each against the query), then interleave the top ones onto the <strong>edges</strong> of the prompt — best-and-second at the start and end, weakest buried in the middle where a miss costs least. This is the standard RAG fix.</p>
+        <div class="relative"><pre>def rerank(chunks, query, scorer):
+    "Cross-encoder / reranker scores (query, chunk) relevance."
+    return sorted(chunks, key=lambda c: scorer(query, c), reverse=True)
+
+def edge_first_order(ranked):
+    "Put the most relevant chunks at the START and END, weakest in the middle."
+    head, tail = [], []
+    for idx, chunk in enumerate(ranked):
+        (head if idx % 2 == 0 else tail).append(chunk)
+    return head + list(reversed(tail))   # best -&gt; edges, worst -&gt; middle
+
+ordered = edge_first_order(rerank(chunks, query, cross_encoder))
+# Now the fact you care about lands where the model actually reads.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">8</div><h3 class="font-bold text-lg">In practice — the real toolkit</h3></div>
+        <p class="text-sm text-slate-600 mb-3">On a real model you don't hand-roll the U — you <em>work around</em> it: retrieve fewer, better chunks; rerank with a cross-encoder (Cohere Rerank, <span class="mono">bge-reranker</span>, a fine-tuned scorer); place the strongest evidence at the top and bottom of the prompt; and keep the key instruction/answer near an edge. Below, a Claude call with the reranked, edge-first context assembled — the fact is where the model reads.</p>
+        <div class="relative"><pre>import anthropic
+client = anthropic.Anthropic()
+
+# 1) retrieve, 2) rerank by relevance, 3) put the best at the edges
+ranked  = rerank(retrieve(query, k=40), query, cross_encoder)[:8]
+context = "\n\n".join(edge_first_order(ranked))   # best -&gt; start & end
+
+msg = client.messages.create(
+    model="claude-opus-5", max_tokens=1024,
+    thinking={"type": "adaptive"},
+    system="Answer only from the provided context. Cite the document id.",
+    messages=[{"role": "user",
+               "content": f"Context:\n{context}\n\nQuestion: {query}"}],
+)
+# The needle now sits near an edge, not buried in the middle -&gt; it gets read.
+# Rerankers: Cohere Rerank, bge-reranker-v2, Voyage rerank, or a fine-tuned CE.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 54 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2"><strong>Lost in the middle</strong> (Liu et&nbsp;al., 2023): an LLM retrieves facts placed at the <strong>start</strong> or <strong>end</strong> of a long context far more reliably than facts in the <strong>middle</strong> — a <strong>U-shaped</strong> position-accuracy curve driven by <strong>primacy</strong> and <strong>recency</strong> — and the middle sags <em>deeper</em> as the context grows, so <strong>long context ≠ used context</strong>. The fixes are positional: <strong>reorder by relevance</strong>, <strong>rerank</strong> with a cross-encoder, and <strong>put the key facts at the edges</strong>. <strong>👉 Tomorrow — Day 55: continuing AIFromZero.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+const clamp = (x,lo,hi) => Math.max(lo, Math.min(hi, x));
+const pct   = a => Math.round(a*100) + '%';
+
+/* LITM-ENGINE-START */
+// ===== Day 54 · Lost in the Middle — a deterministic, seedable U-shaped position-accuracy model. No network. =====
+//
+// Place a needle in document i of N -> relative position r=(i-1)/(N-1) in [0,1].
+// accuracy(r,N) = floor(N) + (1-floor(N))*edge(r), where:
+//   edge(r)  = max(primacy, recency)  -> ~1 at the edges, ~0 in the middle  (the U rise)
+//   floor(N) = floor0 * exp(-k*(N-1)) -> the interior "background" retrievability, decays with N
+// => edges stay high; the middle sits at the floor and collapses as context grows. Always in (0.02, 0.995).
+
+const NMIN = 3, NMAX = 60;
+const SHORT_REF = 5, LONG_REF = NMAX;   // ghost reference curves in the chart
+
+const PROFILES = {
+  standard: { name:'Standard LLM',        P:0.97, R:1.00, sP:0.28, sR:0.22, floor0:0.85, kFloor:0.055, color:'#6366f1',
+              note:'A pronounced U with strong recency — typical of a general-purpose model.' },
+  longctx:  { name:'Long-context-tuned',  P:0.98, R:0.99, sP:0.46, sR:0.44, floor0:0.90, kFloor:0.026, color:'#10b981',
+              note:'Flatter, higher U — training for long context widens the usable middle and slows the decay.' },
+  small:    { name:'Small / weak',        P:0.90, R:0.95, sP:0.20, sR:0.17, floor0:0.72, kFloor:0.085, color:'#f59e0b',
+              note:'A deep, narrow U — only the very ends are reliable and the middle collapses fast.' },
+};
+
+function middleFloor(N, pf){ return pf.floor0 * Math.exp(-pf.kFloor * (N - 1)); }
+// accuracy at relative position r for a context of N docs, given a profile
+function accAtR(r, N, pf){
+  const primacy = pf.P * Math.exp(-Math.pow(r / pf.sP, 2));       // 1 at r=0
+  const recency = pf.R * Math.exp(-Math.pow((1 - r) / pf.sR, 2)); // 1 at r=1
+  const edge = Math.max(primacy, recency);                        // 0..~1
+  const floor = middleFloor(N, pf);
+  return clamp(floor + (1 - floor) * edge, 0.02, 0.995);
+}
+const relPos = (i, N) => N <= 1 ? 0 : (i - 1) / (N - 1);
+function accAtDoc(i, N, pf){ return accAtR(relPos(i, N), N, pf); }
+
+// deterministic seeded PRNG for the retrieval trials
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+const state = { profile:'standard', N:24, pos:12, seed:2727, sweep:null };
+function curR(){ return relPos(state.pos, state.N); }
+function prof(){ return PROFILES[state.profile]; }
+/* LITM-ENGINE-END */
+
+// ============================ chart geometry ============================
+const CW=720, CH=320, PADL=52, PADR=18, PADT=18, PADB=40;
+const PLW = CW-PADL-PADR, PLH = CH-PADT-PADB;
+const xForR = r => PADL + r * PLW;
+const yForA = a => PADT + (1-a) * PLH;
+const STEPSX = 80;
+
+function poly(N, pf){
+  let pts = [];
+  for (let s=0;s<=STEPSX;s++){ const r=s/STEPSX; pts.push(xForR(r).toFixed(1)+','+yForA(accAtR(r,N,pf)).toFixed(1)); }
+  return pts.join(' ');
+}
+const XT = [ [0,'start'], [0.25,'0.25'], [0.5,'middle'], [0.75,'0.75'], [1,'end'] ];
+
+function renderChart(){
+  const pf = prof();
+  let svg = '<svg viewBox="0 0 '+CW+' '+CH+'" role="img" aria-label="retrieval accuracy versus needle position">';
+  // horizontal gridlines + y labels
+  for (let a=0;a<=1.0001;a+=0.25){
+    const y = yForA(a);
+    svg += '<line class="c-grid" x1="'+PADL+'" y1="'+y.toFixed(1)+'" x2="'+(CW-PADR)+'" y2="'+y.toFixed(1)+'"/>';
+    svg += '<text class="c-lbl" x="'+(PADL-8)+'" y="'+(y+3).toFixed(1)+'" text-anchor="end">'+Math.round(a*100)+'%</text>';
+  }
+  // x ticks
+  XT.forEach(t => {
+    const x = xForR(t[0]);
+    svg += '<line class="c-grid" x1="'+x.toFixed(1)+'" y1="'+PADT+'" x2="'+x.toFixed(1)+'" y2="'+(CH-PADB)+'"/>';
+    svg += '<text class="c-lbl" x="'+x.toFixed(1)+'" y="'+(CH-PADB+15)+'" text-anchor="middle">'+t[1]+'</text>';
+  });
+  svg += '<text class="c-lbl" x="'+(PADL+PLW/2)+'" y="'+(CH-4)+'" text-anchor="middle">needle position within the context</text>';
+  // axes
+  svg += '<line class="c-axis" x1="'+PADL+'" y1="'+PADT+'" x2="'+PADL+'" y2="'+(CH-PADB)+'"/>';
+  svg += '<line class="c-axis" x1="'+PADL+'" y1="'+(CH-PADB)+'" x2="'+(CW-PADR)+'" y2="'+(CH-PADB)+'"/>';
+  // ghost reference curves (short & long context)
+  svg += '<polyline class="c-ghost" points="'+poly(SHORT_REF,pf)+'"/>';
+  svg += '<polyline class="c-ghost" points="'+poly(LONG_REF,pf)+'"/>';
+  svg += '<text class="c-lbl" x="'+(xForR(0.5))+'" y="'+(yForA(accAtR(0.5,SHORT_REF,pf))-6).toFixed(1)+'" text-anchor="middle">short ctx</text>';
+  svg += '<text class="c-lbl" x="'+(xForR(0.5))+'" y="'+(yForA(accAtR(0.5,LONG_REF,pf))+14).toFixed(1)+'" text-anchor="middle">long ctx</text>';
+  // current-N bold curve
+  svg += '<polyline class="c-cur" points="'+poly(state.N,pf)+'" style="stroke:'+pf.color+'"/>';
+  // needle marker + dot
+  const r = curR(), xm = xForR(r), ym = yForA(accAtR(r,state.N,pf));
+  svg += '<line class="c-mark" x1="'+xm.toFixed(1)+'" y1="'+PADT+'" x2="'+xm.toFixed(1)+'" y2="'+(CH-PADB)+'"/>';
+  svg += '<circle class="c-dot" cx="'+xm.toFixed(1)+'" cy="'+ym.toFixed(1)+'" r="6" style="fill:'+pf.color+'"/>';
+  svg += '</svg>';
+  $("chartWrap").innerHTML = svg;
+}
+
+// ============================ tiles / narration / stack / trials ============================
+function zone(r){
+  if (r < 0.15) return { k:'near the START', c:'#4338ca', tag:'primacy' };
+  if (r > 0.85) return { k:'near the END',   c:'#047857', tag:'recency' };
+  if (r > 0.40 && r < 0.60) return { k:'in the MIDDLE', c:'#dc2626', tag:'the dead zone' };
+  return { k:'off-centre', c:'#b45309', tag:'partial edge boost' };
+}
+
+function tile(k,v,s,color){ return '<div class="tile"><div class="k">'+esc(k)+'</div><div class="v"'+(color?' style="color:'+color+'"':'')+'>'+esc(v)+'</div><div class="s">'+esc(s)+'</div></div>'; }
+function renderTiles(){
+  const pf = prof();
+  const here = accAtR(curR(), state.N, pf);
+  const mid  = accAtR(0.5, state.N, pf);
+  const edge = Math.max(accAtR(0, state.N, pf), accAtR(1, state.N, pf));
+  const z = zone(curR());
+  $("tiles").innerHTML =
+    tile('Your needle', pct(here), z.k, z.c) +
+    tile('Buried in middle', pct(mid), 'worst case', '#dc2626') +
+    tile('At the edges', pct(edge), '+'+pct(edge-mid)+' vs middle', '#047857');
+}
+
+function renderNarr(){
+  const pf = prof();
+  const r = curR(), here = accAtR(r, state.N, pf), mid = accAtR(0.5, state.N, pf), edge = Math.max(accAtR(0,state.N,pf), accAtR(1,state.N,pf));
+  const z = zone(r);
+  let n = 'Your needle sits <b style="color:'+z.c+'">'+z.k+'</b> ('+z.tag+') of a <b>'+state.N+'-document</b> context, so the model retrieves it about <b>'+pct(here)+'</b> of the time. ';
+  if (z.k === 'in the MIDDLE'){
+    n += 'That is the <b>dead zone</b>: primacy and recency have both faded, leaving only the background floor of <b>'+pct(mid)+'</b>. Slide the context length up and watch this collapse further — <b>long context ≠ used context</b>.';
+  } else if (z.k === 'off-centre'){
+    n += 'It still catches a little edge boost, but drag it toward the centre and accuracy falls to the middle floor of <b>'+pct(mid)+'</b>. Move it to an edge and it climbs to <b>'+pct(edge)+'</b>.';
+  } else {
+    n += 'The edge is exactly where the model reads reliably. Drag the needle toward the centre and accuracy sinks to the middle floor of <b>'+pct(mid)+'</b> — a drop of <b>'+pct(edge-mid)+'</b>. That gap is the whole phenomenon.';
+  }
+  $("narr").innerHTML = n;
+}
+
+function renderNote(){
+  const pf = prof();
+  $("profNote").textContent = pf.note;
+  $("viewNote").innerHTML = 'Profile: <b>'+esc(pf.name)+'</b> · Context: <b>'+state.N+' docs</b>. The middle floor is now <b>'+pct(middleFloor(state.N,pf))+'</b> — a bigger / long-context-tuned model raises the floor and slows its decay, lifting and flattening the whole U.';
+  $("legN").textContent = state.N;
+  $("legShort").textContent = SHORT_REF;
+  $("legLong").textContent = LONG_REF;
+  $("curSwatch").style.background = pf.color;
+}
+
+function accColor(a){ const h = Math.round(clamp(a,0,1) * 130); return 'hsl('+h+' 68% 47%)'; }
+function renderStack(){
+  const pf = prof();
+  let html = '';
+  for (let i=1;i<=state.N;i++){
+    const a = accAtDoc(i, state.N, pf);
+    const isN = i === state.pos;
+    html += '<div class="slot'+(isN?' needle':'')+'" style="background:'+accColor(a)+'" '
+          + 'title="doc '+i+' · pos '+relPos(i,state.N).toFixed(2)+' · retrieval '+pct(a)+'">'
+          + (isN ? '★' : i) + '</div>';
+  }
+  $("stack").innerHTML = html;
+}
+
+const NTRIAL = 16;
+function renderTrials(){
+  const pf = prof();
+  const p = accAtR(curR(), state.N, pf);
+  const rng = mulberry32(state.seed >>> 0);
+  let hits = 0; const chips = [];
+  for (let i=0;i<NTRIAL;i++){
+    const ok = rng() < p;
+    if (ok) hits++;
+    chips.push('<span class="chip '+(ok?'correct':'wrong')+'" title="trial '+(i+1)+'">'+(ok?'✓':'✗')+'</span>');
+  }
+  $("trChips").innerHTML = chips.join('');
+  $("trPos").textContent = 'doc ' + state.pos;
+  $("trModel").textContent = pct(p);
+  $("seedLbl").textContent = state.seed;
+  const miss = NTRIAL - hits;
+  $("trTally").innerHTML =
+    (hits ? '<span style="flex-basis:'+(hits/NTRIAL*100)+'%;background:#10b981">✓ '+hits+'</span>' : '') +
+    (miss ? '<span style="flex-basis:'+(miss/NTRIAL*100)+'%;background:#ef4444">✗ '+miss+'</span>' : '');
+  const good = hits > NTRIAL/2;
+  $("trVerdict").innerHTML = '<span class="verdict '+(good?'v-good':'v-fail')+'">'+(good?'✓ mostly found':'✗ mostly missed')+'</span>';
+  $("trTxt").innerHTML = 'The model found the needle in <b>'+hits+' of '+NTRIAL+'</b> trials (~'+pct(hits/NTRIAL)+'), tracking the model-predicted <b>'+pct(p)+'</b>. '
+    + (good
+        ? 'At this position the fact is read reliably. Move it toward the centre — or grow the context — and the hit rate craters.'
+        : 'Buried where it is, the needle is missed more often than found. Drag it to an <b>edge</b> and re-roll: the same seed will now come up almost all ✓.');
+}
+
+function renderAll(){ renderChart(); renderTiles(); renderNarr(); renderNote(); renderStack(); renderTrials(); }
+
+// ============================ controls ============================
+function setProfile(p){ state.profile = p; document.querySelectorAll('#profPick button').forEach(b=>b.classList.toggle('on', b.dataset.p===p)); renderAll(); }
+function setN(N){
+  state.N = clamp(N, NMIN, NMAX);
+  $("ctxSlider").value = state.N; $("ctxLbl").textContent = state.N; $("posMax").textContent = state.N;
+  $("posSlider").max = state.N;
+  if (state.pos > state.N) state.pos = state.N;
+  $("posSlider").value = state.pos; $("posLbl").textContent = state.pos;
+  const z = zone(curR()); $("posZone").innerHTML = '<span style="color:'+z.c+'">'+z.k+'</span>';
+  renderAll();
+}
+function setPos(p){
+  state.pos = clamp(p, 1, state.N);
+  $("posSlider").value = state.pos; $("posLbl").textContent = state.pos;
+  const z = zone(curR()); $("posZone").innerHTML = '<span style="color:'+z.c+'">'+z.k+'</span>';
+  renderAll();
+}
+
+document.querySelectorAll('#profPick button').forEach(b => b.onclick = () => setProfile(b.dataset.p));
+$("ctxSlider").oninput = e => setN(parseInt(e.target.value, 10));
+$("posSlider").oninput = e => setPos(parseInt(e.target.value, 10));
+$("reroll").onclick = () => { state.seed = (state.seed * 1103515245 + 12345) >>> 8 & 0xffff; renderTrials(); };
+$("sweep").onclick = () => {
+  if (state.sweep){ clearInterval(state.sweep); state.sweep=null; $("sweep").textContent='▶ Sweep needle'; return; }
+  setPos(1); $("sweep").textContent='⏸ Sweeping';
+  state.sweep = setInterval(() => {
+    if (state.pos >= state.N){ clearInterval(state.sweep); state.sweep=null; $("sweep").textContent='▶ Replay sweep'; return; }
+    setPos(state.pos + 1);
+  }, 220);
+};
+
+// boot
+setProfile('standard'); setN(24); setPos(12);
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Long context ≠ used context", why:"Modern LLMs advertise huge context windows, but a bigger window is not the same as bigger <em>usable</em> attention. Liu et&nbsp;al. (2023), <em>\"Lost in the Middle,\"</em> showed that a model's ability to <strong>use</strong> a fact depends on <em>where</em> that fact sits in the context — even when it comfortably fits. Stuffing more documents in does not linearly help; some of them land in a region the model barely reads.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">context window: [ doc doc doc ... doc ]<br><br>fits in the window ✅<br>actually used ❓  (depends on position)</div>`, code:`# The fact IS in the prompt...
+present = needle in context      # True
+# ...but "present" and "retrieved" are different things:
+retrieved = model_reads(position_of(needle))   # depends on WHERE` },
+ { title:"2. Primacy & recency — the ends win", why:"Two effects lift the edges. <strong>Primacy</strong>: content at the very <em>start</em> of the context is attended to strongly (it anchors everything that follows). <strong>Recency</strong>: content at the very <em>end</em> is fresh and close to the answer position. A fact at either edge gets a large boost; a fact in the middle gets neither. (The same U shows up in human memory — we recall the first and last items of a list best.)", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">START ▓▓▓▓ primacy<br>&nbsp;&nbsp;mid  ░░░░ (neither)<br>END &nbsp;&nbsp;▓▓▓▓ recency<br><br>edge(r) = max(primacy, recency)</div>`, code:`primacy = P * exp(-(r/sP)**2)      # peaks at r=0
+recency = R * exp(-((1-r)/sR)**2)  # peaks at r=1
+edge    = max(primacy, recency)    # ~1 at ends, ~0 mid` },
+ { title:"3. The U-shaped curve (Liu et al. 2023)", why:"Plot retrieval accuracy against the needle's position and you get a <strong>U</strong>: high at position 0, dipping to a minimum near the centre, rising again at the last position. Liu et&nbsp;al. measured exactly this on multiple models and tasks (multi-document QA, key-value retrieval). Often recency edges out primacy, so the end is a touch higher than the start — but both beat the middle by a wide margin.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">acc<br>1.0 ▏●&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;●<br>&nbsp;&nbsp;&nbsp;&nbsp;▏&nbsp;╲&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;╱<br>&nbsp;&nbsp;&nbsp;&nbsp;▏&nbsp;&nbsp;╲__╱  &lt;- the sag<br>0.0 ▏__________<br>&nbsp;&nbsp;&nbsp;&nbsp;start  mid  end</div>`, code:`acc(r) = floor + (1 - floor) * edge(r)
+# r=0.0 -> ~1.0   (start)
+# r=0.5 -> floor  (middle, the minimum)
+# r=1.0 -> ~1.0   (end)` },
+ { title:"4. Bigger context, deeper dip", why:"The second half of the phenomenon: the sag gets <em>worse</em> as the context grows. A middle document has no edge boost, so its accuracy is just the <strong>background floor</strong> — the chance the model attends to an arbitrary interior chunk. As you add documents, that floor decays: attention is finite and spread thinner. The edges stay high, but the trough drops toward zero. That's why a 100k-token dump can perform worse than a tight, curated prompt.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">N=5 &nbsp;&nbsp;●╲__╱●  shallow U (floor 0.68)<br>N=24 &nbsp;●╲__╱●  deeper &nbsp;(floor 0.30)<br>N=60 &nbsp;●╲__╱●  cavern &nbsp;(floor 0.03)<br><br>floor(N) = floor0 * exp(-k*(N-1))</div>`, code:`floor(5)  # 0.68  middle still findable
+floor(24) # 0.30  middle sagging
+floor(60) # 0.03  middle vanished
+# edges barely move; the trough falls with N` },
+ { title:"5. Needle-in-a-haystack: measuring it", why:"The practical test (Greg Kamradt's \"needle in a haystack\") hides one distinctive fact — a passphrase, a random sentence — inside a long filler context, then asks the model to retrieve it. Sweep the needle across every <strong>depth</strong> (position) and every <strong>context length</strong> and score hit/miss. The result is a 2-D heat-map: bright at the edges and short lengths, dark in the middle-of-long. It's the empirical fingerprint of lost-in-the-middle.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">depth →<br>len ┌───────────┐<br>&nbsp;↓ &nbsp;│█▓░░░░░░▓█│  short: mostly green<br>&nbsp;&nbsp;&nbsp;&nbsp;│█░.....░█│  long: dark middle<br>&nbsp;&nbsp;&nbsp;&nbsp;└───────────┘<br>bright edges, dark centre</div>`, code:`for length in lengths:
+  for depth in depths:
+    ctx = insert(needle, filler, at=depth, size=length)
+    hit = ask(model, ctx, question) == needle
+    grid[length][depth] = hit   # the heat-map` },
+ { title:"6. Fix #1: put key facts at the edges", why:"If accuracy depends on position, then <strong>controlling position is the fix</strong>. When you assemble a prompt, place the most important evidence — and the actual question/instruction — at the <strong>start</strong> and <strong>end</strong>, not buried in the middle. For RAG, that means the top-ranked chunk goes first or last, not somewhere in the middle of the pack. Free, no model change, and it directly targets the U.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">bad:  [ filler  KEY  filler filler ]<br>good: [ KEY  filler filler  KEY-2 ]<br><br>question near an edge too<br>(not lost after 50 chunks)</div>`, code:`# Assemble so the answer-bearing chunk sits at an edge
+prompt = best_chunk + filler_chunks + second_best_chunk
+prompt += "\\n\\nQuestion: " + query   # question at the end (recency)` },
+ { title:"7. Fix #2: reorder by relevance & rerank", why:"Vector search returns chunks by rough similarity, in no particular order. A <strong>reranker</strong> (a cross-encoder that scores each chunk against the query jointly) re-sorts them by true relevance, and you keep only the few best. Then interleave those best chunks onto the <strong>edges</strong> — most-relevant at the top and bottom, least-relevant buried in the middle where a miss is cheapest. Fewer, better, better-placed chunks beat a big undifferentiated dump.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">retrieve 40 -> rerank -> keep top 8<br><br>rank1 ─┐&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;┌─ rank2<br>rank3 ─┤ edges ├─ rank4<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└ middle┘<br>weakest chunks go where it hurts least</div>`, code:`ranked = rerank(retrieve(q, k=40), q, cross_encoder)[:8]
+# best -> START & END, worst -> middle
+ctx = edge_first_order(ranked)
+# Cohere Rerank / bge-reranker / a fine-tuned cross-encoder` },
+ { title:"8. When it bites & the toolkit", why:"It bites whenever the answer depends on something in a <em>long, unordered</em> context: multi-document RAG, long-chat memory, big code files, \"summarize this 200-page PDF.\" The toolkit: <strong>retrieve fewer, better chunks</strong>; <strong>rerank</strong> with a cross-encoder; <strong>place key evidence at the edges</strong>; keep the question near an edge; and prefer <strong>long-context-tuned</strong> models (which flatten the U) when you truly need length. Above all: don't assume \"in the context\" means \"used.\"", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">long unordered context → U-shaped risk<br>&nbsp;&nbsp;→ retrieve fewer / better<br>&nbsp;&nbsp;→ rerank (cross-encoder)<br>&nbsp;&nbsp;→ best evidence at the edges<br>&nbsp;&nbsp;→ verify, don't assume</div>`, code:`ranked = rerank(chunks, q)[:k]        # fewer, better
+ctx    = edge_first_order(ranked)     # best at edges
+ans    = llm(ctx + "\\nQ: " + q)      # question near edge
+# and: test with a needle-in-haystack eval before you ship` },
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
