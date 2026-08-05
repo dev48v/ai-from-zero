@@ -56,6 +56,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 52 — GraphRAG](https://dev48v.infy.uk/ai/days/day52-graphrag.html) — `day52-graphrag.html`
 - [AIFromZero · Day 53 — Test-Time Compute](https://dev48v.infy.uk/ai/days/day53-test-time-compute.html) — `day53-test-time-compute.html`
 - [AIFromZero · Day 54 — Lost in the Middle](https://dev48v.infy.uk/ai/days/day54-lost-in-the-middle.html) — `day54-lost-in-the-middle.html`
+- [AIFromZero · Day 55 — Semantic Chunking](https://dev48v.infy.uk/ai/days/day55-semantic-chunking.html) — `day55-semantic-chunking.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
