@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 56 — Rerankers</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .triple { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; font-weight:700; background:#eef2ff; color:#4338ca; padding:1px 6px; border-radius:6px; white-space:nowrap; }
+
+  /* ===== controls ===== */
+  .seg { display:inline-flex; border:1px solid #e2e8f0; border-radius:11px; overflow:hidden; }
+  .seg button { padding:7px 14px; font-size:12.5px; font-weight:800; background:#fff; color:#475569; border-right:1px solid #e2e8f0; transition:all .18s; }
+  .seg button:last-child { border-right:0; }
+  .seg button.on { background:#6366f1; color:#fff; }
+
+  input[type=range] { -webkit-appearance:none; appearance:none; height:7px; border-radius:999px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:999px; background:#6366f1; cursor:pointer; border:3px solid #fff; box-shadow:0 2px 8px rgba(99,102,241,.5); }
+  input[type=range]::-moz-range-thumb { width:20px; height:20px; border-radius:999px; background:#6366f1; cursor:pointer; border:3px solid #fff; }
+
+  /* ===== stat tiles ===== */
+  .tile { border:1.5px solid #e2e8f0; border-radius:13px; padding:11px 13px; background:#fff; }
+  .tile .k { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; }
+  .tile .v { font-size:22px; font-weight:900; color:#0f172a; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .tile .s { font-size:10.5px; color:#64748b; margin-top:1px; }
+
+  /* ===== ranking rows ===== */
+  .rowlist { display:flex; flex-direction:column; gap:6px; }
+  .rrow { display:flex; align-items:center; gap:9px; padding:8px 10px; border:1.5px solid #e2e8f0; border-radius:11px; background:#fff; transition:all .2s; }
+  .rrow.dim { opacity:.42; filter:grayscale(.35); }
+  .rrow.gold { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.14); background:#f8f9ff; }
+  .rrow.decoy { border-color:#f59e0b; background:#fffdf5; }
+  .rk { width:26px; height:26px; flex:0 0 26px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:900; background:#0f172a; color:#fff; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .rrow.gold .rk { background:#6366f1; }
+  .rrow.decoy .rk { background:#f59e0b; }
+  .rmeta { min-width:0; flex:1; }
+  .rtitle { font-size:12.5px; font-weight:800; color:#0f172a; display:flex; align-items:center; gap:6px; }
+  .rtext { font-size:10.5px; color:#64748b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rbarwrap { height:6px; border-radius:999px; background:#eef2f7; margin-top:5px; overflow:hidden; }
+  .rbar { height:100%; border-radius:999px; background:#94a3b8; }
+  .rrow.gold .rbar { background:#6366f1; }
+  .rrow.decoy .rbar { background:#f59e0b; }
+  .rscore { flex:0 0 auto; font-size:12px; font-weight:800; color:#334155; font-variant-numeric:tabular-nums; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .tag { font-size:8.5px; font-weight:900; text-transform:uppercase; letter-spacing:.04em; padding:1px 6px; border-radius:999px; }
+  .tag-gold { background:#eef2ff; color:#4338ca; }
+  .tag-decoy { background:#fef3c7; color:#b45309; }
+
+  .delta { flex:0 0 auto; font-size:11px; font-weight:900; padding:2px 7px; border-radius:999px; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .d-up   { background:#dcfce7; color:#047857; }
+  .d-down { background:#fee2e2; color:#b91c1c; }
+  .d-same { background:#f1f5f9; color:#64748b; }
+
+  .cutline { display:flex; align-items:center; gap:8px; margin:2px 0; }
+  .cutline .ln { flex:1; height:0; border-top:2px dashed #dc2626; }
+  .cutline .lbl { font-size:9.5px; font-weight:900; color:#dc2626; text-transform:uppercase; letter-spacing:.05em; white-space:nowrap; }
+
+  /* ===== cost bar ===== */
+  .costbar { height:26px; border-radius:8px; display:flex; overflow:hidden; border:1px solid #e2e8f0; }
+  .costbar > span { display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; color:#fff; min-width:0; transition:flex-basis .3s; white-space:nowrap; }
+
+  .verdict { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:10px; font-weight:800; }
+  .v-good { background:#ecfdf5; color:#047857; }
+  .v-fail { background:#fef2f2; color:#dc2626; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 56</div>
+      <h1 class="text-xl font-bold">🥇 Rerankers — <strong>retrieval gets the right documents into the pile; a reranker gets them into the right order.</strong> The retriever every RAG system starts with is a <strong>bi-encoder</strong>: it turns the query into one vector and each document into one vector <em>independently</em>, then ranks by cosine similarity. That is gloriously fast — the document vectors are computed once, offline, and an approximate-nearest-neighbour index searches millions of them in milliseconds — but it pays for that speed with a blind spot: each document is squashed into a single vector <em>before it ever sees the query</em>, so the score can't reflect how the query and that specific document actually interact. The result is strong <strong>recall</strong> (the useful docs are somewhere in the top-N) but coarse <strong>precision</strong> at the very top: a doc that merely shares a lot of surface words can out-rank the doc that truly answers the question. A <strong>reranker</strong> is a second, slower, sharper stage. It's a <strong>cross-encoder</strong>: it feeds the <em>(query, document) pair together</em> through the transformer so every query token can attend to every document token, and emits one calibrated relevance score per pair. Far more accurate — but there's nothing to precompute (the score depends on the query), so you can't run it over a whole corpus. The pattern that makes it practical is <strong>retrieve-then-rerank</strong>: let the cheap bi-encoder fetch a broad <strong>top-N</strong> shortlist, then spend the expensive cross-encoder only on those N pairs, and reorder to a precise <strong>top-k</strong>. Below is a live, fully self-contained demo over a baked-in help-centre corpus — a real TF-IDF bi-encoder for stage 1 (fast but coarse, and it <em>does</em> mis-rank a keyword-stuffed decoy to the top) and a deterministic canned cross-encoder for stage 2 that reads each pair jointly and pulls the genuinely-relevant answer up to #1. Pick a query, slide the top-N cut, and watch the two rankings side by side with every moved position flagged. <strong>No API, no LLM, all deterministic.</strong></h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Retrieve broad and fast, then <span style="color:#6366f1">rerank the shortlist</span> for precision.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Nine help-centre articles are the corpus. <b>Stage 1</b> is a real bi-encoder (TF-IDF + cosine) that scores every doc against the query independently — fast, but it rewards surface word-overlap, so a <b style="color:#f59e0b">keyword decoy</b> lands at or near the top and the <b style="color:#6366f1">true answer</b> sits lower. <b>Stage 2</b> is a cross-encoder that re-reads each <span class="mono">(query, doc)</span> pair <i>jointly</i> and re-scores only the top-<b>N</b> shortlist, reordering it so the true answer rises to #1. Everything is deterministic and runs in your browser — no network, no embedding API, no LLM.</p>
+      </div>
+
+      <!-- ===================== CARD A · query + top-N control ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="grid md:grid-cols-2 gap-5">
+          <div>
+            <div class="text-[10px] uppercase font-bold text-indigo-600 mb-2">🔎 The query</div>
+            <div class="seg mb-3" id="queryPick"></div>
+            <div class="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-[14px] font-semibold text-slate-800" id="queryText"></div>
+            <div class="text-[11px] text-slate-500 mt-2">Each query has one article that <b style="color:#6366f1">truly answers</b> it and one <b style="color:#f59e0b">keyword decoy</b> that just repeats the query's words. Watch where each lands in stage 1 vs stage 2.</div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-[10px] uppercase font-bold text-indigo-600">Top-N to rerank · <span id="nLbl">4</span> <span class="text-slate-400 normal-case font-normal">of <span id="mLbl">9</span> docs</span></div>
+              <div class="text-[10px] font-bold text-slate-500">the recall ⇄ latency dial</div>
+            </div>
+            <input id="nSlider" type="range" min="2" max="9" step="1" value="4" class="w-full" />
+            <div class="flex justify-between text-[9px] text-slate-400 font-bold mt-1 mono"><span>2 · cheap</span><span>rerank the shortlist</span><span>9 · whole corpus</span></div>
+            <div class="text-[11px] text-slate-500 mt-2">The cross-encoder runs <b>once per shortlisted pair</b>, so cost scales with N. Set N too small and the true answer never reaches the reranker; too big and you pay to re-score docs stage 1 already ruled out. <b>You rerank the shortlist, not the corpus.</b></div>
+            <div class="mt-3">
+              <div class="text-[9px] uppercase font-bold text-slate-400 mb-1">Cross-encoder passes this query</div>
+              <div class="costbar" id="costBar"></div>
+              <div class="text-[10px] text-slate-500 mt-1" id="costNote"></div>
+            </div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4 pt-4 border-t border-slate-200" id="tiles"></div>
+      </div>
+
+      <!-- ===================== CARD B · the two rankings ===================== -->
+      <div class="grid lg:grid-cols-3 gap-5 mb-5">
+        <div class="lg:col-span-2 grid md:grid-cols-2 gap-5">
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold" style="color:#334155">① Bi-encoder retrieval <span class="text-slate-400 normal-case font-normal">— fast, coarse. Ranks all <span id="mLbl2">9</span>; only the top-N (above the red line) go to the reranker.</span></div>
+            <div id="stage1" class="rowlist mt-3"></div>
+          </div>
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold text-indigo-600">② Cross-encoder rerank <span class="text-slate-400 normal-case font-normal">— re-scores the N-doc shortlist jointly and reorders. Badges show each doc's move.</span></div>
+            <div id="stage2" class="rowlist mt-3"></div>
+          </div>
+        </div>
+        <div class="lg:col-span-1 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div class="text-[10px] uppercase font-bold text-indigo-600 mb-1">What's happening</div>
+          <div id="narr" class="text-sm text-slate-700 min-h-[150px]"></div>
+          <div class="mt-3 pt-3 border-t border-slate-200">
+            <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Legend</div>
+            <div class="text-[11px] text-slate-600 space-y-1">
+              <div><span class="tag tag-gold">true answer</span> the doc that actually resolves the query</div>
+              <div><span class="tag tag-decoy">keyword decoy</span> lexical match, wrong intent</div>
+              <div><span class="delta d-up">↑2</span> moved up · <span class="delta d-down">↓1</span> moved down after rerank</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto"><strong>A reranker doesn't retrieve — it re-orders.</strong> The bi-encoder's job is <em>recall</em>: sweep a huge corpus in milliseconds and make sure the good docs are somewhere in the top-N. The cross-encoder's job is <em>precision</em>: read each shortlisted <span class="mono">(query, doc)</span> pair together and decide which one truly answers the question, promoting it past the docs that only looked relevant. Because it runs on N pairs instead of millions, the extra accuracy costs a bounded amount of latency — and because it can only reorder what stage 1 surfaced, N must be large enough for recall. This demo uses TF-IDF and a canned scorer, but the two-stage shape — <strong>fast bi-encoder for recall, slow cross-encoder for precision</strong> — is exactly how Cohere Rerank, bge-reranker and the MS-MARCO cross-encoders slot into a real RAG pipeline before the answer ever reaches the LLM.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">From coarse recall to precise order</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / MATH FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build retrieve-then-rerank — bi-encoder recall, cross-encoder precision</h2>
+    <p class="text-slate-500 mb-8">Reproduce the LOOK engine as real code: a fast first-stage retriever fetches a broad top-N, a cross-encoder re-scores each <span class="mono">(query, doc)</span> pair jointly, and you reorder the shortlist so the truly-relevant doc lands on top. The toy uses TF-IDF for stage 1 and a keyword-blind heuristic for stage 2; the last block swaps in a real cross-encoder / Cohere Rerank and hands the top-k to Claude. Every block is the exact idea flowing through LOOK.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">The corpus and a query</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A retriever ranks a fixed corpus against a query. In the real world the corpus is millions of chunks in a vector store; here it's a handful of help-centre articles so you can see every score.</p>
+        <div class="relative"><pre>corpus = [
+    "On the log in page tap the recovery link and we email a fresh code...",   # reset access (the true answer)
+    "Password security tips: if you forgot a password, still pick a strong...", # keyword decoy
+    "Two factor authentication adds a one time code from your phone...",
+    # ...more articles...
+]
+query = "why can't I log in - I forgot my password"</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Stage 1 — the bi-encoder: embed query &amp; docs <em>separately</em></h3></div>
+        <p class="text-sm text-slate-600 mb-3">A bi-encoder maps the query and each doc to <strong>one vector each, independently</strong>. The doc vectors are computed once and stored, so retrieval is just a cosine / nearest-neighbour lookup — millions of docs in milliseconds. The demo uses a TF-IDF bag-of-words; production uses a neural embedder, but the shape is identical.</p>
+        <div class="relative"><pre>from sentence_transformers import SentenceTransformer, util
+
+bi = SentenceTransformer("all-MiniLM-L6-v2")     # a bi-encoder
+doc_emb = bi.encode(corpus, convert_to_tensor=True)   # PRECOMPUTED, offline
+q_emb   = bi.encode(query,  convert_to_tensor=True)
+
+# cosine every doc against the query, keep the broad top-N
+scores = util.cos_sim(q_emb, doc_emb)[0]
+topN   = scores.topk(N).indices.tolist()          # a shortlist, fast</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">The blind spot: high recall, coarse top-order</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Because each doc is squeezed into a vector <em>before it sees the query</em>, the bi-encoder can't model how <em>this</em> query interacts with <em>this</em> doc. A doc that just repeats the query's words (the keyword decoy) can out-score the doc that actually answers it. The right docs are in the top-N (good recall) — but the #1 is often wrong (poor precision).</p>
+        <div class="relative"><pre># bi-encoder top-3 for "forgot my password":
+#   1. "Password security tips..."   &lt;- decoy: repeats 'password' x5
+#   2. "On the log in page tap the recovery link..."  &lt;- the real fix
+#   3. "Two factor authentication..."
+# recall is fine (the answer is in the list) but the ORDER is wrong.
+# no prompt tweak downstream can undo a bad #1.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Stage 2 — the cross-encoder: score the pair <em>jointly</em></h3></div>
+        <p class="text-sm text-slate-600 mb-3">A cross-encoder concatenates <span class="mono">[query] [SEP] [doc]</span> and runs the pair through the transformer <strong>together</strong>, so every query token attends to every doc token. It outputs a single relevance logit. Nothing can be precomputed — the score depends on the query — which is exactly why it's accurate <em>and</em> why you only run it on a shortlist.</p>
+        <div class="relative"><pre>from sentence_transformers import CrossEncoder
+
+ce = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+
+# one forward pass PER (query, doc) pair — no offline index possible
+pairs  = [(query, corpus[i]) for i in topN]
+rel    = ce.predict(pairs)          # e.g. [0.41, 0.96, 0.34, 0.04]
+# the pair with the true answer now scores highest, not the decoy</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Reorder the shortlist → precise top-k</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Sort the shortlist by the cross-encoder score and take the top-k. The doc the bi-encoder buried at rank 2 or 3 is now #1; the keyword decoy drops. This reordered top-k is what the LLM actually reads.</p>
+        <div class="relative"><pre>order  = sorted(range(len(topN)), key=lambda j: rel[j], reverse=True)
+reranked = [topN[j] for j in order]          # global doc ids, best first
+topk = reranked[:k]                          # feed these to the LLM
+
+for j in order:
+    print(f"{rel[j]:.2f}  {corpus[topN[j]][:60]}")
+# highest-relevance pair first -> the true answer leads</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">The two-stage pipeline in one function</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Wrap it up: bi-encoder fetches the broad top-N (recall), cross-encoder re-scores those N pairs (precision), return the reordered top-k. This <strong>retrieve-then-rerank</strong> shape is the whole pattern.</p>
+        <div class="relative"><pre>def retrieve_then_rerank(query, N=50, k=5):
+    # STAGE 1 — cheap, over the whole corpus
+    scores = util.cos_sim(bi.encode(query), doc_emb)[0]
+    shortlist = scores.topk(N).indices.tolist()
+    # STAGE 2 — expensive, only over N pairs
+    rel = ce.predict([(query, corpus[i]) for i in shortlist])
+    order = sorted(range(N), key=lambda j: rel[j], reverse=True)
+    return [shortlist[j] for j in order[:k]]
+# fast recall from stage 1 + sharp precision from stage 2</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">7</div><h3 class="font-bold text-lg">Choosing N — the recall ⇄ latency dial</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The reranker can only reorder what stage 1 surfaced: if the true answer sits at bi-encoder rank 60 and you rerank the top 50, it never gets a chance. Raise N for recall, but each extra doc is another cross-encoder forward pass, so latency grows with N. Typical N is 50–200; measure recall@N on your data and pick the smallest N that still catches the answers.</p>
+        <div class="relative"><pre># cost model: 1 ANN lookup (stage 1) + N transformer passes (stage 2)
+#   N too small -> answer never reaches the reranker (recall ceiling)
+#   N too big   -> pay to re-score docs stage 1 already ruled out
+#
+# tune empirically:
+for N in (10, 25, 50, 100, 200):
+    print(N, recall_at_k(eval_set, N=N, k=5))   # pick the knee of the curve</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">8</div><h3 class="font-bold text-lg">In practice — a hosted reranker, then answer with Claude</h3></div>
+        <p class="text-sm text-slate-600 mb-3">In production you rarely host the cross-encoder yourself: <strong>Cohere Rerank</strong>, <strong>Voyage rerank</strong>, or an open <strong>bge-reranker</strong> take the query plus the shortlist and return the reordered docs. The MTEB reranking benchmarks track how much they lift retrieval. Then hand the precise top-k to <span class="mono">claude-opus-5</span> — because the #1 chunk is now the real answer, the model has what it needs.</p>
+        <div class="relative"><pre>import cohere, anthropic
+
+co     = cohere.Client()
+client = anthropic.Anthropic()
+
+# stage 1: your vector DB returns a broad shortlist (top-N)
+shortlist = vector_db.search(query, top_n=100)
+
+# stage 2: hosted cross-encoder reranks -> precise top-k
+ranked = co.rerank(model="rerank-english-v3.0",
+                   query=query, documents=shortlist, top_n=5)
+context = "\n\n".join(shortlist[r.index] for r in ranked.results)
+
+msg = client.messages.create(
+    model="claude-opus-5", max_tokens=1024,
+    system="Answer only from the provided context. Cite the source.",
+    messages=[{"role": "user",
+               "content": f"Context:\n{context}\n\nQuestion: {query}"}],
+)
+# the reranked #1 is the true answer -> grounded, correct response</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 56 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2">A <strong>reranker</strong> is the precision stage that a fast retriever can't be. The <strong>bi-encoder</strong> embeds query and docs separately for millisecond recall over millions, but squashing each doc to a vector before it sees the query leaves the top-order coarse. The <strong>cross-encoder</strong> reads each <span class="mono">(query, doc)</span> pair jointly for a sharp relevance score — too slow for a whole corpus, perfect for a shortlist. <strong>Retrieve-then-rerank</strong> combines them: broad top-N for recall, cross-encoder rerank for precision, reorder to top-k before the LLM reads a word. Tune N for the recall/latency tradeoff; reach for Cohere Rerank / bge-reranker in production. <strong>👉 Tomorrow — Day 57: continuing AIFromZero.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+const clamp = (x,lo,hi) => Math.max(lo, Math.min(hi, x));
+
+/* RERANK-ENGINE-START */
+// ===== Day 56 · Rerankers — deterministic 2-stage retrieve-then-rerank. No network, no LLM. =====
+//
+// Stage 1 (bi-encoder): a real TF-IDF bag-of-words + cosine over the whole corpus. Fast, coarse:
+//   it rewards surface word-overlap, so a keyword-stuffed decoy out-ranks the true answer.
+// Stage 2 (cross-encoder): a CANNED relevance score per (query, doc) pair — deterministic, standing
+//   in for a model that reads the pair jointly. It re-scores ONLY the top-N shortlist and reorders,
+//   pulling the genuinely-relevant doc to #1. N is the recall (did the answer reach stage 2?) vs
+//   latency (how many cross-encoder passes?) dial.
+
+const CORPUS = [
+  { id:'d0', title:'Reset account access',      text:"On the log in page tap the recovery link and we email a fresh code so you can choose a new secret and get back in." },
+  { id:'d1', title:'Password help and security', text:"Password security tips: if you forgot a password, still pick a strong password; a forgotten password is common, so store every password safely and never share a password." },
+  { id:'d2', title:'Two-factor authentication',  text:"Two factor authentication adds a one time code from your phone whenever you sign in, for extra safety on your account." },
+  { id:'d3', title:'Fix a declined payment',     text:"If a payment is declined, open Settings then Payment methods to replace the saved details and retry the declined charge right away." },
+  { id:'d4', title:'Plans, pricing and cards',   text:"Every plan is billed to the card on file; update the card anytime and the card charge renews until you update or remove the card." },
+  { id:'d5', title:'Cancel a subscription',      text:"To cancel a subscription open Billing and choose cancel plan; access continues until the paid period ends." },
+  { id:'d6', title:'Export records',             text:"Download your records into a CSV or JSON sheet you can open in Excel from the Account area anytime." },
+  { id:'d7', title:'Data privacy policy',        text:"Our data policy explains how your personal data is stored and processed; this data notice covers how we protect data under GDPR and how to request your data." },
+  { id:'d8', title:'Mobile app download',        text:"Download the mobile app for iPhone and Android from the App Store or Google Play to manage your account anywhere." },
+];
+const M = CORPUS.length;
+const IDX = {}; CORPUS.forEach((d,i)=>IDX[d.id]=i);
+
+const QUERIES = [
+  { q:"why can't I log in — I forgot my password",      gold:'d0', decoy:'d1', emoji:'🔑', label:'password' },
+  { q:"how do I download my data to a spreadsheet",      gold:'d6', decoy:'d7', emoji:'📤', label:'export' },
+  { q:"my credit card was declined, how do I update it", gold:'d3', decoy:'d4', emoji:'💳', label:'payment' },
+];
+
+// canned cross-encoder relevance (0..1) per query index, per doc id — deterministic, models joint understanding
+const REL = [
+  { d0:0.96, d1:0.41, d2:0.34, d3:0.04, d4:0.04, d5:0.07, d6:0.03, d7:0.04, d8:0.09 },
+  { d6:0.96, d7:0.43, d8:0.22, d5:0.09, d4:0.08, d3:0.06, d0:0.05, d1:0.03, d2:0.03 },
+  { d3:0.95, d4:0.49, d5:0.44, d0:0.05, d1:0.04, d2:0.07, d6:0.03, d7:0.04, d8:0.08 },
+];
+
+const STOP = new Set(("a an the of to and or in on at is are was were be been it its this that with for as by from into "
+  + "then so such can will just my i how do you your we our top whenever every must least new one file page keep them "
+  + "save until why me cant").split(/\s+/));
+function tokenize(s){ return s.toLowerCase().replace(/[^a-z0-9\s]/g,' ').split(/\s+/).filter(w => w.length > 1 && !STOP.has(w)); }
+
+// ---- Stage 1 : real TF-IDF bi-encoder over the corpus ----
+const DOCTOKS = CORPUS.map(d => tokenize(d.title + ' ' + d.text));
+const DF = new Map();
+DOCTOKS.forEach(t => new Set(t).forEach(w => DF.set(w, (DF.get(w)||0) + 1)));
+function idf(w){ return Math.log((1 + M) / (1 + (DF.get(w)||0))) + 1; }
+function tfidf(tokens){
+  const tf = new Map(); tokens.forEach(w => tf.set(w, (tf.get(w)||0) + 1));
+  const v = new Map(); tf.forEach((c,w) => v.set(w, c * idf(w)));
+  return v;
+}
+const DOCVECS = DOCTOKS.map(tfidf);
+function cosine(a,b){
+  let dot=0, na=0, nb=0;
+  a.forEach((va,w) => { na += va*va; const vb = b.get(w); if (vb) dot += va*vb; });
+  b.forEach(vb => { nb += vb*vb; });
+  return (na && nb) ? dot / (Math.sqrt(na)*Math.sqrt(nb)) : 0;
+}
+function biEncoderRank(qi){
+  const qv = tfidf(tokenize(QUERIES[qi].q));
+  return CORPUS.map((d,i) => ({ id:d.id, score:cosine(qv, DOCVECS[i]) }))
+               .sort((a,b) => b.score - a.score);   // full ranking, best first
+}
+
+// ---- Stage 2 : canned cross-encoder over the shortlist only ----
+function crossEncoderRerank(qi, shortlistIds){
+  return shortlistIds.map(id => ({ id, score: REL[qi][id] ?? 0 }))
+                     .sort((a,b) => b.score - a.score);
+}
+
+const state = { query:0, N:4 };
+/* RERANK-ENGINE-END */
+
+// derive everything for the current state
+function compute(){
+  const Q = QUERIES[state.query];
+  const bi = biEncoderRank(state.query);
+  const biRankOf = {}; bi.forEach((r,i) => biRankOf[r.id] = i + 1);   // 1-based global rank
+  const shortlist = bi.slice(0, state.N).map(r => r.id);
+  const cross = crossEncoderRerank(state.query, shortlist);
+  const crossRankOf = {}; cross.forEach((r,i) => crossRankOf[r.id] = i + 1);
+  return { Q, bi, biRankOf, shortlist, cross, crossRankOf };
+}
+
+// ============================ query picker ============================
+function buildQueryPick(){
+  $("queryPick").innerHTML = QUERIES.map((Q,i) => '<button data-q="'+i+'">'+Q.emoji+' '+esc(Q.label)+'</button>').join('');
+  document.querySelectorAll('#queryPick button').forEach(btn => btn.onclick = () => { state.query = parseInt(btn.dataset.q,10); renderAll(); });
+}
+
+// ============================ ranking rows ============================
+function row(d, rankNum, cls, tagHtml, scoreStr, barPct, deltaHtml){
+  return '<div class="rrow '+cls+'">'
+    + '<div class="rk">'+rankNum+'</div>'
+    + '<div class="rmeta">'
+    +   '<div class="rtitle">'+esc(d.title)+' '+tagHtml+'</div>'
+    +   '<div class="rtext">'+esc(d.text)+'</div>'
+    +   '<div class="rbarwrap"><div class="rbar" style="width:'+barPct.toFixed(0)+'%"></div></div>'
+    + '</div>'
+    + (deltaHtml || '')
+    + '<div class="rscore">'+scoreStr+'</div>'
+    + '</div>';
+}
+function tagFor(id, Q){
+  if (id === Q.gold)  return '<span class="tag tag-gold">true answer</span>';
+  if (id === Q.decoy) return '<span class="tag tag-decoy">keyword decoy</span>';
+  return '';
+}
+
+function renderStage1(c){
+  const maxScore = Math.max(1e-9, c.bi[0].score);
+  let html = '';
+  c.bi.forEach((r,i) => {
+    const d = CORPUS[IDX[r.id]];
+    const inN = i < state.N;
+    let cls = inN ? '' : 'dim';
+    if (r.id === c.Q.gold) cls += ' gold';
+    else if (r.id === c.Q.decoy) cls += ' decoy';
+    html += row(d, i+1, cls.trim(), tagFor(r.id, c.Q), r.score.toFixed(3), 100*r.score/maxScore, '');
+    if (i === state.N - 1)
+      html += '<div class="cutline"><span class="lbl">top-'+state.N+' cut → reranked</span><span class="ln"></span><span class="lbl">below: ignored</span></div>';
+  });
+  $("stage1").innerHTML = html;
+}
+
+function renderStage2(c){
+  const maxScore = Math.max(1e-9, c.cross[0].score);
+  let html = '';
+  c.cross.forEach((r,i) => {
+    const d = CORPUS[IDX[r.id]];
+    let cls = '';
+    if (r.id === c.Q.gold) cls = 'gold';
+    else if (r.id === c.Q.decoy) cls = 'decoy';
+    const from = c.biRankOf[r.id], to = i + 1;
+    const delta = from - to;   // +ve = moved up
+    let dHtml;
+    if (delta > 0)      dHtml = '<div class="delta d-up">↑'+delta+'</div>';
+    else if (delta < 0) dHtml = '<div class="delta d-down">↓'+(-delta)+'</div>';
+    else                dHtml = '<div class="delta d-same">—</div>';
+    html += row(d, to, cls, tagFor(r.id, c.Q), r.score.toFixed(2), 100*r.score/maxScore, dHtml);
+  });
+  $("stage2").innerHTML = html;
+}
+
+// ============================ tiles / cost / narration ============================
+function tile(k,v,s,color){ return '<div class="tile"><div class="k">'+esc(k)+'</div><div class="v"'+(color?' style="color:'+color+'"':'')+'>'+v+'</div><div class="s">'+esc(s)+'</div></div>'; }
+
+function renderTiles(c){
+  const biTop1 = c.bi[0].id, ceTop1 = c.cross[0].id;
+  const goldInN = c.shortlist.includes(c.Q.gold);
+  const goldFrom = c.biRankOf[c.Q.gold];
+  const goldTo   = goldInN ? c.crossRankOf[c.Q.gold] : null;
+  const t1correct = ceTop1 === c.Q.gold;
+  $("tiles").innerHTML =
+    tile('Bi-encoder #1', '<span style="font-size:14px">'+esc(CORPUS[IDX[biTop1]].title)+'</span>',
+         biTop1===c.Q.gold?'already correct':'keyword decoy — wrong', biTop1===c.Q.gold?'#047857':'#b45309') +
+    tile('Reranked #1', '<span style="font-size:14px">'+esc(CORPUS[IDX[ceTop1]].title)+'</span>',
+         t1correct?'the true answer ✓':'still off — raise N', t1correct?'#6366f1':'#b45309') +
+    tile('True answer moved', goldInN ? ('#'+goldFrom+' → #'+goldTo) : ('#'+goldFrom+' → out'),
+         goldInN ? (goldFrom>goldTo?'pulled up ↑':'unchanged') : 'below the top-N cut', goldInN&&goldFrom>goldTo?'#047857':'#b45309') +
+    tile('Cross-encoder passes', state.N+' / '+M, 'pairs re-scored this query', '#0f172a');
+}
+
+function renderCost(){
+  const rerankPct = 100 * state.N / M;
+  $("costBar").innerHTML =
+    '<span style="flex-basis:'+rerankPct+'%;background:#6366f1">'+state.N+' reranked</span>' +
+    '<span style="flex-basis:'+(100-rerankPct)+'%;background:#cbd5e1;color:#475569">'+(M-state.N)+' skipped</span>';
+  $("costNote").innerHTML = 'The cross-encoder runs <b>'+state.N+'</b> forward pass'+(state.N>1?'es':'')+' — one per shortlisted pair — not '+M+'. On a real corpus that is <b>N vs millions</b>: the whole reason reranking is affordable.';
+}
+
+function renderNarr(c){
+  const Q = c.Q;
+  const goldInN = c.shortlist.includes(Q.gold);
+  const goldFrom = c.biRankOf[Q.gold];
+  const decoyFrom = c.biRankOf[Q.decoy];
+  const ceTop1 = c.cross[0].id;
+  let n = 'Stage 1 ranks the <b style="color:#f59e0b">keyword decoy</b> (“'+esc(CORPUS[IDX[Q.decoy]].title)+'”) at <b>#'+decoyFrom+'</b> — it just repeats the query\'s words — while the <b style="color:#6366f1">true answer</b> (“'+esc(CORPUS[IDX[Q.gold]].title)+'”) sits at <b>#'+goldFrom+'</b>. ';
+  if (!goldInN){
+    n += 'With <b>N='+state.N+'</b> the true answer is <b>below the cut</b>, so the reranker never sees it and #1 stays wrong. <b>A reranker can only reorder what stage 1 surfaced</b> — raise N until the answer makes the shortlist.';
+  } else if (ceTop1 === Q.gold){
+    const moved = goldFrom - c.crossRankOf[Q.gold];
+    n += 'The cross-encoder re-reads each shortlisted pair jointly, scores the true answer highest, and '+(moved>0?('lifts it <b>'+moved+' place'+(moved>1?'s':'')+'</b> to #1'):'keeps it at #1')+' — the decoy drops. <b>Same retrieval, corrected order.</b> Now the LLM reads the right chunk first.';
+  } else {
+    n += 'Even reranked, #1 isn\'t the true answer yet at this N — nudge the top-N so the reranker has the right candidate to promote.';
+  }
+  $("narr").innerHTML = n;
+}
+
+function renderAll(){
+  const c = compute();
+  const b = document.querySelectorAll('#queryPick button');
+  b.forEach((btn,i) => btn.classList.toggle('on', i === state.query));
+  $("queryText").innerHTML = '<span class="text-slate-400 text-xs font-bold mr-1">Q:</span>“'+esc(c.Q.q)+'”';
+  renderStage1(c);
+  renderStage2(c);
+  renderTiles(c);
+  renderCost();
+  renderNarr(c);
+}
+
+// ============================ controls ============================
+$("nSlider").oninput = e => { state.N = parseInt(e.target.value,10); $("nLbl").textContent = state.N; renderAll(); };
+
+// boot
+buildQueryPick();
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Retrieval recall ≠ top-order precision", why:"A first-stage retriever is tuned to <strong>recall</strong>: make sure the useful documents land somewhere in the top-N of a huge corpus, fast. That is not the same as <strong>precision at the top</strong> — getting the single best document to rank #1. A doc that merely shares surface words with the query can out-rank the one that truly answers it. Since RAG feeds the model the top chunk(s), a wrong #1 becomes a wrong (or unsupported) answer, and no downstream prompt fixes it.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">retrieve top-N &nbsp;→&nbsp; [right doc is IN here]&nbsp; ✅ recall<br>but order: &nbsp;decoy #1 &nbsp; answer #3 &nbsp; ❌ precision<br><br>the answer is present but not on top</div>`, code:`# recall@N: is the gold doc anywhere in the top-N?  (usually yes)
+# precision@1: is the gold doc the #1 result?        (often no)
+# a reranker attacks precision@1 without re-retrieving` },
+ { title:"2. The bi-encoder — fast, separate encoding", why:"The retriever is a <strong>bi-encoder</strong> (a.k.a. dual encoder): it embeds the query and each document into <strong>one vector each, independently</strong>. Document vectors are computed once, offline, and stored in an ANN index, so query time is a single embed + a nearest-neighbour lookup — milliseconds over millions of docs. The catch: each document is compressed into a fixed vector <em>before it ever sees the query</em>, so the similarity can't reflect query-specific detail.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">query → [ q-vec ]<br>doc&nbsp;&nbsp;&nbsp;→ [ d-vec ]&nbsp;&nbsp;(precomputed offline)<br>score = cos(q-vec, d-vec)<br><br>2 encodes, no interaction · O(1) per doc at query time</div>`, code:`doc_emb = bi.encode(corpus)      # ONCE, offline, indexed
+q_emb   = bi.encode(query)       # at query time
+scores  = cosine(q_emb, doc_emb) # cheap ANN lookup over millions` },
+ { title:"3. The cross-encoder — slow, joint encoding", why:"A <strong>cross-encoder</strong> takes the query and one document <strong>together</strong> — <span class='mono'>[query] [SEP] [doc]</span> — and runs the pair through the transformer so every query token can attend to every document token. Out comes a single, calibrated relevance score. This models the fine query-doc interaction the bi-encoder threw away, so it's far more accurate at judging <em>this doc for this query</em> — but there's nothing to precompute, because the score depends on the query.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">[query [SEP] doc] → transformer → relevance<br>every q-token attends every d-token<br><br>1 encode PER PAIR · accurate · nothing to cache</div>`, code:`# one forward pass per (query, doc) pair
+rel = cross_encoder.predict([(query, doc)])   # e.g. 0.96
+# reads the pair jointly -> precise, but O(N) at query time` },
+ { title:"4. Why not cross-encode everything?", why:"If the cross-encoder is so much sharper, why not use it as the retriever? Cost. It needs a full transformer forward pass for <em>every</em> (query, doc) pair, and the score can't be indexed offline because it depends on the query. Scoring a million-doc corpus per query is seconds-to-minutes of GPU time — a non-starter for interactive search. The bi-encoder can pre-index; the cross-encoder cannot. So you use each where it's strong.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">bi-encoder:&nbsp; index offline → ms over millions ✅<br>cross-encoder over ALL docs: N transformer passes<br>1,000,000 passes / query → 💥 too slow<br><br>only affordable on a SHORTLIST</div>`, code:`# cross-encoding the whole corpus, per query:
+cost = N_docs * one_transformer_pass    # millions * ms  = seconds+
+# impossible interactively -> restrict N to a shortlist` },
+ { title:"5. Retrieve-then-rerank — the two-stage pattern", why:"Combine their strengths. <strong>Stage 1</strong>: the bi-encoder sweeps the whole corpus and returns a broad <strong>top-N</strong> shortlist — cheap, high recall. <strong>Stage 2</strong>: the cross-encoder re-scores just those N (query, doc) pairs and reorders them into a precise <strong>top-k</strong>. You pay the expensive model only N times per query, and you get its precision exactly where it matters — the final order handed to the LLM.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">corpus ──bi-encoder──▶ top-N (recall, fast)<br>top-N ──cross-encoder──▶ top-k (precision, sharp)<br>top-k ──▶ LLM<br><br>cheap wide net, then expensive fine sort</div>`, code:`shortlist = bi_encoder.topN(query, N=50)          # stage 1: recall
+rel       = cross_encoder.predict(pairs(query, shortlist))
+top_k     = reorder(shortlist, rel)[:k]           # stage 2: precision` },
+ { title:"6. The top-N cut — recall vs latency", why:"N is the crucial dial. The reranker can only reorder what stage 1 handed it: if the true answer sits at bi-encoder rank 60 and N=50, it's already gone — no reranking recovers it. So bigger N means higher recall. But every extra shortlisted doc is another cross-encoder forward pass, so latency grows linearly with N. The art is picking the smallest N whose recall@N still catches the answers — usually 50–200.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">N too small → answer below the cut → can't be fixed<br>N too big&nbsp;&nbsp; → wasted cross-encoder passes<br><br>tune N to recall@N on YOUR data</div>`, code:`# reranker precision is capped by stage-1 recall@N
+assert gold_rank_in_stage1 <= N   # else the reranker never sees it
+# measure recall@N, pick the smallest N past the knee of the curve` },
+ { title:"7. Latency & cost budget", why:"Concretely: stage 1 is one ANN lookup (sub-millisecond to a few ms). Stage 2 is N cross-encoder passes — a few milliseconds each on GPU, and they batch well, so reranking ~100 docs typically adds tens of milliseconds. That's a bounded, predictable tax for a large jump in top-order quality. Hosted rerank APIs (Cohere, Voyage) price per document reranked, which is again why you rerank a shortlist, not the corpus.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">stage 1: 1 ANN lookup&nbsp;&nbsp;&nbsp;&nbsp;≈ few ms<br>stage 2: N cross passes ≈ tens of ms (batched)<br><br>bounded latency · billed per reranked doc</div>`, code:`# rough budget for a query:
+t = ann_lookup_ms + N * cross_pass_ms   # e.g. 3 + 100*0.3 ≈ 33 ms
+# accuracy up a lot, latency up a little -> usually worth it` },
+ { title:"8. In practice & the toolkit", why:"You rarely train the cross-encoder yourself. Reach for a hosted reranker — <strong>Cohere Rerank</strong>, <strong>Voyage rerank</strong> — or an open model like <strong>bge-reranker</strong> / <span class='mono'>cross-encoder/ms-marco-MiniLM</span> via sentence-transformers. The <strong>MTEB</strong> reranking tasks benchmark how much lift each gives. A middle ground is <strong>ColBERT</strong>'s late interaction (token-level, precomputable, between bi- and cross-encoder). Drop the reranker between your vector store and the LLM; because the #1 chunk is now the real answer, the model is better grounded.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">vector DB → top-N → RERANKER → top-k → Claude<br><br>Cohere Rerank · Voyage · bge-reranker · MS-MARCO CE<br>ColBERT = late-interaction middle ground · MTEB tracks it</div>`, code:`from sentence_transformers import CrossEncoder
+ce = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+ranked = sorted(shortlist, key=lambda d: ce.predict([(q, d)]), reverse=True)
+# feed ranked[:k] to claude-opus-5 as grounded context` },
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
