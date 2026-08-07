@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 57 — Hybrid Search</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .triple { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; font-weight:700; background:#eef2ff; color:#4338ca; padding:1px 6px; border-radius:6px; white-space:nowrap; }
+
+  /* ===== controls ===== */
+  .seg { display:inline-flex; border:1px solid #e2e8f0; border-radius:11px; overflow:hidden; }
+  .seg button { padding:7px 14px; font-size:12.5px; font-weight:800; background:#fff; color:#475569; border-right:1px solid #e2e8f0; transition:all .18s; }
+  .seg button:last-child { border-right:0; }
+  .seg button.on { background:#6366f1; color:#fff; }
+
+  input[type=range] { -webkit-appearance:none; appearance:none; height:7px; border-radius:999px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:999px; background:#6366f1; cursor:pointer; border:3px solid #fff; box-shadow:0 2px 8px rgba(99,102,241,.5); }
+  input[type=range]::-moz-range-thumb { width:20px; height:20px; border-radius:999px; background:#6366f1; cursor:pointer; border:3px solid #fff; }
+  input[type=range].amber::-webkit-slider-thumb { background:#f59e0b; box-shadow:0 2px 8px rgba(245,158,11,.5); }
+  input[type=range].amber::-moz-range-thumb { background:#f59e0b; }
+
+  .toggle { display:inline-flex; align-items:center; gap:7px; cursor:pointer; user-select:none; }
+  .toggle .track { width:38px; height:22px; border-radius:999px; background:#cbd5e1; position:relative; transition:background .18s; }
+  .toggle .track .knob { position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:999px; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:left .18s; }
+  .toggle.on .track { background:#6366f1; }
+  .toggle.on .track .knob { left:18px; }
+
+  /* ===== stat tiles ===== */
+  .tile { border:1.5px solid #e2e8f0; border-radius:13px; padding:11px 13px; background:#fff; }
+  .tile .k { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; }
+  .tile .v { font-size:15px; font-weight:900; color:#0f172a; margin-top:2px; line-height:1.2; }
+  .tile .s { font-size:10.5px; color:#64748b; margin-top:2px; }
+
+  /* ===== ranking rows ===== */
+  .rowlist { display:flex; flex-direction:column; gap:6px; }
+  .rrow { display:flex; align-items:center; gap:9px; padding:8px 10px; border:1.5px solid #e2e8f0; border-radius:11px; background:#fff; transition:all .2s; }
+  .rrow.dim { opacity:.5; filter:grayscale(.4); }
+  .rrow.gold { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.14); background:#f8f9ff; }
+  .rrow.decoy { border-color:#f59e0b; background:#fffdf5; }
+  .rk { width:26px; height:26px; flex:0 0 26px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:900; background:#0f172a; color:#fff; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .rrow.gold .rk { background:#6366f1; }
+  .rrow.decoy .rk { background:#f59e0b; }
+  .rmeta { min-width:0; flex:1; }
+  .rtitle { font-size:12.5px; font-weight:800; color:#0f172a; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .rtext { font-size:10.5px; color:#64748b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rbarwrap { height:6px; border-radius:999px; background:#eef2f7; margin-top:5px; overflow:hidden; }
+  .rbar { height:100%; border-radius:999px; background:#94a3b8; }
+  .rrow.gold .rbar { background:#6366f1; }
+  .rrow.decoy .rbar { background:#f59e0b; }
+  .rscore { flex:0 0 auto; font-size:12px; font-weight:800; color:#334155; font-variant-numeric:tabular-nums; font-family:ui-monospace,Menlo,Consolas,monospace; text-align:right; min-width:44px; }
+  .tag { font-size:8.5px; font-weight:900; text-transform:uppercase; letter-spacing:.04em; padding:1px 6px; border-radius:999px; }
+  .tag-gold { background:#eef2ff; color:#4338ca; }
+  .tag-decoy { background:#fef3c7; color:#b45309; }
+  .tag-mute { background:#f1f5f9; color:#94a3b8; }
+
+  /* ===== fused contribution chips ===== */
+  .contrib { display:flex; gap:5px; flex:0 0 auto; }
+  .chip { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:10px; font-weight:800; padding:2px 7px; border-radius:8px; white-space:nowrap; line-height:1.35; text-align:center; }
+  .chip .cv { display:block; font-size:9px; font-weight:700; opacity:.85; }
+  .chip-bm { background:#e0f2fe; color:#0369a1; }
+  .chip-de { background:#f3e8ff; color:#7e22ce; }
+  .chip-off { background:#f1f5f9; color:#94a3b8; }
+
+  .cutline { display:flex; align-items:center; gap:8px; margin:2px 0; }
+  .cutline .ln { flex:1; height:0; border-top:2px dashed #94a3b8; }
+  .cutline .lbl { font-size:9.5px; font-weight:900; color:#94a3b8; text-transform:uppercase; letter-spacing:.05em; white-space:nowrap; }
+
+  .verdict { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:10px; font-weight:800; }
+  .v-good { background:#ecfdf5; color:#047857; }
+  .v-fail { background:#fef2f2; color:#dc2626; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 57</div>
+      <h1 class="text-xl font-bold">🔀 Hybrid Search — <strong>two engines that fail in opposite ways, fused into one that doesn't.</strong> Modern retrieval has two great tools that are each half-blind. <strong>Lexical search (BM25)</strong> matches the actual words: it is unbeatable on exact keywords, product codes, error IDs and rare technical terms — but it is literal, so it cannot tell that <em>"sign in"</em> and <em>"log in"</em> mean the same thing, and a pure paraphrase with no shared words scores <strong>zero</strong>. <strong>Dense vector search</strong> matches meaning: it embeds query and documents into vectors and ranks by cosine, so it sails through paraphrase and synonyms — but it smears rare tokens into a fuzzy semantic average, so it can rank a generic <em>"error"</em> article above the one doc that names your <em>exact</em> error code. Neither is strictly better; they miss <em>different</em> things. <strong>Hybrid search</strong> runs both and <strong>fuses the two ranked lists</strong>. The trick is that you don't need the two scores to live on the same scale: <strong>Reciprocal Rank Fusion (RRF)</strong> throws the scores away and adds up <span class="mono">1/(k+rank)</span> across lists, so a doc that either engine ranked highly floats to the top — a scale-free vote. (A <strong>weighted sum</strong> of normalized scores is the alternative, and the demo shows why the <em>normalize</em> step is not optional.) Below is a live, fully self-contained engine over a baked-in help-centre corpus — a real <strong>BM25</strong> (tf saturation via <span class="mono">k1</span>, length-norm via <span class="mono">b</span>, proper idf) and a hand-built <strong>concept-space cosine</strong> standing in for dense embeddings — with a query that BM25 alone half-answers, dense alone half-answers, and hybrid gets fully right. <strong>No API, no LLM, all deterministic.</strong></h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Keywords <span style="color:#0ea5e9">and</span> meaning — <span style="color:#6366f1">fuse the two rankings</span>.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">Nine help-centre articles are the corpus. <b style="color:#0ea5e9">BM25</b> (lexical) scores every doc by exact word overlap — great on codes &amp; rare terms, blind to paraphrase. <b style="color:#7e22ce">Dense</b> (semantic) scores by meaning in a concept space — great on paraphrase, fuzzy on exact codes. Watch each engine miss something the other catches, then fuse them with <b style="color:#6366f1">RRF</b> (or a weighted sum) and see the truly-relevant docs rise to the top. Everything is deterministic and runs in your browser — no network, no embedding API, no LLM.</p>
+      </div>
+
+      <!-- ===================== CARD A · query + controls ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="grid md:grid-cols-2 gap-5">
+          <div>
+            <div class="text-[10px] uppercase font-bold text-indigo-600 mb-2">🔎 The query</div>
+            <div class="seg mb-3" id="queryPick"></div>
+            <div class="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-[14px] font-semibold text-slate-800" id="queryText"></div>
+            <div class="text-[11px] text-slate-500 mt-2" id="queryNote"></div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase font-bold text-indigo-600 mb-2">🔗 Fusion method</div>
+            <div class="seg mb-3" id="methodPick">
+              <button data-m="rrf">RRF · reciprocal rank</button>
+              <button data-m="ws">Weighted sum</button>
+            </div>
+
+            <div id="rrfControls">
+              <div class="flex items-center justify-between mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">RRF constant · k = <span id="kLbl" class="mono">60</span></div>
+                <div class="text-[10px] font-bold text-slate-400">score = Σ 1/(k+rank)</div>
+              </div>
+              <input id="kSlider" type="range" min="1" max="100" step="1" value="60" class="w-full" />
+              <div class="text-[11px] text-slate-500 mt-1">Small <b>k</b> lets a rank-1 hit dominate; large <b>k</b> flattens the votes so agreement across lists matters more. Only ranks are used — the raw scores never touch the fusion.</div>
+            </div>
+
+            <div id="wsControls" class="hidden">
+              <div class="flex items-center justify-between mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">Weight · α = <span id="aLbl" class="mono">0.50</span></div>
+                <div class="text-[10px] font-bold text-slate-400">α·BM25 + (1−α)·dense</div>
+              </div>
+              <input id="aSlider" type="range" min="0" max="1" step="0.05" value="0.5" class="w-full" />
+              <div class="flex justify-between text-[9px] text-slate-400 font-bold mt-1 mono"><span>0 · all dense</span><span>balance</span><span>1 · all BM25</span></div>
+              <div class="mt-2" id="normToggle"></div>
+              <div class="text-[11px] text-slate-500 mt-1">Weighted sum adds the two <em>scores</em>, so they must share a scale. Turn <b>normalize</b> off and watch BM25's raw magnitude (0–4) bulldoze dense (0–1).</div>
+            </div>
+
+            <div class="mt-3 pt-3 border-t border-slate-200 grid grid-cols-2 gap-3">
+              <div>
+                <div class="text-[10px] uppercase font-bold text-sky-600 mb-1">BM25 k1 · tf saturation = <span id="k1Lbl" class="mono">1.5</span></div>
+                <input id="k1Slider" type="range" min="0" max="3" step="0.1" value="1.5" class="w-full" />
+              </div>
+              <div>
+                <div class="text-[10px] uppercase font-bold text-sky-600 mb-1">BM25 b · length-norm = <span id="bLbl" class="mono">0.75</span></div>
+                <input id="bSlider" type="range" min="0" max="1" step="0.05" value="0.75" class="w-full" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4 pt-4 border-t border-slate-200" id="tiles"></div>
+      </div>
+
+      <!-- ===================== CARD B · the two retrievers ===================== -->
+      <div class="grid lg:grid-cols-3 gap-5 mb-5">
+        <div class="lg:col-span-2 grid md:grid-cols-2 gap-5">
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold" style="color:#0369a1">① BM25 — lexical <span class="text-slate-400 normal-case font-normal">exact word overlap. Rare terms &amp; codes score high; a paraphrase with no shared words scores 0.</span></div>
+            <div id="bm25list" class="rowlist mt-3"></div>
+          </div>
+          <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-xs uppercase font-bold" style="color:#7e22ce">② Dense — semantic <span class="text-slate-400 normal-case font-normal">cosine in concept space. Paraphrase &amp; synonyms match; a rare exact code blurs into a generic concept.</span></div>
+            <div id="denselist" class="rowlist mt-3"></div>
+          </div>
+        </div>
+        <div class="lg:col-span-1 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div class="text-[10px] uppercase font-bold text-indigo-600 mb-1">What's happening</div>
+          <div id="narr" class="text-sm text-slate-700 min-h-[150px]"></div>
+          <div class="mt-3 pt-3 border-t border-slate-200">
+            <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Legend</div>
+            <div class="text-[11px] text-slate-600 space-y-1">
+              <div><span class="tag tag-gold">relevant</span> a doc that truly answers this query</div>
+              <div><span class="tag tag-decoy">false hit</span> a doc one engine wrongly favours</div>
+              <div><span class="tag tag-mute">no match</span> BM25 score 0 — not retrieved, no vote</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD C · fused ===================== -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-5 mb-5">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <div class="text-xs uppercase font-bold text-indigo-600">③ Fused ranking · <span id="fuseLbl">RRF</span> <span class="text-slate-400 normal-case font-normal">— each row shows what BM25 and dense each contributed, then the total.</span></div>
+          <div class="text-[11px] font-bold" id="fuseVerdict"></div>
+        </div>
+        <div id="fusedlist" class="rowlist mt-3"></div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto"><strong>Hybrid search wins because its two halves fail independently.</strong> BM25 can't see that a paraphrase means the same thing; dense can't hold onto an exact code. Fuse them and each engine covers the other's blind spot — a doc only needs to be strong in <em>one</em> list to survive. <strong>RRF</strong> makes that fusion trivial: it uses only the ranks, so the two engines never have to agree on a scale, and there's a single knob (<span class="mono">k</span>). A <strong>weighted sum</strong> can outperform it when you carefully normalize and tune α, but that calibration is exactly what RRF lets you skip. This demo uses a toy BM25 and a concept-space stand-in for embeddings, but the shape is the real thing — <strong>Weaviate, Elasticsearch/OpenSearch, Qdrant, Milvus and pgvector all ship native BM25+vector hybrid with RRF built in</strong>, and it usually feeds a reranker (Day 56) before the LLM ever reads a word.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Two half-blind engines, one fused ranking</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / MATH FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build hybrid search — BM25 + dense, fused with RRF</h2>
+    <p class="text-slate-500 mb-8">Reproduce the LOOK engine as real code: score the corpus two ways — a lexical <span class="mono">BM25</span> and a dense embedding cosine — then fuse the two ranked lists so a doc strong in <em>either</em> survives. The toy uses a concept-space stand-in for embeddings; the last block swaps in a real embedder plus a native-hybrid vector DB and hands the result to a reranker and Claude. Every block is the exact idea flowing through LOOK.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">The corpus and a two-sided query</h3></div>
+        <p class="text-sm text-slate-600 mb-3">One query can carry <em>both</em> a paraphrase and an exact code. BM25 will nail the code and whiff the paraphrase; dense will do the reverse. That split is the whole reason to fuse.</p>
+        <div class="relative"><pre>corpus = [
+    "Trouble logging in? Recover your account access from the log in page...",  # login answer (paraphrase target)
+    "Error X0-2231 keeps popping up when a saved session has timed out...",      # the exact-code answer
+    "A red error message keeps popping up on the dashboard...",                  # lexical decoy
+    "Two factor authentication sends a one time login code to your phone...",    # semantic decoy
+    # ...more help-centre articles...
+]
+query = "I can't sign in and X0-2231 keeps popping up"
+#         ^ paraphrase of 'log in'        ^ exact error code</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Lexical engine — BM25 (idf · tf saturation · length-norm)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">BM25 sums, over each query term in the doc: an <strong>idf</strong> (rare terms count more), a <strong>tf</strong> that <em>saturates</em> via <span class="mono">k1</span> (the 5th "password" barely beats the 4th), and a <strong>length penalty</strong> via <span class="mono">b</span> (long docs don't win just by being long). A rare code like <span class="mono">X0-2231</span> gets a huge idf, so the one doc that contains it rockets to the top.</p>
+        <div class="relative"><pre>import math
+N = len(corpus); avgdl = sum(len(d) for d in docs_tok)/N
+
+def idf(t):                                   # BM25 idf, non-negative
+    n = sum(t in set(d) for d in docs_tok)
+    return math.log(1 + (N - n + 0.5)/(n + 0.5))
+
+def bm25(q_tok, d, k1=1.5, b=0.75):
+    score, dl = 0.0, len(d)
+    for t in set(q_tok):
+        f = d.count(t)
+        if not f: continue
+        score += idf(t) * (f*(k1+1)) / (f + k1*(1 - b + b*dl/avgdl))
+    return score
+lex = sorted(range(N), key=lambda i: bm25(q_tok, docs_tok[i]), reverse=True)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Semantic engine — dense embeddings + cosine</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A dense embedder maps text to a vector where <em>meaning</em>, not spelling, decides closeness — so <span class="mono">"sign in"</span> lands next to <span class="mono">"log in"</span>. Rank by cosine. The LOOK demo fakes the embedder by mapping words to shared concept buckets; production uses a real model, but the ranking step is identical.</p>
+        <div class="relative"><pre>from sentence_transformers import SentenceTransformer, util
+
+embed   = SentenceTransformer("all-MiniLM-L6-v2")
+doc_emb = embed.encode(corpus, convert_to_tensor=True)   # precomputed offline
+q_emb   = embed.encode(query,  convert_to_tensor=True)
+
+sims = util.cos_sim(q_emb, doc_emb)[0]
+dense = sims.argsort(descending=True).tolist()   # by meaning, not words
+# 'sign in' ~ 'log in' -> the paraphrase answer ranks high;
+# but the exact code X0-2231 blurs into a generic 'error' vector.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">The two blind spots (why one engine is never enough)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Print the two top-3 lists and the failure is symmetric: BM25 finds the code doc but not the paraphrase; dense finds the paraphrase but ranks a generic error doc over the exact-code one. Each list is <em>half</em> right.</p>
+        <div class="relative"><pre># BM25 top-3:                         # DENSE top-3:
+#  1. Error X0-2231 ...   (code ✓)    #  1. Regain account access ... (login ✓)
+#  2. Dashboard error ... (decoy)     #  2. Account profile ...        (decoy)
+#  3. (paraphrase answer MISSING)     #  3. (exact-code answer MISSING)
+#
+# BM25 can't bridge sign-in -> log-in ; dense can't pin a rare code.
+# neither ordering, alone, puts BOTH true answers on top.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Fuse with Reciprocal Rank Fusion (RRF)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">RRF ignores the scores entirely — they live on incompatible scales — and adds <span class="mono">1/(k+rank)</span> across every list a doc appears in. A doc ranked #1 anywhere gets a big vote; being decent in both lists also adds up. A doc a list never retrieved simply contributes 0 from that list.</p>
+        <div class="relative"><pre>def rrf(rankings, k=60):
+    score = {}
+    for ranked in rankings:                 # e.g. [lex, dense]
+        for rank, doc in enumerate(ranked, start=1):
+            score[doc] = score.get(doc, 0) + 1.0/(k + rank)
+    return sorted(score, key=score.get, reverse=True)
+
+fused = rrf([lex, dense], k=60)
+# the code doc (BM25 #1) and the login doc (dense #1) BOTH surface -
+# each was #1 in one list, so each earns a top 1/(k+1) vote.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">The alternative — weighted sum (and why you must normalize)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">You <em>can</em> fuse the scores directly with <span class="mono">α·BM25 + (1−α)·dense</span> — but BM25 is unbounded (0–tens) while cosine is 0–1, so without a <strong>min-max normalize</strong> BM25 dominates no matter what α you pick. Normalize each list to 0–1 first, then α is a real dial. RRF sidesteps this entire calibration by using ranks.</p>
+        <div class="relative"><pre>def minmax(scores):
+    lo, hi = min(scores.values()), max(scores.values())
+    return {d: (s-lo)/(hi-lo) if hi>lo else 0.0 for d, s in scores.items()}
+
+def weighted(lex_s, dense_s, alpha=0.5, normalize=True):
+    L = minmax(lex_s)   if normalize else lex_s
+    D = minmax(dense_s) if normalize else dense_s
+    keys = set(L) | set(D)
+    return sorted(keys, key=lambda d: alpha*L.get(d,0) + (1-alpha)*D.get(d,0), reverse=True)
+# normalize=False -> BM25's raw magnitude bulldozes cosine. RRF has no such trap.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">7</div><h3 class="font-bold text-lg">Hybrid search in one function</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Wrap it: score lexically, score densely, fuse, cut to top-k. Each retriever usually returns its own top-N first (so RRF fuses shortlists, not the whole corpus). This <strong>retrieve-both-then-fuse</strong> shape is the entire pattern.</p>
+        <div class="relative"><pre>def hybrid_search(query, k=10, rrf_k=60):
+    q_tok = tokenize(query)
+    lex   = sorted(range(N), key=lambda i: bm25(q_tok, docs_tok[i]), reverse=True)[:50]
+    lex   = [i for i in lex if bm25(q_tok, docs_tok[i]) > 0]   # only real matches vote
+    q_emb = embed.encode(query, convert_to_tensor=True)
+    dense = util.cos_sim(q_emb, doc_emb)[0].argsort(descending=True).tolist()[:50]
+    return rrf([lex, dense], k=rrf_k)[:k]      # fused top-k
+# keyword precision + semantic recall, in one ranked list</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">8</div><h3 class="font-bold text-lg">In practice — native hybrid, then rerank, then Claude</h3></div>
+        <p class="text-sm text-slate-600 mb-3">You rarely hand-roll this. <strong>Weaviate, Elasticsearch/OpenSearch, Qdrant, Milvus, pgvector</strong> all expose BM25+vector hybrid with RRF as a single query. Then feed the fused shortlist to a <strong>reranker</strong> (Day 56) for precise top-order, and the top-k to <span class="mono">claude-opus-5</span>. Hybrid fixes <em>recall</em> (both answers get retrieved); the reranker fixes <em>precision</em> (the best one lands at #1).</p>
+        <div class="relative"><pre>import weaviate, cohere, anthropic
+
+# stage 1: native BM25 + vector hybrid, fused by RRF, in ONE query
+res = collection.query.hybrid(query=query, alpha=0.5,       # 0=BM25, 1=vector
+                              fusion_type=HybridFusion.RANKED_FUSION, limit=50)
+docs = [o.properties["text"] for o in res.objects]
+
+# stage 2: rerank the fused shortlist for precise order (Day 56)
+ranked = cohere.Client().rerank(model="rerank-english-v3.0",
+                                query=query, documents=docs, top_n=5)
+context = "\n\n".join(docs[r.index] for r in ranked.results)
+
+# stage 3: grounded answer
+anthropic.Anthropic().messages.create(
+    model="claude-opus-5", max_tokens=1024,
+    system="Answer only from the provided context. Cite the source.",
+    messages=[{"role":"user","content":f"Context:\n{context}\n\nQ: {query}"}])
+# hybrid recall -> reranker precision -> grounded generation</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 57 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2"><strong>Hybrid search</strong> runs a lexical engine and a semantic engine side by side and fuses their rankings. <strong>BM25</strong> owns exact keywords, codes and rare terms via idf + saturating tf + length-norm, but is blind to paraphrase. <strong>Dense vectors</strong> own meaning and synonyms, but blur rare exact tokens. <strong>RRF</strong> fuses them with nothing but ranks — <span class="mono">Σ 1/(k+rank)</span> — so the two engines never need a shared scale, while a <strong>weighted sum</strong> can win only after you normalize and tune α. The payoff is recall you can't get from either alone: a doc strong in just one list survives. Pair it with a reranker (Day 56) for precision and it's the retrieval front-end of a serious RAG stack. <strong>👉 Tomorrow — Day 58: continuing AIFromZero.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* HYBRID-ENGINE-START */
+// ===== Day 57 · Hybrid Search — BM25 (lexical) + dense concept-cosine (semantic), fused by RRF / weighted-sum.
+//       Deterministic, no network, no LLM. =====
+
+// ---------- corpus (help-centre articles) ----------
+const CORPUS = [
+  { id:'d0', title:'Regain account access',        text:"Trouble logging in? Recover your account access from the log in page and choose a brand new secret to get back into your profile." },
+  { id:'d1', title:'Clear error X0-2231',          text:"Error X0-2231 keeps popping up when a saved session has timed out; open Settings, clear the cache and it is fixed." },
+  { id:'d2', title:'Dashboard error banner',       text:"A red error message keeps popping up on the dashboard whenever the page loads; refresh the browser to clear the banner." },
+  { id:'d3', title:'Two-factor authentication',    text:"Two factor authentication sends a one time login code to your phone every time you access your account for extra security." },
+  { id:'d4', title:'Export your records',          text:"Save all your details to a spreadsheet: pick download records and choose a CSV or JSON sheet from the account area." },
+  { id:'d5', title:'Account profile settings',     text:"Update your account profile: change your display name, photo and contact email from the profile page whenever you like." },
+  { id:'d6', title:'Printer fault F17-900',        text:"Fault F17-900 means the printer driver failed to load; reinstall the driver from the downloads folder to resolve the fault." },
+  { id:'d7', title:'Upgrade your plan',            text:"Your billing plan is charged to the card on file; get more storage from the upgrade tab and the card renews each month." },
+  { id:'d8', title:'Mobile app',                   text:"Download the mobile app for iPhone and Android to manage your account and check records on the go." },
+];
+const M = CORPUS.length;
+const IDX = {}; CORPUS.forEach((d,i)=>IDX[d.id]=i);
+
+// ---------- queries. gold = docs that truly answer; lexDecoy / semDecoy = the trap each engine falls for ----------
+const QUERIES = [
+  { q:"I can't sign in and X0-2231 keeps popping up", gold:['d0','d1'], lexDecoy:'d2', semDecoy:'d5', emoji:'🔑', label:'login + code',
+    note:"Two answers in one question: a login problem stated as a paraphrase, plus an exact error code. BM25 gets the code, dense gets the login — only hybrid gets both." },
+  { q:"how do I pull my info into a grid for excel", gold:['d4'], lexDecoy:null, semDecoy:'d8', emoji:'📤', label:'paraphrase',
+    note:"A pure paraphrase — not one query word appears in the answer. BM25 matches nothing at all; only the semantic side can find it." },
+  { q:"error code F17-900", gold:['d6'], lexDecoy:null, semDecoy:'d2', emoji:'🏷️', label:'exact code',
+    note:"A rare code plus the generic word 'error'. Dense blurs it into other error docs and mis-picks; BM25 pins the exact code doc." },
+];
+
+// ---------- concept lexicon (stand-in for dense semantics: words -> shared meaning buckets) ----------
+const CONCEPTS = {
+  AUTH: "log logging login signin sign in access account accounts recover recovery secret password profile credentials unlock authenticate authentication".split(' '),
+  SEC:  "security secure safety protect phone two factor verification verify".split(' '),
+  PAY:  "billing plan card charge charged declined refused invoice payment renews storage upgrade".split(' '),
+  ERR:  "error message banner fault crash bug broken issue problem failed fail".split(' '),
+  SYS:  "session cache settings config timeout timed expired reset refresh clear server token".split(' '),
+  DATA: "export download csv json report spreadsheet records details data backup file sheet grid excel".split(' '),
+  DASH: "dashboard page screen view panel".split(' '),
+  DEV:  "mobile app iphone android printer driver phone device".split(' '),
+};
+const TOK2CON = {};
+for (const c in CONCEPTS) CONCEPTS[c].forEach(w => { if(!(w in TOK2CON)) TOK2CON[w]=c; });
+
+// ---------- tokenizer (keeps codes like x0-2231 as one token) ----------
+const STOP = new Set("a an the of to and or is are was were be been it its this that with for as by from into out up on at in i you your my our we do does how what when where why can cant could would should will just so if then than my me get got keeps keep every each time one all your you brand new back has have had".split(' '));
+function tokenize(s){
+  return (s.toLowerCase().match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) || [])
+    .filter(w => w.length > 1 && !STOP.has(w));
+}
+
+// ---------- BM25 (idf · tf saturation via k1 · length-norm via b) ----------
+const DOCTOKS = CORPUS.map(d => tokenize(d.title + ' ' + d.text));
+const DL = DOCTOKS.map(t => t.length);
+const AVGDL = DL.reduce((a,b)=>a+b,0)/M;
+const DF = new Map();
+DOCTOKS.forEach(t => new Set(t).forEach(w => DF.set(w,(DF.get(w)||0)+1)));
+function bm25idf(w){ const n = DF.get(w)||0; return Math.log(1 + (M - n + 0.5)/(n + 0.5)); }
+function bm25Score(qToks, di, k1, b){
+  const toks = DOCTOKS[di];
+  const tf = new Map(); toks.forEach(w => tf.set(w,(tf.get(w)||0)+1));
+  let s = 0;
+  new Set(qToks).forEach(w => {
+    const f = tf.get(w)||0; if(!f) return;
+    s += bm25idf(w) * (f*(k1+1)) / (f + k1*(1 - b + b*DL[di]/AVGDL));
+  });
+  return s;
+}
+function bm25Rank(qi, k1, b){
+  const q = tokenize(QUERIES[qi].q);
+  return CORPUS.map((d,i)=>({id:d.id, score:bm25Score(q,i,k1,b)}))
+               .sort((a,b)=>b.score-a.score);
+}
+
+// ---------- dense (concept-space cosine, stand-in for embeddings) ----------
+function conceptVec(toks){
+  const v = new Map();
+  toks.forEach(w => { const c = TOK2CON[w]; if(c) v.set(c,(v.get(c)||0)+1); });
+  return v;
+}
+const DOCCON = DOCTOKS.map(conceptVec);
+function cosine(a,b){
+  let dot=0,na=0,nb=0;
+  a.forEach((va,k)=>{ na+=va*va; const vb=b.get(k); if(vb) dot+=va*vb; });
+  b.forEach(vb=>{ nb+=vb*vb; });
+  return (na&&nb) ? dot/(Math.sqrt(na)*Math.sqrt(nb)) : 0;
+}
+function denseRank(qi){
+  const qv = conceptVec(tokenize(QUERIES[qi].q));
+  return CORPUS.map((d,i)=>({id:d.id, score:cosine(qv, DOCCON[i])}))
+               .sort((a,b)=>b.score-a.score);
+}
+
+// ---------- RRF fusion (a method credits only docs it RETRIEVED, i.e. score>0) ----------
+function rrf(bm, de, k){
+  const rb={}; bm.filter(r=>r.score>0).forEach((r,i)=>rb[r.id]=i+1);
+  const rd={}; de.filter(r=>r.score>0).forEach((r,i)=>rd[r.id]=i+1);
+  return CORPUS.map(d=>{
+    const cb = rb[d.id] ? 1/(k+rb[d.id]) : 0;
+    const cd = rd[d.id] ? 1/(k+rd[d.id]) : 0;
+    return { id:d.id, rb:rb[d.id]||null, rd:rd[d.id]||null, cb, cd, score:cb+cd };
+  }).sort((a,b)=>b.score-a.score);
+}
+
+// ---------- weighted-sum fusion (optional min-max normalize) ----------
+function minmax(map){
+  const vals = Object.values(map); const lo = Math.min(...vals), hi = Math.max(...vals);
+  const out = {}; for(const k in map) out[k] = (hi>lo) ? (map[k]-lo)/(hi-lo) : 0;
+  return out;
+}
+function weighted(bm, de, alpha, normalize){
+  const sb={}; bm.forEach(r=>sb[r.id]=r.score);
+  const sd={}; de.forEach(r=>sd[r.id]=r.score);
+  const nb = normalize ? minmax(sb) : sb;
+  const nd = normalize ? minmax(sd) : sd;
+  return CORPUS.map(d=>{
+    const b = nb[d.id]||0, dd = nd[d.id]||0;
+    return { id:d.id, b, d:dd, score: alpha*b + (1-alpha)*dd };
+  }).sort((a,b)=>b.score-a.score);
+}
+
+const state = { query:0, method:'rrf', rrfk:60, alpha:0.5, normalize:true, k1:1.5, b:0.75 };
+/* HYBRID-ENGINE-END */
+
+// derive everything for the current state
+function compute(){
+  const Q = QUERIES[state.query];
+  const bm = bm25Rank(state.query, state.k1, state.b);
+  const de = denseRank(state.query);
+  const bmRankOf={}; bm.forEach((r,i)=>bmRankOf[r.id]=i+1);
+  const deRankOf={}; de.forEach((r,i)=>deRankOf[r.id]=i+1);
+  const fused = state.method==='rrf'
+    ? rrf(bm, de, state.rrfk)
+    : weighted(bm, de, state.alpha, state.normalize);
+  return { Q, bm, de, bmRankOf, deRankOf, fused };
+}
+
+// ============================ pickers ============================
+function buildQueryPick(){
+  $("queryPick").innerHTML = QUERIES.map((Q,i)=>'<button data-q="'+i+'">'+Q.emoji+' '+esc(Q.label)+'</button>').join('');
+  document.querySelectorAll('#queryPick button').forEach(btn => btn.onclick = () => { state.query = parseInt(btn.dataset.q,10); renderAll(); });
+}
+function buildNormToggle(){
+  $("normToggle").innerHTML = '<div class="toggle'+(state.normalize?' on':'')+'" id="normT"><div class="track"><div class="knob"></div></div><span class="text-[11px] font-bold text-slate-600">min-max normalize each list</span></div>';
+  $("normT").onclick = () => { state.normalize = !state.normalize; renderAll(); };
+}
+
+// ============================ ranking rows ============================
+function tagFor(id, Q, decoyId){
+  if (Q.gold.includes(id)) return '<span class="tag tag-gold">relevant</span>';
+  if (id === decoyId)      return '<span class="tag tag-decoy">false hit</span>';
+  return '';
+}
+function baseRow(d, rankNum, cls, tagHtml, barPct, rightHtml){
+  return '<div class="rrow '+cls+'">'
+    + '<div class="rk">'+rankNum+'</div>'
+    + '<div class="rmeta">'
+    +   '<div class="rtitle">'+esc(d.title)+' '+tagHtml+'</div>'
+    +   '<div class="rtext">'+esc(d.text)+'</div>'
+    +   '<div class="rbarwrap"><div class="rbar" style="width:'+Math.max(0,barPct).toFixed(0)+'%"></div></div>'
+    + '</div>'
+    + rightHtml
+    + '</div>';
+}
+
+function renderSingle(elId, ranked, c, decoyId, cutoff){
+  const maxScore = Math.max(1e-9, ranked[0].score);
+  let html='';
+  ranked.forEach((r,i)=>{
+    const d = CORPUS[IDX[r.id]];
+    let cls='';
+    const zero = r.score <= 1e-9;
+    if (zero) cls='dim';
+    if (c.Q.gold.includes(r.id)) cls += ' gold';
+    else if (r.id===decoyId) cls += ' decoy';
+    const tag = zero && !c.Q.gold.includes(r.id) && r.id!==decoyId
+      ? '<span class="tag tag-mute">no match</span>' : tagFor(r.id, c.Q, decoyId);
+    const right = '<div class="rscore">'+r.score.toFixed(3)+'</div>';
+    html += baseRow(d, i+1, cls.trim(), tag, 100*r.score/maxScore, right);
+    if (cutoff && i===cutoff-1)
+      html += '<div class="cutline"><span class="lbl">top-'+cutoff+'</span><span class="ln"></span><span class="lbl">rest</span></div>';
+  });
+  $(elId).innerHTML = html;
+}
+
+function renderFused(c){
+  const ranked = c.fused;
+  const maxScore = Math.max(1e-9, ranked[0].score);
+  const cutoff = c.Q.gold.length;
+  let html='';
+  ranked.forEach((r,i)=>{
+    const d = CORPUS[IDX[r.id]];
+    let cls='';
+    const decoyId = c.Q.semDecoy || c.Q.lexDecoy;
+    if (c.Q.gold.includes(r.id)) cls='gold';
+    else if (r.id===decoyId) cls='decoy';
+    let contrib;
+    if (state.method==='rrf'){
+      const bmC = r.rb ? '<div class="chip chip-bm">BM25 #'+r.rb+'<span class="cv">+'+r.cb.toFixed(4)+'</span></div>'
+                       : '<div class="chip chip-off">BM25 —<span class="cv">+0</span></div>';
+      const deC = r.rd ? '<div class="chip chip-de">dense #'+r.rd+'<span class="cv">+'+r.cd.toFixed(4)+'</span></div>'
+                       : '<div class="chip chip-off">dense —<span class="cv">+0</span></div>';
+      contrib = '<div class="contrib">'+bmC+deC+'</div>';
+    } else {
+      const a=state.alpha;
+      const bmC = '<div class="chip chip-bm">α·BM25<span class="cv">'+(a*r.b).toFixed(3)+'</span></div>';
+      const deC = '<div class="chip chip-de">(1−α)·dn<span class="cv">'+((1-a)*r.d).toFixed(3)+'</span></div>';
+      contrib = '<div class="contrib">'+bmC+deC+'</div>';
+    }
+    const right = contrib + '<div class="rscore">'+ (state.method==='rrf'? r.score.toFixed(4) : r.score.toFixed(3)) +'</div>';
+    html += baseRow(d, i+1, cls, tagFor(r.id, c.Q, decoyId), 100*r.score/maxScore, right);
+    if (i===cutoff-1)
+      html += '<div class="cutline"><span class="lbl">fused top-'+cutoff+'</span><span class="ln"></span><span class="lbl">rest</span></div>';
+  });
+  $("fusedlist").innerHTML = html;
+}
+
+// ============================ tiles / narration ============================
+function tile(k,v,s,color){ return '<div class="tile"><div class="k">'+esc(k)+'</div><div class="v"'+(color?' style="color:'+color+'"':'')+'>'+v+'</div><div class="s">'+esc(s)+'</div></div>'; }
+function goldsInTop(ranked, gold, n){ return gold.filter(g => ranked.slice(0,n).map(r=>r.id).includes(g)).length; }
+
+function renderTiles(c){
+  const G = c.Q.gold.length;
+  const cut = G;
+  const bmHit = goldsInTop(c.bm, c.Q.gold, cut);
+  const deHit = goldsInTop(c.de, c.Q.gold, cut);
+  const fuHit = goldsInTop(c.fused, c.Q.gold, cut);
+  const bestSingle = Math.max(bmHit, deHit);
+  const bmTop = c.bm[0], deTop = c.de[0], fuTop = c.fused[0];
+  const okBm = c.Q.gold.includes(bmTop.id), okDe = c.Q.gold.includes(deTop.id), okFu = c.Q.gold.includes(fuTop.id);
+  $("tiles").innerHTML =
+    tile('BM25 #1', esc(CORPUS[IDX[bmTop.id]].title), okBm?'relevant ✓':'not the answer', okBm?'#0369a1':'#b45309') +
+    tile('Dense #1', esc(CORPUS[IDX[deTop.id]].title), okDe?'relevant ✓':'not the answer', okDe?'#7e22ce':'#b45309') +
+    tile('Hybrid #1', esc(CORPUS[IDX[fuTop.id]].title), okFu?'relevant ✓':'still off', okFu?'#6366f1':'#b45309') +
+    tile('Relevant in top-'+cut, fuHit+' / '+G+' <span style="font-size:11px;color:#94a3b8">hybrid</span>',
+         'BM25 '+bmHit+' · dense '+deHit+' alone', fuHit>bestSingle?'#047857':'#0f172a');
+}
+
+function renderNarr(c){
+  const Q=c.Q, gid=Q.gold, T=id=>esc(CORPUS[IDX[id]].title);
+  let n='';
+  if (state.query===0){
+    const bmG0=c.bmRankOf[gid[0]], bmG1=c.bmRankOf[gid[1]], deG0=c.deRankOf[gid[0]], deG1=c.deRankOf[gid[1]];
+    n = '<b style="color:#0369a1">BM25</b> matches the exact code <span class="mono">X0-2231</span>, so the code answer "'+T('d1')+'" is #'+bmG1+' — but it can\'t link <i>"sign in"</i> to <i>"log in"</i>, so the login answer "'+T('d0')+'" sits at #'+bmG0+', out of reach. '
+      + '<b style="color:#7e22ce">Dense</b> does the mirror image: the login answer is #'+deG0+', but the rare code blurs into a generic vector so the code answer falls to #'+deG1+'. '
+      + 'Each engine is <b>half right</b>. '+fusedSentence(c);
+  } else if (state.query===1){
+    const bmZero = c.bm.every(r=>r.score<=1e-9);
+    n = '<b style="color:#0369a1">BM25</b> '+(bmZero?'scores <b>every doc 0</b> — not one query word appears in any article':'finds almost nothing')+', so lexical search is helpless on a pure paraphrase. '
+      + '<b style="color:#7e22ce">Dense</b> maps <i>"grid / excel"</i> to the same concept as <i>spreadsheet / CSV</i> and puts "'+T('d4')+'" at #'+c.deRankOf['d4']+'. '+fusedSentence(c);
+  } else {
+    n = '<b style="color:#7e22ce">Dense</b> flattens the code <span class="mono">F17-900</span> into a generic <i>error</i> concept and wrongly ranks "'+T(Q.semDecoy)+'" above the real answer (dense has "'+T('d6')+'" at #'+c.deRankOf['d6']+'). '
+      + '<b style="color:#0369a1">BM25</b> pins the exact code, putting "'+T('d6')+'" at #'+c.bmRankOf['d6']+'. '+fusedSentence(c);
+  }
+  $("narr").innerHTML = n;
+}
+function fusedSentence(c){
+  const G=c.Q.gold.length, cut=G;
+  const fuHit=goldsInTop(c.fused,c.Q.gold,cut), bmHit=goldsInTop(c.bm,c.Q.gold,cut), deHit=goldsInTop(c.de,c.Q.gold,cut);
+  const name = state.method==='rrf' ? 'RRF' : 'The weighted sum';
+  if (fuHit>=G && fuHit>Math.max(bmHit,deHit))
+    return '<b style="color:#6366f1">'+name+'</b> fuses the two lists and lands <b>'+fuHit+' / '+G+'</b> relevant docs in the top — more than either engine alone.';
+  if (fuHit>=G)
+    return '<b style="color:#6366f1">'+name+'</b> keeps all <b>'+fuHit+' / '+G+'</b> relevant docs on top by inheriting the winning list\'s vote.';
+  if (state.method==='ws' && !state.normalize)
+    return '<b style="color:#dc2626">With normalize OFF</b>, BM25\'s raw scale bulldozes dense and the fusion collapses to a BM25 clone — turn it back on.';
+  return '<b style="color:#6366f1">'+name+'</b> fuses both — nudge the controls to see the ranking shift.';
+}
+
+function renderControls(){
+  const isRRF = state.method==='rrf';
+  $("rrfControls").classList.toggle('hidden', !isRRF);
+  $("wsControls").classList.toggle('hidden', isRRF);
+  $("fuseLbl").textContent = isRRF ? 'RRF · Σ 1/(k+rank)' : ('weighted sum · α='+state.alpha.toFixed(2)+(state.normalize?' · normalized':' · RAW'));
+  document.querySelectorAll('#methodPick button').forEach(b=>b.classList.toggle('on', b.dataset.m===state.method));
+}
+
+function renderAll(){
+  const c = compute();
+  document.querySelectorAll('#queryPick button').forEach((btn,i)=>btn.classList.toggle('on', i===state.query));
+  $("queryText").innerHTML = '<span class="text-slate-400 text-xs font-bold mr-1">Q:</span>"'+esc(c.Q.q)+'"';
+  $("queryNote").innerHTML = esc(c.Q.note);
+  renderControls();
+  renderSingle('bm25list', c.bm, c, c.Q.lexDecoy, null);
+  renderSingle('denselist', c.de, c, c.Q.semDecoy, null);
+  renderFused(c);
+  renderTiles(c);
+  renderNarr(c);
+  const G=c.Q.gold.length, cut=G, fuHit=goldsInTop(c.fused,c.Q.gold,cut);
+  $("fuseVerdict").innerHTML = fuHit>=G
+    ? '<span class="verdict v-good">✓ '+fuHit+'/'+G+' relevant in the fused top</span>'
+    : '<span class="verdict v-fail">'+fuHit+'/'+G+' — adjust controls</span>';
+}
+
+// ============================ control wiring ============================
+document.querySelectorAll('#methodPick button').forEach(b => b.onclick = () => { state.method=b.dataset.m; renderAll(); });
+$("kSlider").oninput  = e => { state.rrfk = parseInt(e.target.value,10); $("kLbl").textContent = state.rrfk; renderAll(); };
+$("aSlider").oninput  = e => { state.alpha = parseFloat(e.target.value); $("aLbl").textContent = state.alpha.toFixed(2); renderAll(); };
+$("k1Slider").oninput = e => { state.k1 = parseFloat(e.target.value); $("k1Lbl").textContent = state.k1.toFixed(1); renderAll(); };
+$("bSlider").oninput  = e => { state.b = parseFloat(e.target.value); $("bLbl").textContent = state.b.toFixed(2); renderAll(); };
+
+// boot
+buildQueryPick();
+buildNormToggle();
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. One query, two kinds of match", why:"Any search request is really two requests at once. Some of it is <strong>lexical</strong> — exact tokens that must appear verbatim: a product SKU, an error code like <span class='mono'>X0-2231</span>, a person's name, an API method. Some of it is <strong>semantic</strong> — intent expressed in words that may never appear in the answer: <i>\"sign in\"</i> for a doc that says <i>\"log in\"</i>. A single engine tuned for one of these is structurally weak at the other, so the honest move is to run both.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">query = "sign in + X0-2231"<br><br>&nbsp;&nbsp;"sign in" → needs MEANING match (paraphrase)<br>&nbsp;"X0-2231" → needs EXACT token match (code)<br><br>one engine can't be great at both</div>`, code:`# lexical need:  exact rare token  -> BM25 shines, dense blurs
+# semantic need: paraphrase/synonym -> dense shines, BM25 blind
+# hybrid = run both, fuse the rankings` },
+ { title:"2. Lexical engine — BM25", why:"BM25 scores a doc by summing, over each query term it contains, three factors. <strong>idf</strong>: rare terms are worth more than common ones (so a unique code dominates). <strong>Saturating tf</strong> via <span class='mono'>k1</span>: term frequency helps with diminishing returns — the 5th occurrence adds almost nothing. <strong>Length-norm</strong> via <span class='mono'>b</span>: a long document doesn't win just for containing more words. It's the workhorse behind Lucene, Elasticsearch and OpenSearch.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">score = Σ_t  idf(t) · f·(k1+1)<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;―――――――――――――――<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; f + k1·(1−b + b·|D|/avgdl)<br><br>rare term ↑ · tf saturates · long doc penalised</div>`, code:`idf(t) = ln(1 + (N - n_t + 0.5)/(n_t + 0.5))    # n_t = docs with t
+score  = Σ  idf(t) * f*(k1+1) / (f + k1*(1 - b + b*|D|/avgdl))
+# k1 ~1.2–2.0 controls tf saturation ; b ~0.75 controls length-norm` },
+ { title:"3. BM25's blind spot — paraphrase", why:"BM25 only ever compares <em>tokens</em>. If the query says <i>\"sign in\"</i> and the answer says <i>\"log in\"</i>, there is no shared token, so the score contribution is literally zero — the right answer is invisible. A pure paraphrase can score 0 against the very doc that answers it. No amount of tuning <span class='mono'>k1</span> or <span class='mono'>b</span> fixes a vocabulary mismatch; the words simply aren't there.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">query:  "sign in"<br>answer: "...log in page..."<br><br>shared tokens = ∅  →  BM25 score = 0<br><br>correct answer, invisible to lexical search</div>`, code:`q = {"sign","in"};  d = {"log","in","page",...}
+overlap = q ∩ d = {"in"}          # a stopword, dropped
+bm25 = 0.0                        # paraphrase = lexical miss` },
+ { title:"4. Semantic engine — dense vectors", why:"A dense embedder maps text to a vector where distance encodes <em>meaning</em>. Trained on huge corpora, it places <i>\"sign in\"</i>, <i>\"log in\"</i> and <i>\"access my account\"</i> near each other, so cosine similarity retrieves the paraphrase the lexical engine missed. Document vectors are precomputed and indexed (ANN), so it's fast at query time. The demo fakes the embedder by mapping words to shared concept buckets — same ranking behaviour, no model needed.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">embed("sign in")  ≈  embed("log in")<br>rank by cos(q_vec, d_vec)<br><br>meaning, not spelling → paraphrase matches</div>`, code:`doc_emb = embed(corpus)            # precomputed, indexed (ANN)
+sims    = cos_sim(embed(query), doc_emb)
+dense   = argsort(sims, desc)      # 'sign in' ~ 'log in' -> match` },
+ { title:"5. Dense's blind spot — exact rare tokens", why:"The same averaging that captures meaning <em>loses</em> rare, information-dense tokens. An error code like <span class='mono'>F17-900</span> is either absent from the embedder's vocabulary or contributes a tiny nudge to a vector dominated by the surrounding common words. So dense retrieval can rank a <em>generic</em> \"error\" article above the one doc that names your exact code — it understood the topic but lost the identifier. Lexical and dense fail on <strong>opposite</strong> inputs.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">"error code F17-900"<br>&nbsp;&nbsp;→ vector ≈ generic "error" direction<br><br>dense picks ANY error doc; BM25 picks THE one<br>the code is a needle dense smooths away</div>`, code:`# dense over "F17-900": the rare token barely moves the vector
+# -> a generic 'error' doc can outrank the exact-code doc
+# BM25 gives F17-900 a huge idf -> exact doc #1. opposite failures.` },
+ { title:"6. Reciprocal Rank Fusion (RRF)", why:"How do you combine a BM25 score (0–tens, unbounded) with a cosine (0–1)? RRF's answer: don't — throw the scores away and use only <strong>ranks</strong>. Each list votes <span class='mono'>1/(k+rank)</span> for every doc it retrieved; sum the votes across lists. A doc that either engine ranked #1 gets a big vote, so it survives even if the other engine never saw it. It's <em>scale-free</em>, needs no tuning beyond a single <span class='mono'>k</span>, and is the default in most hybrid vector DBs.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">RRF(d) = Σ_lists  1/(k + rank_list(d))<br><br>code doc: BM25 #1, dense #6 → 1/(k+1)+1/(k+6)<br>login doc: BM25 —,&nbsp; dense #1 → 0 + 1/(k+1)<br><br>both earn a top vote → both rise. scores never used.</div>`, code:`def rrf(rankings, k=60):
+    s = {}
+    for ranked in rankings:                # [lex, dense]
+        for rank, doc in enumerate(ranked, 1):
+            s[doc] = s.get(doc,0) + 1/(k+rank)
+    return sorted(s, key=s.get, reverse=True)` },
+ { title:"7. Weighted sum & the normalize trap", why:"The other fusion is a <strong>weighted sum</strong>: <span class='mono'>α·BM25 + (1−α)·dense</span>. It can beat RRF when tuned — but only if you first <strong>min-max normalize</strong> each list to 0–1. Skip that and BM25's raw magnitude (0–tens) dwarfs cosine (0–1), so the sum is just BM25 with extra steps, whatever α you set. RRF's whole appeal is dodging this calibration: ranks are already comparable. Small <span class='mono'>k</span> in RRF ≈ trusting top ranks hard; large <span class='mono'>k</span> ≈ rewarding cross-list agreement.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">raw:&nbsp;&nbsp; 0.5·(BM25=8) + 0.5·(cos=0.9) → 4.45  (BM25 wins always)<br>norm: 0.5·(1.0)&nbsp;&nbsp;&nbsp;&nbsp; + 0.5·(1.0)&nbsp;&nbsp;&nbsp; → real blend<br><br>weighted sum needs normalize ; RRF needs nothing</div>`, code:`def weighted(L, D, a=0.5, norm=True):
+    if norm: L, D = minmax(L), minmax(D)   # <- do NOT skip
+    return sorted(set(L)|set(D),
+                  key=lambda d: a*L.get(d,0)+(1-a)*D.get(d,0), reverse=True)` },
+ { title:"8. Hybrid in practice — and where it sits", why:"Hybrid is a solved feature: <strong>Weaviate</strong>, <strong>Elasticsearch/OpenSearch</strong>, <strong>Qdrant</strong>, <strong>Milvus</strong> and <strong>pgvector</strong> all run BM25+vector and fuse with RRF in a single query (often exposing an <span class='mono'>alpha</span>). Its job is <em>recall</em> — get every kind of relevant doc into the shortlist. Pair it with a <strong>reranker</strong> (Day 56) for top-order <em>precision</em>, then hand the top-k to Claude. Hybrid retrieval → rerank → grounded generation is the retrieval spine of a serious RAG system.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">BM25 ┐<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ RRF ─▶ fused top-N ─▶ reranker ─▶ top-k ─▶ Claude<br>dense┘<br><br>hybrid = recall · reranker = precision</div>`, code:`res = collection.query.hybrid(query=q, alpha=0.5,      # native BM25+vector
+                              fusion_type=RANKED_FUSION)
+ranked = cohere.rerank(query=q, documents=res.docs)   # Day 56
+claude.messages.create(model="claude-opus-5", ...)    # grounded answer` },
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>

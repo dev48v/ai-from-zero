@@ -58,6 +58,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 54 — Lost in the Middle](https://dev48v.infy.uk/ai/days/day54-lost-in-the-middle.html) — `day54-lost-in-the-middle.html`
 - [AIFromZero · Day 55 — Semantic Chunking](https://dev48v.infy.uk/ai/days/day55-semantic-chunking.html) — `day55-semantic-chunking.html`
 - [AIFromZero · Day 56 — Rerankers](https://dev48v.infy.uk/ai/days/day56-rerankers.html) — `day56-rerankers.html`
+- [AIFromZero · Day 57 — Hybrid Search](https://dev48v.infy.uk/ai/days/day57-hybrid-search.html) — `day57-hybrid-search.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
