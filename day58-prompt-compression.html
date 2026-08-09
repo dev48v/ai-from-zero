@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 58 — Prompt Compression</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  /* ===== controls ===== */
+  .seg { display:inline-flex; border:1px solid #e2e8f0; border-radius:11px; overflow:hidden; }
+  .seg button { padding:7px 14px; font-size:12.5px; font-weight:800; background:#fff; color:#475569; border-right:1px solid #e2e8f0; transition:all .18s; }
+  .seg button:last-child { border-right:0; }
+  .seg button.on { background:#6366f1; color:#fff; }
+
+  input[type=range] { -webkit-appearance:none; appearance:none; height:7px; border-radius:999px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:999px; background:#6366f1; cursor:pointer; border:3px solid #fff; box-shadow:0 2px 8px rgba(99,102,241,.5); }
+  input[type=range]::-moz-range-thumb { width:20px; height:20px; border-radius:999px; background:#6366f1; cursor:pointer; border:3px solid #fff; }
+
+  .toggle { display:inline-flex; align-items:center; gap:7px; cursor:pointer; user-select:none; }
+  .toggle .track { width:38px; height:22px; border-radius:999px; background:#cbd5e1; position:relative; transition:background .18s; }
+  .toggle .track .knob { position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:999px; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:left .18s; }
+  .toggle.on .track { background:#f59e0b; }
+  .toggle.on .track .knob { left:18px; }
+
+  /* ===== stat tiles ===== */
+  .tile { border:1.5px solid #e2e8f0; border-radius:13px; padding:11px 13px; background:#fff; }
+  .tile .k { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; }
+  .tile .v { font-size:15px; font-weight:900; color:#0f172a; margin-top:2px; line-height:1.2; }
+  .tile .s { font-size:10.5px; color:#64748b; margin-top:2px; }
+
+  /* ===== prompt token view ===== */
+  .promptbox { line-height:2.15; font-size:13.5px; }
+  .ptok { border-radius:5px; padding:1px 3px; transition:all .18s; white-space:normal; }
+  .ptok.kept { color:#0f172a; }
+  .ptok.dropped { color:#cbd5e1; text-decoration:line-through; text-decoration-color:#f87171; background:transparent !important; }
+  .ptok.prot.kept { box-shadow: inset 0 -2px 0 #f59e0b; font-weight:800; color:#78350f; }
+  .ptok.prot.dropped { color:#fca5a5; text-decoration-color:#dc2626; font-weight:700; }
+
+  .chip { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; }
+  .chip-num { background:#eff6ff; color:#1d4ed8; }
+  .chip-neg { background:#fef2f2; color:#dc2626; }
+  .chip-ent { background:#f0fdf4; color:#15803d; }
+
+  .verdict { display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:800; }
+  .v-good { background:#ecfdf5; color:#047857; }
+  .v-fail { background:#fef2f2; color:#dc2626; }
+
+  .lostrow { display:flex; align-items:center; gap:8px; padding:6px 9px; border:1.5px solid #fecaca; border-radius:10px; background:#fff5f5; }
+  .swatch { width:12px; height:12px; border-radius:3px; display:inline-block; flex:0 0 12px; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero · Day 58</div>
+      <h1 class="text-xl font-bold">🪗 Prompt Compression — <strong>most of your prompt is filler; keep the signal, drop the rest.</strong> A long prompt or retrieved context costs money on <em>every</em> call and slows down the prefill — but a large fraction of its tokens carry almost no information: articles, connectives, hedges, boilerplate. <strong>Prompt compression</strong> (the <strong>LLMLingua</strong> family from Microsoft) shrinks the text by scoring each token's <strong>information value</strong> and dropping the lowest-value ones until it hits a target <strong>compression ratio</strong>, keeping the meaning intact. The score is a <strong>perplexity / self-information</strong> stand-in: a token a small model finds <em>surprising</em> (rare, high-information) is worth keeping; a token it can predict from context (a stopword, filler) is cheap to throw away. The one rule that makes it safe: <strong>never drop the load-bearing tokens</strong> — <span class="mono">numbers</span>, <span class="mono">negations</span>, and <span class="mono">named entities</span> — because losing a single <em>"not"</em> or a dollar amount silently flips the instruction. Below is a live, fully self-contained engine over a baked-in support prompt: it scores every token by an inverse-frequency information heuristic, protects the critical tokens, and a <strong>compression-ratio slider</strong> progressively removes the lowest-value tokens — with a running token count, cost saving, and a <strong>"meaning retained?"</strong> check. Toggle the guard off, or switch to <strong>naive truncation</strong>, and watch the meaning break. <strong>No API, no LLM, all deterministic.</strong></h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Squeeze the prompt <span style="color:#6366f1">— keep the meaning</span>.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">One baked-in support prompt is scored token-by-token. High-information tokens glow <b style="color:#6366f1">indigo</b>; filler is pale. The three <b style="color:#b45309">protected</b> classes — <b style="color:#1d4ed8">numbers</b>, <b style="color:#dc2626">negations</b>, <b style="color:#15803d">entities</b> — are underlined amber. Drag the <b>compression ratio</b> and the lowest-value tokens vanish first, live. Everything is deterministic and runs in your browser — no network, no tokenizer API, no LLM.</p>
+      </div>
+
+      <!-- ===================== CARD A · controls ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="grid md:grid-cols-2 gap-5">
+          <div>
+            <div class="text-[10px] uppercase font-bold text-indigo-600 mb-2">🗜️ Compression method</div>
+            <div class="seg mb-3" id="methodPick">
+              <button data-m="salience">LLMLingua-style · salience prune</button>
+              <button data-m="truncate">Naive truncation · keep first</button>
+            </div>
+            <div class="text-[11px] text-slate-500" id="methodNote"></div>
+            <div class="mt-3 pt-3 border-t border-slate-200">
+              <div id="protToggle"></div>
+              <div class="text-[11px] text-slate-500 mt-1">The guard pins every <b>number</b>, <b>negation</b> and <b>entity</b> so the ratio can never evict them. Turn it off to see pure salience ranking mangle a negation or a dollar amount.</div>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-[10px] uppercase font-bold text-slate-500">Compression ratio · remove <span id="cLbl" class="mono">50</span>% of tokens</div>
+              <div class="text-[10px] font-bold text-slate-400">budget = keep the top-(1−r) by info</div>
+            </div>
+            <input id="cSlider" type="range" min="0" max="90" step="1" value="50" class="w-full" />
+            <div class="flex justify-between text-[9px] text-slate-400 font-bold mt-1 mono"><span>0 · full prompt</span><span>lossy</span><span>90 · aggressive</span></div>
+            <div class="text-[11px] text-slate-500 mt-2">The ratio is a <em>budget</em>: at r=50% the engine keeps the 50% highest-information tokens and drops the rest. Raise it and the token count falls monotonically — cost and prefill latency fall with it.</div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4 pt-4 border-t border-slate-200" id="tiles"></div>
+      </div>
+
+      <!-- ===================== CARD B · the compressed prompt ===================== -->
+      <div class="grid lg:grid-cols-3 gap-5 mb-5">
+        <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
+          <div class="text-xs uppercase font-bold text-indigo-600">Compressed prompt <span class="text-slate-400 normal-case font-normal">— what the model actually receives. Struck-through = dropped; brightness = information value; amber underline = protected.</span></div>
+          <div id="compPrompt" class="promptbox mt-3"></div>
+          <div class="mt-4 pt-3 border-t border-slate-200 flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-slate-600">
+            <span><span class="swatch" style="background:rgba(99,102,241,.55)"></span> high info · kept</span>
+            <span><span class="swatch" style="background:rgba(99,102,241,.12)"></span> low info · droppable</span>
+            <span><span class="swatch" style="background:#fca5a5"></span> <s>dropped</s></span>
+            <span><span class="swatch" style="background:#f59e0b"></span> protected (num · neg · entity)</span>
+          </div>
+        </div>
+        <div class="lg:col-span-1 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div class="text-[10px] uppercase font-bold text-indigo-600 mb-1">What's happening</div>
+          <div id="narr" class="text-sm text-slate-700 min-h-[120px]"></div>
+          <div class="mt-3 pt-3 border-t border-slate-200">
+            <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Protected classes</div>
+            <div class="flex flex-wrap gap-2">
+              <span class="chip chip-num"># numbers</span>
+              <span class="chip chip-neg">¬ negations</span>
+              <span class="chip chip-ent">◆ entities</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD C · meaning check ===================== -->
+      <div class="bg-white rounded-2xl border-2 border-indigo-200 p-5 mb-5">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <div class="text-xs uppercase font-bold text-indigo-600">Meaning retained? <span class="text-slate-400 normal-case font-normal">— every number, negation and entity must survive the cut.</span></div>
+          <div id="verdict"></div>
+        </div>
+        <div id="lostbox" class="mt-3"></div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto"><strong>Prompt compression buys back the tokens filler wastes.</strong> A short model scores each token's surprisal, the lowest-value ones are dropped to a budget, and the compressed prompt does nearly the same job at a fraction of the cost and latency. The whole game is knowing what you can afford to lose: <strong>stopwords and boilerplate, yes; a number, a negation, or an entity, never</strong> — which is exactly what naive truncation (blindly cutting the end) and un-guarded ranking get wrong. This demo uses an inverse-frequency stand-in for perplexity, but the shape is the real thing — <strong>LLMLingua and LLMLingua-2</strong> ship this as a library, routinely hitting 2×–5× compression with the answer quality nearly unchanged, and it pairs naturally with retrieval (Day 55/57) and long-context management (Day 52) before the prompt ever reaches Claude.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Score, protect, prune to a budget</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE / MATH FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build prompt compression — score, protect, prune</h2>
+    <p class="text-slate-500 mb-8">Reproduce the LOOK engine as real code: score every token by an information heuristic (a perplexity stand-in), pin the tokens you must never drop, then cut the lowest-value ones to a target ratio. The toy uses inverse-frequency surprisal; the last block swaps in the real <span class="mono">LLMLingua-2</span> compressor and feeds the shrunk prompt to Claude. Every block is the exact idea flowing through LOOK.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">A long prompt, tokenized</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Compression operates on the <em>context</em> you send every call — a system prompt, retrieved chunks, few-shot examples. Split it into tokens; we keep whole words here, real systems use the model's sub-word tokenizer.</p>
+        <div class="relative"><pre>prompt = (
+  "You are a billing support assistant for Acme Cloud in London. "
+  "A customer says invoice INV-4471 for $250 was charged twice on March 3, 2025. "
+  "Do not issue a refund without manager approval. Never share the card number. "
+  "If fewer than 3 login attempts failed, reset it within 48 hours. "
+  "Under the GDPR policy you must delete personal data on request."
+)
+toks = prompt.split()                 # ~55 tokens; most carry little information</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Score each token by information (a perplexity stand-in)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A token's value is how <em>surprising</em> it is — its <strong>self-information</strong> <span class="mono">−log&#8322;&nbsp;p(token)</span>. Rare tokens (a code, a name) score high; a stopword the model can predict from context scores near zero. LLMLingua uses a small LM's perplexity; here inverse frequency is the deterministic stand-in.</p>
+        <div class="relative"><pre>import math
+from collections import Counter
+
+freq = Counter(t.lower().strip(".,") for t in toks)
+N = len(toks)
+STOP = {"a","an","the","of","to","and","or","is","for","on","in","you","it"}
+
+def info(t):
+    key = t.lower().strip(".,")
+    surprisal = -math.log2(freq[key] / N)   # rare -> high, common -> low
+    if key in STOP:  surprisal *= 0.12       # filler the model can guess back
+    return surprisal
+# real LLMLingua: perplexity of each token under a small causal LM (GPT-2-ish)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Protect what you must never drop</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Low information ≠ droppable. A lone <span class="mono">not</span> is common (low surprisal) but load-bearing — losing it flips the instruction. Pin the three critical classes: <strong>numbers</strong>, <strong>negations</strong>, <strong>named entities</strong>. Real systems pass these as <span class="mono">force_tokens</span> or run a quick NER pass.</p>
+        <div class="relative"><pre>import re
+NEG = {"not","no","never","without","none","neither","nor","cannot"}
+
+def protected(t):
+    key = t.lower().strip(".,")
+    is_number = bool(re.search(r"\d", key))               # 250, $250, 48, INV-4471
+    is_negation = key in NEG                               # not / never / without
+    is_entity = bool(re.match(r"[A-Z]", t)) and t.lower() not in FIRST_WORDS  # Acme, GDPR
+    return is_number or is_negation or is_entity
+# these tokens are pinned regardless of how low their information score is</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Rank and cut to a budget (the compression ratio)</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Pick a ratio <span class="mono">r</span> = fraction to remove. Give protected tokens infinite value so they always survive, then drop the <span class="mono">round(r·N)</span> lowest-value non-protected tokens. Order is preserved — you keep a readable subset, not a reordering.</p>
+        <div class="relative"><pre>def compress(toks, r=0.5, protect=True):
+    def value(t):
+        if protect and protected(t): return float("inf")   # pinned
+        return info(t)
+    n_remove = round(r * len(toks))
+    # indices of the lowest-value tokens (protected ones sort to the end)
+    order = sorted(range(len(toks)), key=lambda i: (value(toks[i]), i))
+    drop = {i for i in order[:n_remove] if value(toks[i]) != float("inf")}
+    return " ".join(t for i, t in enumerate(toks) if i not in drop)
+
+compress(toks, r=0.5)   # ~half the tokens, meaning intact</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">The meaning-retained guard</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Compression is only safe if you can <em>prove</em> nothing critical was lost. Diff the protected set against the survivors — if any dropped, the compression is unsafe at that ratio: raise the budget, or lower <span class="mono">r</span>.</p>
+        <div class="relative"><pre>def meaning_retained(toks, compressed):
+    kept = set(compressed.split())
+    lost = [t for t in toks if protected(t) and t not in kept]
+    return (len(lost) == 0, lost)
+
+ok, lost = meaning_retained(toks, compress(toks, r=0.5))
+assert ok, f"critical tokens dropped: {lost}"   # e.g. ['not', '$250'] -> reject</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Contrast: naive truncation loses the tail</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The lazy way to fit a budget is to cut the end (or middle) of the prompt. It's free — and it silently amputates whatever lives there. Here it drops the GDPR rule and the "do not promise a discount" guardrail entirely, regardless of how important they are.</p>
+        <div class="relative"><pre>def truncate(toks, r=0.5):
+    keep = len(toks) - round(r * len(toks))
+    return " ".join(toks[:keep])          # blind — the last r% just disappears
+
+# salience prune keeps the load-bearing "Never share the card number";
+# truncation at the same ratio never sees it, and never sees the GDPR rule.
+# same token budget, very different meaning.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">7</div><h3 class="font-bold text-lg">Compression ≠ summarization</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Summarization <em>rewrites</em> (abstractive) — a second LLM call that costs tokens, adds latency, and can hallucinate. Compression <em>selects</em> (extractive) — it only ever deletes existing tokens, so it's cheap, fast, and can't invent facts. Different tools: summarize for humans, compress for the model.</p>
+        <div class="relative"><pre># summarization: another model rewrites the text (abstractive)
+summary = llm("Summarize:\n" + prompt)     # + cost, + latency, may hallucinate
+
+# compression: keep a subset of the ORIGINAL tokens (extractive)
+compressed = compress(toks, r=0.5)          # cheap, deterministic, no new tokens
+# LLMs still read compressed (non-fluent) text well - they fill the gaps.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">8</div><h3 class="font-bold text-lg">In practice — LLMLingua-2, then Claude</h3></div>
+        <p class="text-sm text-slate-600 mb-3">You rarely hand-roll the scorer. <strong>LLMLingua / LLMLingua-2</strong> ship a compressor that uses a small model's token importance, honours a target rate, and force-keeps tokens you name. Compress the big context once, then send the shrunk prompt to <span class="mono">claude-opus-5</span> — fewer input tokens, lower cost, faster prefill.</p>
+        <div class="relative"><pre>from llmlingua import PromptCompressor
+import anthropic
+
+compressor = PromptCompressor(
+    model_name="microsoft/llmlingua-2-xlm-roberta-large-meetingbank",
+    use_llmlingua2=True)
+
+out = compressor.compress_prompt(
+    long_context, rate=0.4,                     # keep ~40% of tokens
+    force_tokens=["\n", ".", "?", "!"])         # + your numbers / entities
+compressed = out["compressed_prompt"]           # out["rate"] reports actual ratio
+
+anthropic.Anthropic().messages.create(
+    model="claude-opus-5", max_tokens=1024,
+    messages=[{"role":"user","content": f"{compressed}\n\nQ: {question}"}])
+# 2x-5x fewer input tokens; answer quality nearly unchanged</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-indigo-50 border border-indigo-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-indigo-900">🎉 Day 58 of AIFromZero done.</h3><p class="text-sm text-indigo-700 mt-2"><strong>Prompt compression</strong> shrinks a long prompt by scoring each token's information (a perplexity / self-information stand-in) and dropping the lowest-value ones to a target <strong>compression ratio</strong>, cutting cost and prefill latency. The safety rule is absolute: <strong>never drop a number, a negation, or an entity</strong> — a lost "not" or dollar amount flips the meaning. That guard is exactly what <strong>naive truncation</strong> (cut the end) and un-protected ranking get wrong, and it's why extractive compression beats a summarization round-trip. The <strong>LLMLingua</strong> family ships this as a library at 2×–5× compression, feeding a shorter, cheaper prompt to Claude. <strong>👉 Tomorrow — Day 59: continuing AIFromZero.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* PROMPT-COMPRESSION-ENGINE-START */
+// ===== Day 58 · Prompt Compression — score token salience (inverse-frequency
+//       self-information, a perplexity stand-in), protect numbers/negations/
+//       entities, prune to a compression-ratio budget. Deterministic, no LLM. =====
+
+const PROMPT = "You are a billing support assistant for Acme Cloud in London. A customer says invoice INV-4471 for $250 was charged twice on March 3, 2025. Do not issue a refund without manager approval. Never share the customer password or full card number. If the account has fewer than 3 failed login attempts, reset it and send a confirmation email within 48 hours. Under the GDPR policy you must delete personal data on request. Respond politely, and do not promise a discount that was not approved.";
+
+// stopwords = low-information filler a model can predict from context (negations kept OUT).
+const STOP = new Set("a an the of to and or is are was were be been it its this that with for as by from into out up on at in you your our we do does how what when where why can could would should will just so if then than my me get got keep every each time one all has have had must on request".split(' '));
+const NEG  = new Set("not no never without none neither nor cannot cant dont don't".split(' '));
+
+// ---------- tokenize (whitespace words; keep $, %, digits, internal hyphens) ----------
+function tokenize(text){
+  const raw = text.split(/\s+/).filter(Boolean);
+  const toks = [];
+  let sentenceStart = true;
+  raw.forEach((w, i) => {
+    const key = w.toLowerCase().replace(/^[^a-z0-9$%]+/,'').replace(/[^a-z0-9$%]+$/,'');
+    const lead = w.replace(/^[^A-Za-z0-9]+/,'');            // strip leading punctuation
+    const cap = /^[A-Z]/.test(lead);
+    const allCaps = /[A-Z]/.test(lead) && /^[A-Z0-9-]{2,}$/.test(lead);
+    const isNum = /\d/.test(key);
+    const isNeg = NEG.has(key);
+    const isEnt = !isNum && cap && (!sentenceStart || allCaps);
+    toks.push({ raw:w, key, i, isNum, isNeg, isEnt });
+    sentenceStart = /[.!?]$/.test(w);
+  });
+  return toks;
+}
+
+// ---------- score self-information (perplexity stand-in) + protection flags ----------
+function analyze(){
+  const toks = tokenize(PROMPT);
+  const N = toks.length;
+  const freq = {};
+  toks.forEach(t => freq[t.key] = (freq[t.key]||0) + 1);
+  let maxInfo = 1e-9;
+  toks.forEach(t => {
+    const p = freq[t.key] / N;
+    let sal = -Math.log2(p);              // surprisal: rare -> high, common -> low
+    if (STOP.has(t.key)) sal *= 0.12;     // filler is nearly free to drop
+    if (t.key.length <= 1) sal *= 0.30;   // stray single chars
+    t.info = sal;
+    t.protected = t.isNum || t.isNeg || t.isEnt;
+    if (sal > maxInfo) maxInfo = sal;
+  });
+  toks.forEach(t => t.heat = t.info / maxInfo);
+  return { toks, N };
+}
+const DATA = analyze();
+
+const state = { compress: 50, method:'salience', protect:true };
+
+// ---------- decide which tokens to drop for the current state ----------
+function compute(){
+  const toks = DATA.toks, N = DATA.N;
+  const nRemove = Math.round(N * state.compress / 100);
+  const dropped = new Set();
+  if (state.method === 'truncate'){
+    // blind: remove the LAST nRemove tokens — the tail just disappears
+    for (let k = 0; k < nRemove; k++) dropped.add(N - 1 - k);
+  } else {
+    // salience prune: drop the lowest-value tokens first (protected -> Infinity)
+    const order = toks.map(t => {
+      let eff = t.info;
+      if (state.protect && t.protected) eff = Infinity;
+      return { i:t.i, eff };
+    }).sort((a,b) => (a.eff - b.eff) || (a.i - b.i));
+    for (let k = 0; k < nRemove && k < order.length; k++){
+      if (order[k].eff === Infinity) break;   // never drop a pinned token
+      dropped.add(order[k].i);
+    }
+  }
+  const kept = toks.filter(t => !dropped.has(t.i));
+  const crit = toks.filter(t => t.protected);
+  const critLost = crit.filter(t => dropped.has(t.i));
+  return { toks, N, dropped, kept, crit, critLost };
+}
+
+// ---------- cost model (illustrative: tokens here are words, not BPE) ----------
+const RATE = 5;                                   // illustrative $ / 1M input tokens
+function dollars(tok){ return tok * RATE / 1000; } // -> $ per 1,000 API calls
+/* PROMPT-COMPRESSION-ENGINE-END */
+
+// ============================ rendering ============================
+function heatColor(h){ return 'rgba(99,102,241,' + (0.06 + 0.55 * h).toFixed(3) + ')'; }
+function catOf(t){ return t.isNum ? 'number' : t.isNeg ? 'negation' : t.isEnt ? 'entity' : ''; }
+
+function renderPrompt(c){
+  let html = '';
+  c.toks.forEach(t => {
+    const drop = c.dropped.has(t.i);
+    let cls = 'ptok ' + (drop ? 'dropped' : 'kept');
+    if (t.protected) cls += ' prot';
+    const style = (!drop && !t.protected) ? ' style="background:' + heatColor(t.heat) + '"' : '';
+    html += '<span class="' + cls + '"' + style + '>' + esc(t.raw) + '</span> ';
+  });
+  $("compPrompt").innerHTML = html;
+}
+
+function tile(k,v,s,color){ return '<div class="tile"><div class="k">'+esc(k)+'</div><div class="v"'+(color?' style="color:'+color+'"':'')+'>'+v+'</div><div class="s">'+esc(s)+'</div></div>'; }
+
+function renderTiles(c){
+  const orig = c.N, comp = c.kept.length;
+  const removedPct = Math.round(100 * (orig - comp) / orig);
+  const keptCrit = c.crit.length - c.critLost.length;
+  const safe = c.critLost.length === 0;
+  $("tiles").innerHTML =
+    tile('Original prompt', orig + ' <span style="font-size:11px;color:#94a3b8">tokens</span>', 'full context sent every call', '#0f172a') +
+    tile('Compressed', comp + ' <span style="font-size:11px;color:#94a3b8">tokens</span>', '−' + removedPct + '% smaller', '#6366f1') +
+    tile('Est. cost / 1K calls', '$' + dollars(comp).toFixed(2), 'was $' + dollars(orig).toFixed(2) + ' · save $' + dollars(orig - comp).toFixed(2), removedPct > 0 ? '#047857' : '#0f172a') +
+    tile('Critical kept', keptCrit + ' / ' + c.crit.length, 'numbers · negations · entities', safe ? '#047857' : '#dc2626');
+}
+
+function renderVerdict(c){
+  const safe = c.critLost.length === 0;
+  $("verdict").innerHTML = safe
+    ? '<span class="verdict v-good">✓ meaning retained — all ' + c.crit.length + ' critical tokens survive</span>'
+    : '<span class="verdict v-fail">✗ meaning broken — ' + c.critLost.length + ' critical token' + (c.critLost.length>1?'s':'') + ' dropped</span>';
+  if (safe){
+    $("lostbox").innerHTML = '<div class="text-[13px] text-slate-500">Every number, negation and entity is still in the compressed prompt. Safe to send.</div>';
+  } else {
+    let rows = c.critLost.map(t => {
+      const cat = catOf(t);
+      const chip = t.isNum ? '<span class="chip chip-num"># number</span>'
+                 : t.isNeg ? '<span class="chip chip-neg">¬ negation</span>'
+                 : '<span class="chip chip-ent">◆ entity</span>';
+      return '<div class="lostrow"><span class="mono font-bold text-slate-800">' + esc(t.raw) + '</span>' + chip + '<span class="text-[11px] text-slate-500 ml-auto">a lost ' + cat + ' can flip the instruction</span></div>';
+    }).join('');
+    $("lostbox").innerHTML = '<div class="grid sm:grid-cols-2 gap-2">' + rows + '</div>';
+  }
+}
+
+function renderNarr(c){
+  const removed = c.N - c.kept.length;
+  let n = '';
+  if (state.method === 'truncate'){
+    const T = id => esc(id);
+    n = '<b style="color:#dc2626">Naive truncation</b> just deletes the last <b>' + removed + '</b> tokens — free, but it amputates the <em>end</em> of the prompt. '
+      + (c.critLost.length
+          ? 'Here it loses ' + c.critLost.map(t=>'<span class="mono">'+esc(t.raw)+'</span>').slice(0,4).join(', ') + (c.critLost.length>4?' …':'') + ' — the model never sees the GDPR rule or the "do not promise a discount" guardrail.'
+          : 'At this ratio the tail it cut happened to hold nothing critical — push it higher and the guardrails at the end vanish.');
+  } else if (state.protect){
+    n = '<b style="color:#6366f1">Salience pruning</b> removes the <b>' + removed + '</b> lowest-information tokens — mostly stopwords and filler — while the <b style="color:#b45309">guard</b> pins every number, negation and entity in place. '
+      + (c.critLost.length ? 'Something still slipped — raise the budget.' : 'Meaning survives at ' + state.compress + '% compression.');
+  } else {
+    n = '<b style="color:#6366f1">Salience pruning, guard OFF.</b> '
+      + (c.critLost.length
+          ? 'Pure ranking judged ' + c.critLost.map(t=>'<span class="mono">'+esc(t.raw)+'</span>').slice(0,4).join(', ') + (c.critLost.length>4?' …':'') + ' "low value" and cut them — a negation or number gone silently flips the instruction. <b>This is exactly why LLMLingua protects them.</b>'
+          : 'No critical token has fallen below the cut yet — raise the ratio and watch a negation or number get dropped.');
+  }
+  $("narr").innerHTML = n;
+}
+
+// ============================ controls ============================
+function buildProtToggle(){
+  $("protToggle").innerHTML = '<div class="toggle'+(state.protect?' on':'')+'" id="protT"><div class="track"><div class="knob"></div></div><span class="text-[12px] font-bold text-slate-700">Protect numbers · negations · entities</span></div>';
+  $("protT").onclick = () => { state.protect = !state.protect; renderAll(); };
+}
+function renderControls(){
+  document.querySelectorAll('#methodPick button').forEach(b => b.classList.toggle('on', b.dataset.m === state.method));
+  const isTrunc = state.method === 'truncate';
+  $("protToggle").parentElement.style.opacity = isTrunc ? '.45' : '1';
+  $("protToggle").parentElement.style.pointerEvents = isTrunc ? 'none' : 'auto';
+  $("methodNote").innerHTML = isTrunc
+    ? 'Cuts the last r% of tokens outright — the cheap, meaning-blind baseline. The guard does not apply.'
+    : 'Keeps the highest-information tokens up to the budget; drops filler first.';
+}
+
+function renderAll(){
+  const c = compute();
+  renderControls();
+  renderPrompt(c);
+  renderTiles(c);
+  renderVerdict(c);
+  renderNarr(c);
+}
+
+// wiring
+document.querySelectorAll('#methodPick button').forEach(b => b.onclick = () => { state.method = b.dataset.m; renderAll(); });
+$("cSlider").oninput = e => { state.compress = parseInt(e.target.value, 10); $("cLbl").textContent = state.compress; renderAll(); };
+
+// boot
+buildProtToggle();
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Why compress — long context is a tax", why:"Every token in your prompt is paid for on <em>every single call</em>, and the model's prefill time grows with prompt length. A big system prompt, a stack of retrieved chunks, or few-shot examples can be 80% filler — articles, connectives, hedges, boilerplate the model doesn't need spelled out. <strong>Prompt compression</strong> trims that filler so you send far fewer tokens for nearly the same behaviour: lower cost, faster first-token latency, and more room left in the context window.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">2,000-token context &times; 50,000 calls/day<br>&nbsp;&nbsp;&nbsp;&nbsp;&darr; compress 60%<br>800 tokens &times; 50,000 calls/day<br><br>same job, ~60% less input cost + faster prefill</div>`, code:`# cost & latency both scale with input length
+cost   = input_tokens * price_per_token   # every call
+prefill_latency ~ O(input_tokens)         # first-token delay
+# compression cuts input_tokens with (almost) no quality loss` },
+ { title:"2. Token salience — surprise = information", why:"Not all tokens are equal. A token's value is its <strong>self-information</strong> <span class='mono'>−log&#8322; p(token)</span>: how <em>surprising</em> it is. A rare token (an error code, a name, a number) is high-information — the model can't guess it, so it must be kept. A stopword like <span class='mono'>the</span> is almost fully predictable from context, so its information is near zero and it's cheap to drop. LLMLingua measures this with a small language model's <strong>perplexity</strong>; the demo uses inverse frequency as a deterministic stand-in.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">info(t) = −log&#8322; p(t)<br><br>"the"&nbsp;&nbsp;&rarr; p high &rarr; info &asymp; 0   (drop)<br>"X0-2231" &rarr; p low &nbsp;&rarr; info high  (keep)<br><br>keep the surprising tokens</div>`, code:`# perplexity / self-information of each token
+info(t) = -log2( p(t | context) )
+# LLMLingua: p from a small causal LM (GPT-2-scale)
+# toy:        p from token frequency in the prompt
+# high info -> keep ; low info -> droppable` },
+ { title:"3. Stopwords & boilerplate — the free wins", why:"The bulk of the savings comes from tokens that carry almost no meaning on their own: articles (<span class='mono'>a, the</span>), connectives (<span class='mono'>and, of, to</span>), filler verbs, and repeated boilerplate. An LLM reconstructs the intent from the remaining content words with no loss — compressed prompts read like a telegram, and models handle them fine. These are dropped first, before any harder call is needed.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]">"<span style="color:#cbd5e1;text-decoration:line-through">You are a</span> billing support assistant <span style="color:#cbd5e1;text-decoration:line-through">for</span> Acme Cloud <span style="color:#cbd5e1;text-decoration:line-through">in</span> London"<br><br><span class="mono text-slate-500">&rarr; "billing support assistant Acme Cloud London"</span></div>`, code:`# drop the predictable filler first
+STOP = {"a","an","the","of","to","and","or","is","for","on"}
+if key in STOP: info *= 0.12    # push filler to the bottom
+# these evaporate before any content word is at risk` },
+ { title:"4. What you must NEVER drop", why:"Low information is <em>not</em> the same as safe to remove. Three classes are load-bearing regardless of their score, because losing one silently changes the meaning: <strong>numbers</strong> ($250, 48 hours, 3 attempts — drop one and the policy is wrong), <strong>negations</strong> (<span class='mono'>not</span>, <span class='mono'>never</span>, <span class='mono'>without</span> — drop one and the instruction inverts), and <strong>named entities</strong> (Acme, GDPR, London — drop one and the referent is lost). Pin them: force-keep, or run a quick NER/regex pass, before pruning.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]">"Do <b style="color:#dc2626">not</b> issue a refund"<br><span class="mono text-slate-400">&mdash; drop "not" &rarr;</span><br>"Do issue a refund" &nbsp;😱<br><br><span class="text-slate-500">numbers · negations · entities = pinned</span></div>`, code:`PROTECT = is_number(t) or is_negation(t) or is_entity(t)
+# numbers:   $250, 48, 3, INV-4471, 2025
+# negations: not, never, no, without, cannot
+# entities:  Acme, GDPR, London  (proper nouns)
+value(t) = +inf if PROTECT else info(t)   # never evicted` },
+ { title:"5. The compression ratio — a token budget", why:"You don't drop by a fixed threshold; you drop to a <strong>budget</strong>. Pick a ratio <span class='mono'>r</span> — the fraction of tokens to remove (or equivalently, keep the top <span class='mono'>1−r</span> by value). Sort tokens by information (protected = infinite), then delete the <span class='mono'>round(r·N)</span> lowest until the budget is met. Order is preserved, so the result is a readable subset. Slide <span class='mono'>r</span> up and the count falls monotonically — a smooth cost/quality dial.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">n_remove = round(r &times; N)<br><br>r=0.3 &rarr; keep top 70% by info<br>r=0.6 &rarr; keep top 40% by info<br><br>higher r &rarr; fewer tokens, more risk</div>`, code:`order   = sorted(tokens, key=value)        # lowest value first
+n_drop  = round(r * len(tokens))
+drop    = {t for t in order[:n_drop] if value(t) != inf}
+kept    = [t for t in tokens if t not in drop]   # original order kept` },
+ { title:"6. LLMLingua vs naive truncation", why:"The lazy way to hit a token budget is to cut the end of the prompt (or the middle — the 'lost-in-the-middle' zone from Day 54). It's free and it's blind: it deletes whatever happens to live there, no matter how important. A prompt often puts its hardest constraints last ('Never…', 'Under GDPR…', 'do not promise…') — truncation drops exactly those. Salience pruning removes low-value tokens from <em>everywhere</em>, so the guardrails survive.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]">truncate: [keep ▓▓▓▓▓▓] <span style="color:#dc2626">✂ cut tail ▓▓▓▓</span><br><span class="text-slate-400 mono text-[11px]">&rarr; loses "Never share the card number"</span><br><br>prune: [▓ &middot; ▓ &middot; ▓ &middot; ▓ &middot; ▓] drop lowest anywhere<br><span class="text-slate-400 mono text-[11px]">&rarr; keeps every guardrail</span></div>`, code:`# naive — blind to importance
+truncate = tokens[: keep]          # last r% just gone
+
+# salience prune — value-aware, order-preserving
+prune    = [t for t in tokens if value(t) high enough]
+# same budget, truncation loses the end; prune keeps the signal` },
+ { title:"7. Compression ≠ summarization", why:"Both shrink text, but they're different tools. <strong>Summarization</strong> is <em>abstractive</em> — a second LLM rewrites the content into new words. That costs an extra call, adds latency, and can hallucinate or drop a detail. <strong>Compression</strong> is <em>extractive</em> — it only ever deletes existing tokens, so it's cheap, deterministic, and cannot invent facts. The compressed text isn't fluent English, but LLMs read it fine. Summarize for humans; compress for the model.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><b>summarize</b> (abstractive): rewrites &rarr; +LLM call, may hallucinate<br><br><b>compress</b> (extractive): deletes tokens &rarr; cheap, faithful<br><br><span class="text-slate-500">select, don't rewrite</span></div>`, code:`# abstractive: costs a call, risks drift
+summary  = llm("Summarize: " + text)
+
+# extractive: subset of original tokens, no new content
+compressed = drop_low_value(tokens, r=0.5)
+# faithful by construction — it can only remove, never add` },
+ { title:"8. In practice — LLMLingua, then Claude", why:"You rarely write the scorer. <strong>LLMLingua</strong> and <strong>LLMLingua-2</strong> (Microsoft) ship a <span class='mono'>PromptCompressor</span> that ranks tokens with a small model, honours a target rate, and force-keeps tokens you name — routinely 2×–5× compression with answer quality nearly unchanged. Compress the big context once, cache it, then send the shrunk prompt to Claude. It slots in right after retrieval (Day 55/57) and alongside long-context management (Day 52), before the model reads a token.", concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">retrieve &rarr; <b>compress (LLMLingua-2)</b> &rarr; Claude<br><br>2,000 tok &rarr; 800 tok<br>~60% cheaper input · faster prefill<br>answer quality &asymp; unchanged</div>`, code:`from llmlingua import PromptCompressor
+c = PromptCompressor(use_llmlingua2=True)
+out = c.compress_prompt(context, rate=0.4,
+                        force_tokens=["\\n",".","?"])
+claude.messages.create(model="claude-opus-5",
+   messages=[{"role":"user","content":out["compressed_prompt"]}])` },
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
