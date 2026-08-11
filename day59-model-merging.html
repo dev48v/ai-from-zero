@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 59 — Model Merging</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  /* ===== controls ===== */
+  .seg { display:inline-flex; flex-wrap:wrap; border:1px solid #e2e8f0; border-radius:11px; overflow:hidden; }
+  .seg button { padding:7px 13px; font-size:12.5px; font-weight:800; background:#fff; color:#475569; border-right:1px solid #e2e8f0; transition:all .18s; }
+  .seg button:last-child { border-right:0; }
+  .seg button.on { background:#7c3aed; color:#fff; }
+
+  .preset { padding:5px 11px; font-size:11.5px; font-weight:800; border-radius:999px; border:1.5px solid #e2e8f0; background:#fff; color:#475569; transition:all .16s; }
+  .preset:hover { border-color:#7c3aed; color:#7c3aed; }
+
+  input[type=range] { -webkit-appearance:none; appearance:none; height:7px; border-radius:999px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:999px; background:#7c3aed; cursor:pointer; border:3px solid #fff; box-shadow:0 2px 8px rgba(124,58,237,.5); }
+  input[type=range]::-moz-range-thumb { width:20px; height:20px; border-radius:999px; background:#7c3aed; cursor:pointer; border:3px solid #fff; }
+  .ctlrow { transition:opacity .18s; }
+  .ctlrow.off { opacity:.32; pointer-events:none; }
+
+  /* ===== stat tiles ===== */
+  .tile { border:1.5px solid #e2e8f0; border-radius:13px; padding:11px 13px; background:#fff; }
+  .tile .k { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; }
+  .tile .v { font-size:19px; font-weight:900; color:#0f172a; margin-top:2px; line-height:1.2; }
+  .tile .s { font-size:10.5px; color:#64748b; margin-top:2px; }
+
+  /* ===== accuracy bars ===== */
+  .accrow { display:grid; grid-template-columns:118px 1fr; align-items:center; gap:10px; margin-bottom:7px; }
+  .accname { font-size:11.5px; font-weight:800; color:#334155; text-align:right; }
+  .bartrack { position:relative; height:20px; border-radius:6px; background:#f1f5f9; overflow:hidden; }
+  .barfill { height:100%; border-radius:6px; transition:width .28s ease; }
+  .barlbl { position:absolute; right:6px; top:0; height:20px; line-height:20px; font-size:10.5px; font-weight:900; color:#0f172a; }
+  .chance { position:absolute; left:50%; top:0; width:2px; height:100%; background:#cbd5e1; }
+
+  /* ===== weight-space bars ===== */
+  .wgrid { display:grid; grid-template-columns:82px 1fr 1fr 1fr; gap:4px 8px; align-items:center; font-size:11px; }
+  .wlabel { font-weight:700; color:#334155; text-align:right; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:10.5px; }
+  .wcell { position:relative; height:14px; background:#f8fafc; border-radius:3px; }
+  .wcell .zero { position:absolute; left:50%; top:0; width:1px; height:100%; background:#e2e8f0; }
+  .wbar { position:absolute; top:2px; height:10px; border-radius:2px; transition:all .25s ease; }
+  .conflict .wlabel { color:#dc2626; }
+  .wrow-hdr { font-size:9.5px; font-weight:900; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; text-align:center; }
+
+  .chip { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:800; padding:2px 9px; border-radius:999px; }
+  .chip-a { background:#eff6ff; color:#1d4ed8; }
+  .chip-b { background:#fff7ed; color:#c2410c; }
+  .chip-m { background:#f5f3ff; color:#6d28d9; }
+  .chip-x { background:#fef2f2; color:#dc2626; }
+
+  .verdict { display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:800; }
+  .v-good { background:#ecfdf5; color:#047857; }
+  .v-mid  { background:#fffbeb; color:#b45309; }
+  .v-fail { background:#fef2f2; color:#dc2626; }
+
+  .sent { display:flex; align-items:center; gap:8px; padding:6px 9px; border:1.5px solid #e2e8f0; border-radius:10px; background:#fff; font-size:12px; margin-bottom:6px; }
+  .sent.ok { border-color:#a7f3d0; background:#f0fdf9; }
+  .sent.bad { border-color:#fecaca; background:#fff5f5; }
+  .swatch { width:12px; height:12px; border-radius:3px; display:inline-block; flex:0 0 12px; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-violet-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <div class="text-xs text-violet-600 font-bold uppercase tracking-wider">AIFromZero · Day 59</div>
+      <h1 class="text-xl font-bold">🧬 Model Merging — <strong>two fine-tunes, one model, zero GPUs.</strong> A trained checkpoint is nothing but a long list of numbers, so two models fine-tuned from the <em>same</em> base sit at two points in the same <strong>weight space</strong> — and you can do arithmetic on them. Subtract the base from a fine-tune and you get a <strong>task vector</strong> <span class="mono">τ = θ_finetuned − θ_base</span>: the <em>direction</em> that encodes the skill it learned. Add two task vectors back onto the base and you get one model that can do <em>both</em> jobs, without a single training step, without the original data, without touching a GPU — this is <strong>task arithmetic</strong>. Flip the sign and you <strong>unlearn</strong> a skill instead. The catch is <strong>interference</strong>: the two skills fight over shared parameters, and where they want <em>opposite signs</em>, naive averaging cancels both to nearly zero. <strong>TIES</strong> fixes that by <em>Trimming</em> the tiny values, <em>Electing</em> a single sign per parameter, and averaging only the entries that agree; <strong>DARE</strong> randomly drops and rescales; <strong>SLERP</strong> interpolates on the sphere so the weight norm doesn't shrink. Below, two real classifiers are <strong>actually trained in your browser</strong> by gradient descent from one shared base — a review-sentiment model and a spam filter — then merged live by any of those five methods, with real held-out accuracy on <em>both</em> tasks recomputed on every slider move. <strong>No API, no library, all deterministic.</strong></h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Two specialists in, <span style="color:#7c3aed">one generalist out</span>.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">On load, three logistic-regression models are trained for real, right here: a shared <b>base</b> (pre-trained on a generic politeness task), then two fine-tunes from it — <b style="color:#1d4ed8">Model A</b> (review sentiment) and <b style="color:#c2410c">Model B</b> (spam filter). Neither can do the other's job. Pick a merge method, move the sliders, and the <b style="color:#7c3aed">merged</b> weights are recomputed and re-scored on both held-out sets, live. Every number below comes from real gradient descent and a real accuracy count — nothing is hard-coded.</p>
+      </div>
+
+      <!-- ===================== CARD A · controls ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+        <div class="grid md:grid-cols-2 gap-5">
+          <div>
+            <div class="text-[10px] uppercase font-bold text-violet-600 mb-2">🧬 Merge method</div>
+            <div class="seg mb-3" id="methodPick">
+              <button data-m="avg">Average · Model Soup</button>
+              <button data-m="task">Task Arithmetic</button>
+              <button data-m="ties">TIES</button>
+              <button data-m="dare">DARE</button>
+              <button data-m="slerp">SLERP</button>
+            </div>
+            <div class="text-[11px] text-slate-500 min-h-[46px]" id="methodNote"></div>
+            <div class="mt-3 pt-3 border-t border-slate-200">
+              <div class="text-[10px] uppercase font-bold text-slate-400 mb-2">Jump to</div>
+              <div class="flex flex-wrap gap-2">
+                <button class="preset" data-p="base">Base only</button>
+                <button class="preset" data-p="a">Model A only</button>
+                <button class="preset" data-p="b">Model B only</button>
+                <button class="preset" data-p="best">Best merge</button>
+                <button class="preset" data-p="neg">Unlearn A (negate)</button>
+                <button class="preset" data-p="over">Over-scale λ = 1.5</button>
+              </div>
+            </div>
+          </div>
+          <div class="space-y-3">
+            <div class="ctlrow" id="rowLA">
+              <div class="flex items-center justify-between mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">λ<sub>A</sub> · how much <b style="color:#1d4ed8">sentiment</b> to add</div>
+                <div class="text-[11px] font-black mono" style="color:#1d4ed8" id="laLbl">0.50</div>
+              </div>
+              <input id="laS" type="range" min="-100" max="150" step="5" value="50" class="w-full" />
+              <div class="flex justify-between text-[9px] text-slate-400 font-bold mono"><span>−1.0 unlearn</span><span>0 base</span><span>1.5 over-scale</span></div>
+            </div>
+            <div class="ctlrow" id="rowLB">
+              <div class="flex items-center justify-between mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">λ<sub>B</sub> · how much <b style="color:#c2410c">spam</b> to add</div>
+                <div class="text-[11px] font-black mono" style="color:#c2410c" id="lbLbl">0.50</div>
+              </div>
+              <input id="lbS" type="range" min="-100" max="150" step="5" value="50" class="w-full" />
+              <div class="flex justify-between text-[9px] text-slate-400 font-bold mono"><span>−1.0 unlearn</span><span>0 base</span><span>1.5 over-scale</span></div>
+            </div>
+            <div class="ctlrow off" id="rowK">
+              <div class="flex items-center justify-between mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">TIES trim · keep top <span class="mono" id="kLbl">50</span>% by magnitude</div>
+                <div class="text-[10px] font-bold text-slate-400">the rest are zeroed</div>
+              </div>
+              <input id="kS" type="range" min="10" max="100" step="5" value="50" class="w-full" />
+            </div>
+            <div class="ctlrow off" id="rowP">
+              <div class="flex items-center justify-between mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">DARE drop rate p = <span class="mono" id="pLbl">0.50</span></div>
+                <div class="text-[10px] font-bold text-slate-400">survivors rescaled ×1/(1−p)</div>
+              </div>
+              <input id="pS" type="range" min="0" max="90" step="5" value="50" class="w-full" />
+            </div>
+            <div class="ctlrow off" id="rowT">
+              <div class="flex items-center justify-between mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">SLERP t = <span class="mono" id="tLbl">0.50</span></div>
+                <div class="text-[10px] font-bold text-slate-400">0 = pure A · 1 = pure B</div>
+              </div>
+              <input id="tS" type="range" min="0" max="100" step="5" value="50" class="w-full" />
+            </div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4 pt-4 border-t border-slate-200" id="tiles"></div>
+      </div>
+
+      <!-- ===================== CARD B · accuracy + weight space ===================== -->
+      <div class="grid lg:grid-cols-2 gap-5 mb-5">
+        <div class="bg-white rounded-2xl border border-slate-200 p-5">
+          <div class="text-xs uppercase font-bold text-violet-600">Held-out accuracy <span class="text-slate-400 normal-case font-normal">— every model scored on <b>both</b> tasks. The grey line is 50% (coin flip).</span></div>
+          <div class="mt-4 mb-1 text-[10px] uppercase font-bold text-slate-400">Task A · review sentiment (60 held-out)</div>
+          <div id="accA"></div>
+          <div class="mt-4 mb-1 text-[10px] uppercase font-bold text-slate-400">Task B · spam filter (60 held-out)</div>
+          <div id="accB"></div>
+          <div class="mt-4 pt-3 border-t border-slate-200 flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-slate-600">
+            <span><span class="swatch" style="background:#94a3b8"></span> base</span>
+            <span><span class="swatch" style="background:#2563eb"></span> Model A</span>
+            <span><span class="swatch" style="background:#ea580c"></span> Model B</span>
+            <span><span class="swatch" style="background:#7c3aed"></span> merged</span>
+          </div>
+        </div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-5">
+          <div class="text-xs uppercase font-bold text-violet-600">Weight space <span class="text-slate-400 normal-case font-normal">— the two task vectors and what the merge kept. <b style="color:#dc2626">Red labels</b> = the two skills want <b>opposite signs</b> here.</span></div>
+          <div class="wgrid mt-3 mb-1"><div></div><div class="wrow-hdr">τ<sub>A</sub> sentiment</div><div class="wrow-hdr">τ<sub>B</sub> spam</div><div class="wrow-hdr">merged Δ</div></div>
+          <div id="wspace" class="wgrid" style="max-height:330px; overflow:auto;"></div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD C · narration + samples ===================== -->
+      <div class="grid lg:grid-cols-5 gap-5 mb-5">
+        <div class="lg:col-span-2 rounded-2xl border-2 border-violet-200 bg-violet-50 p-5">
+          <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <div class="text-[10px] uppercase font-bold text-violet-700">What's happening</div>
+            <div id="verdict"></div>
+          </div>
+          <div id="narr" class="text-sm text-slate-700 min-h-[150px]"></div>
+        </div>
+        <div class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5">
+          <div class="text-xs uppercase font-bold text-violet-600 mb-3">The merged model, judging real held-out examples <span class="text-slate-400 normal-case font-normal">— three from each task, scored by the current merge.</span></div>
+          <div id="samples"></div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto"><strong>Model merging turns "which fine-tune do I ship?" into "ship all of them".</strong> Because a checkpoint is a vector, a learned skill is a <em>direction</em> — <span class="mono">τ = θ_finetuned − θ_base</span> — and directions add, scale and negate. Averaging is the crude version; <strong>task arithmetic</strong> gives you a dial per skill; <strong>TIES</strong> handles the sign fights that averaging silently cancels; <strong>DARE</strong> sparsifies before merging; <strong>SLERP</strong> keeps the weight norm intact. It costs minutes of CPU instead of GPU-days, needs no training data, and is how a huge share of the open-weight models on Hugging Face are actually made — <span class="mono">mergekit</span> is the standard tool. The one rule nobody escapes: <strong>merging is a hypothesis, the eval is the answer</strong>.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2">
+      <h3 class="font-bold text-lg mb-3">Skills are directions you can add</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-violet-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-violet-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-violet-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-violet-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-violet-600 tracking-wider mb-2">CODE / MATH FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a model merger — task vectors, TIES, DARE, SLERP</h2>
+    <p class="text-slate-500 mb-8">Rebuild the LOOK engine as real code. Load two checkpoints, subtract the base to get task vectors, then implement each merge rule exactly as the demo does it — soup, task arithmetic, negation, TIES, DARE, SLERP — and finish with the <span class="mono">mergekit</span> config that does all of it on real 7B models. Every block is the same maths flowing through the demo above.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Load three checkpoints that share an ancestor</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Merging is <em>parameter-wise</em>, so the models must have identical shapes: same architecture, same layer names, same tokenizer, and — for the arithmetic to mean anything — the same pre-trained base. Two fine-tunes of the same base are mergeable; a Llama and a Mistral are not.</p>
+        <div class="relative"><pre>import torch
+from safetensors.torch import load_file
+
+base = load_file("base/model.safetensors")      # the shared pre-trained checkpoint
+ft_a = load_file("sentiment/model.safetensors") # fine-tune 1
+ft_b = load_file("spam/model.safetensors")      # fine-tune 2
+
+assert base.keys() == ft_a.keys() == ft_b.keys()          # same parameter names
+assert all(base[k].shape == ft_a[k].shape for k in base)  # same shapes</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Task vectors — the skill as a direction</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Subtract the base from a fine-tune and what's left is <em>only</em> what fine-tuning changed: <span class="mono">τ = θ_ft − θ_base</span>. That difference vector is the skill. Note it is mostly near-zero — fine-tuning nudges a small fraction of the parameters, which is exactly why two task vectors can coexist.</p>
+        <div class="relative"><pre>def task_vector(ft, base):
+    return {k: ft[k].float() - base[k].float() for k in base}
+
+tau_a = task_vector(ft_a, base)     # "review sentiment"
+tau_b = task_vector(ft_b, base)     # "spam filtering"
+
+# sanity: base + tau_a reconstructs the fine-tune exactly
+assert all(torch.allclose(base[k] + tau_a[k], ft_a[k].float()) for k in base)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">Model soup — the one-line merge</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The simplest merge is a plain (optionally weighted) average of the fine-tunes. It's identical to adding both task vectors at λ = 0.5 each, which is a useful way to see it: a soup is just task arithmetic with the weights forced to sum to 1.</p>
+        <div class="relative"><pre>def soup(models, weights=None):
+    n = len(models)
+    w = weights or [1 / n] * n
+    return {k: sum(wi * m[k].float() for wi, m in zip(w, models))
+            for k in models[0]}
+
+merged = soup([ft_a, ft_b])                      # equal soup
+# identical to: base + 0.5*tau_a + 0.5*tau_b</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Task arithmetic — a dial per skill, and negation</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Give each task vector its own coefficient and you get a mixing desk. Positive λ adds the skill, λ = 0 returns the base, and a <strong>negative</strong> λ subtracts it — the model gets measurably <em>worse</em> at that task while the others are untouched. That is the cheapest known form of unlearning.</p>
+        <div class="relative"><pre>def task_arithmetic(base, taus, lambdas):
+    out = {}
+    for k in base:
+        v = base[k].float().clone()
+        for tau, lam in zip(taus, lambdas):
+            v += lam * tau[k]
+        out[k] = v
+    return out
+
+both   = task_arithmetic(base, [tau_a, tau_b], [0.5, 0.5])   # do both jobs
+forget = task_arithmetic(base, [tau_a],        [-1.0])       # unlearn sentiment
+# lambda is the single most important knob - sweep it against your eval</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Measure the interference before you fix it</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Two failure modes wreck naive merges. <strong>Redundancy</strong>: most entries of a task vector are noise-sized and only dilute the useful ones. <strong>Sign conflict</strong>: where the two skills disagree, averaging drives the parameter toward zero and <em>both</em> skills lose it. Count the damage first — it tells you whether TIES will help.</p>
+        <div class="relative"><pre>import torch
+
+def interference(tau_a, tau_b, eps=0.05):
+    conflicts = kept = 0
+    for k in tau_a:
+        a, b = tau_a[k], tau_b[k]
+        big = (a.abs() > eps) &amp; (b.abs() > eps)
+        conflicts += (big &amp; (a.sign() != b.sign())).sum().item()
+        kept      += big.sum().item()
+    return conflicts, kept
+
+c, n = interference(tau_a, tau_b)
+print(f"{c}/{n} shared parameters disagree on sign")   # these cancel in a soup</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">TIES — Trim, Elect sign, Disjoint Merge</h3></div>
+        <p class="text-sm text-slate-600 mb-3">TIES (NeurIPS 2023) fixes both problems in three passes. <strong>Trim</strong>: keep only the top-k% of each task vector by magnitude, zero the rest — the noise is gone. <strong>Elect</strong>: for each parameter, pick the sign with the larger total magnitude across models. <strong>Disjoint merge</strong>: average only the models that agree with the elected sign, so the losers don't drag it back to zero.</p>
+        <div class="relative"><pre>def ties(base, taus, k=0.2, lam=1.0):
+    out = {}
+    for key in base:
+        stack = torch.stack([t[key].flatten() for t in taus])     # [n_models, P]
+
+        # 1. TRIM - keep top-k% by |value| within each model
+        n_keep = max(1, int(k * stack.shape[1]))
+        thresh = stack.abs().kthvalue(stack.shape[1] - n_keep + 1, dim=1,
+                                      keepdim=True).values
+        stack = stack * (stack.abs() >= thresh)
+
+        # 2. ELECT - one sign per parameter, by total magnitude
+        elected = stack.sum(dim=0).sign()
+
+        # 3. DISJOINT MERGE - mean over the entries that agree
+        agree = (stack.sign() == elected) &amp; (stack != 0)
+        merged = (stack * agree).sum(0) / agree.sum(0).clamp(min=1)
+
+        out[key] = base[key].float() + lam * merged.view(base[key].shape)
+    return out</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold">7</div><h3 class="font-bold text-lg">DARE — Drop And REscale</h3></div>
+        <p class="text-sm text-slate-600 mb-3">DARE throws away a random fraction <span class="mono">p</span> of each task vector's entries and multiplies the survivors by <span class="mono">1/(1−p)</span>, so the <em>expected</em> vector is unchanged. Because task vectors are so redundant, you can drop 90% and lose almost nothing — while the sparser vectors overlap far less, which cuts interference. It composes with TIES (<span class="mono">dare_ties</span> in mergekit).</p>
+        <div class="relative"><pre>def dare(tau, p=0.9, generator=None):
+    out = {}
+    for k, v in tau.items():
+        mask = torch.rand(v.shape, generator=generator) &gt;= p   # keep with prob 1-p
+        out[k] = v * mask / (1 - p)                            # rescale survivors
+    return out
+# E[dare(tau)] == tau  ->  same direction, a fraction of the entries
+merged = task_arithmetic(base, [dare(tau_a), dare(tau_b)], [1.0, 1.0])</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold">8</div><h3 class="font-bold text-lg">SLERP — interpolate on the sphere, not the line</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A straight-line average between two weight vectors that point in different directions is <em>shorter</em> than either — the merged model's activations shrink. SLERP walks the arc between them at constant angular speed and interpolates the magnitude separately, so the norm is preserved. It's the default for merging exactly two models.</p>
+        <div class="relative"><pre>def slerp(a, b, t=0.5, eps=1e-8):
+    na, nb = a.norm(), b.norm()
+    ua, ub = a / na, b / nb
+    omega  = torch.acos((ua * ub).sum().clamp(-1, 1))     # angle between them
+    s = torch.sin(omega)
+    if s.abs() &lt; eps:                                     # nearly parallel
+        return (1 - t) * a + t * b
+    direction = (torch.sin((1 - t) * omega) * ua + torch.sin(t * omega) * ub) / s
+    return direction * ((1 - t) * na + t * nb)            # magnitude interpolated
+# linear average shrinks the norm; SLERP does not</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold">9</div><h3 class="font-bold text-lg">In practice — mergekit, then evaluate</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Nobody hand-rolls this at 7B scale. <span class="mono">mergekit</span> takes a YAML recipe, streams the tensors so it runs on CPU with modest RAM, and writes a normal checkpoint you can serve anywhere. The merge itself takes minutes — the real work is the sweep: λ and k are hyper-parameters, and only your eval set can tell you which combination actually won.</p>
+        <div class="relative"><pre># merge.yml
+base_model: mistralai/Mistral-7B-v0.1
+merge_method: ties          # linear | task_arithmetic | ties | dare_ties | slerp
+dtype: bfloat16
+parameters:
+  int8_mask: true
+models:
+  - model: org/mistral-sentiment
+    parameters: { weight: 0.5, density: 0.5 }   # weight = lambda, density = top-k
+  - model: org/mistral-spam
+    parameters: { weight: 0.5, density: 0.5 }
+
+# $ pip install mergekit
+# $ mergekit-yaml merge.yml ./merged --cuda --allow-crimes
+# then sweep: for w in 0.3 0.4 0.5 0.6; do ... ; lm_eval --model hf ... ; done
+# a merge is a HYPOTHESIS - the eval is the answer</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-violet-50 border border-violet-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-violet-900">🎉 Day 59 of AIFromZero done.</h3><p class="text-sm text-violet-700 mt-2"><strong>Model merging</strong> combines several fine-tunes of the same base into one checkpoint by doing arithmetic on their weights — no training, no data, no GPU. Subtract the base to get a <strong>task vector</strong> <span class="mono">τ = θ_ft − θ_base</span>, then add task vectors to gain skills, or negate one to <strong>unlearn</strong> a skill. Naive averaging suffers <strong>interference</strong> — redundant entries dilute the signal and sign conflicts cancel it — which is what <strong>TIES</strong> (trim → elect sign → disjoint merge), <strong>DARE</strong> (drop &amp; rescale) and <strong>SLERP</strong> (arc interpolation, norm preserved) each attack from a different angle. <span class="mono">mergekit</span> ships all of them, λ and k are the knobs, and the eval set is the only judge. <strong>👉 Tomorrow — Day 60: continuing AIFromZero.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* MODEL-MERGING-ENGINE-START */
+// ===== Day 59 · Model Merging — three logistic-regression models are REALLY
+//       trained here by full-batch gradient descent (shared base -> two
+//       fine-tunes), then merged in weight space by soup / task arithmetic /
+//       TIES / DARE / SLERP and re-scored on two held-out sets. Deterministic. =====
+
+const VOCAB = [
+  "great","love","excellent","quality",           // task A · positive core
+  "terrible","awful","broken","refund",           // task A · negative core
+  "winner","click","prize","cash","casino",       // task B · spam core
+  "order","tracking","invoice","shipment",        // task B · ham core
+  "free","offer",                                 // shared · both skills AGREE
+  "urgent","delivery","service",                  // shared · the skills CONFLICT
+  "hello","thanks","please"                       // pre-training only
+];
+const D = VOCAB.length, DIM = D + 1;              // + bias term
+const idx = w => VOCAB.indexOf(w);
+
+// deterministic PRNG — same data + same DARE mask on every load
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+const A_POS_CORE=["great","love","excellent","quality"],   A_POS_SH=["free","offer","delivery","service"];
+const A_NEG_CORE=["terrible","awful","broken","refund"],   A_NEG_SH=["urgent"];
+const B_SPAM_CORE=["winner","click","prize","cash","casino"], B_SPAM_SH=["free","offer","urgent"];
+const B_HAM_CORE=["order","tracking","invoice","shipment"], B_HAM_SH=["delivery","service"];
+const POLITE=["hello","thanks","please"];
+const TASKW = VOCAB.filter(w=>!POLITE.includes(w));
+const A_ALL = A_POS_CORE.concat(A_NEG_CORE), B_ALL = B_SPAM_CORE.concat(B_HAM_CORE);
+
+function pick(rng,pool,n){ const c=pool.slice(), out=[]; for(let k=0;k<n&&c.length;k++) out.push(c.splice(Math.floor(rng()*c.length),1)[0]); return out; }
+function vec(words){ const x=new Array(DIM).fill(0); words.forEach(w=>{const i=idx(w); if(i>=0)x[i]=1;}); x[D]=1; return x; }
+
+// ---------- data: bag-of-words sentences, balanced, plus off-task noise ----------
+function genSet(seed,n,posCore,posSh,negCore,negSh,distract){
+  const rng=mulberry32(seed); const X=[],Y=[],T=[];
+  for(let i=0;i<n;i++){
+    const y=i%2, core=y?posCore:negCore, sh=y?posSh:negSh;
+    let words=pick(rng,core,2);
+    if(rng()<0.85) words=words.concat(pick(rng,sh,1));
+    if(distract && rng()<0.35) words=words.concat(pick(rng,distract,1));  // cross-task noise
+    X.push(vec(words)); Y.push(y); T.push(words);
+  }
+  return {X,Y,T};
+}
+function genBase(seed,n){                          // pre-training task: is the message polite?
+  const rng=mulberry32(seed); const X=[],Y=[],T=[];
+  for(let i=0;i<n;i++){
+    const y=i%2;
+    const words = y ? pick(rng,POLITE,1).concat(pick(rng,TASKW,2)) : pick(rng,TASKW,3);
+    X.push(vec(words)); Y.push(y); T.push(words);
+  }
+  return {X,Y,T};
+}
+
+// ---------- real logistic regression by full-batch gradient descent ----------
+const sig = z => 1/(1+Math.exp(-z));
+function dotp(w,x){ let s=0; for(let i=0;i<DIM;i++) s+=w[i]*x[i]; return s; }
+function train(data,w0,lr,steps,l2,anchor){
+  const w=w0.slice(), N=data.X.length, a=anchor||new Array(DIM).fill(0);
+  for(let s=0;s<steps;s++){
+    const g=new Array(DIM).fill(0);
+    for(let n=0;n<N;n++){ const e=sig(dotp(w,data.X[n]))-data.Y[n]; for(let i=0;i<DIM;i++) g[i]+=e*data.X[n][i]; }
+    for(let i=0;i<DIM;i++){ let gi=g[i]/N; if(i<D) gi+=l2*(w[i]-a[i]); w[i]-=lr*gi; }   // L2 pulls toward the anchor
+  }
+  return w;
+}
+const accuracy = (w,d) => { let c=0; for(let n=0;n<d.X.length;n++) if((dotp(w,d.X[n])>0?1:0)===d.Y[n]) c++; return c/d.X.length; };
+
+const BASE_TR = genBase(11,200);
+const A_TR = genSet(21,90,A_POS_CORE,A_POS_SH,A_NEG_CORE,A_NEG_SH,B_ALL);
+const A_EV = genSet(22,60,A_POS_CORE,A_POS_SH,A_NEG_CORE,A_NEG_SH,B_ALL);
+const B_TR = genSet(31,90,B_SPAM_CORE,B_SPAM_SH,B_HAM_CORE,B_HAM_SH,A_ALL);
+const B_EV = genSet(32,60,B_SPAM_CORE,B_SPAM_SH,B_HAM_CORE,B_HAM_SH,A_ALL);
+
+const BASE = train(BASE_TR, new Array(DIM).fill(0), 0.9, 700, 0.02, null);   // the shared ancestor
+const TH_A = train(A_TR, BASE, 0.7, 600, 0.03, BASE);                        // fine-tune 1 (stays near base)
+const TH_B = train(B_TR, BASE, 0.7, 600, 0.03, BASE);                        // fine-tune 2
+const TAU_A = TH_A.map((v,i)=>v-BASE[i]);       // task vector: the sentiment skill
+const TAU_B = TH_B.map((v,i)=>v-BASE[i]);       // task vector: the spam skill
+
+// ---------- merge methods ----------
+const addv = (b,parts) => b.map((v,i)=> v + parts.reduce((s,p)=> s + p[0]*p[1][i], 0));
+
+function trimTop(t,keepFrac){                    // TIES step 1 — keep top-k% by |value|
+  const ord = t.map((v,i)=>({i,a:Math.abs(v)})).sort((x,y)=> y.a-x.a || x.i-y.i);
+  const keep = Math.max(1, Math.round(keepFrac*t.length));
+  const S = new Set(ord.slice(0,keep).map(o=>o.i));
+  return t.map((v,i)=> S.has(i)? v : 0);
+}
+function ties(base,taus,keepFrac,lams){
+  const trimmed = taus.map(t=>trimTop(t,keepFrac));
+  const m=new Array(DIM).fill(0), elected=new Array(DIM).fill(0);
+  for(let i=0;i<DIM;i++){
+    let mass=0; trimmed.forEach((t,j)=>mass+=lams[j]*t[i]);          // step 2 — elect a sign
+    const s = mass>0?1:mass<0?-1:0; elected[i]=s;
+    let sum=0,cnt=0;                                                 // step 3 — disjoint mean
+    if(s) trimmed.forEach((t,j)=>{ const v=lams[j]*t[i]; if(v!==0 && Math.sign(v)===s){ sum+=v; cnt++; } });
+    m[i] = cnt? sum/cnt : 0;
+  }
+  return { w: base.map((v,i)=>v+m[i]), delta:m, trimmed, elected };
+}
+function dare(base,taus,p,lams,seed){
+  const rng=mulberry32(seed);
+  const kept = taus.map(t=> t.map(v => (p>=1 ? 0 : (rng()<p ? 0 : v/(1-p)))));   // drop, then rescale
+  const w = addv(base, kept.map((t,j)=>[lams[j],t]));
+  return { w, delta: w.map((v,i)=>v-base[i]), kept };
+}
+const nrm = v => Math.sqrt(v.reduce((s,x)=>s+x*x,0));
+function slerp(a,b,t){                            // arc between two weight vectors
+  const na=nrm(a), nb=nrm(b), ua=a.map(v=>v/na), ub=b.map(v=>v/nb);
+  let d=0; for(let i=0;i<DIM;i++) d+=ua[i]*ub[i]; d=Math.max(-1,Math.min(1,d));
+  const om=Math.acos(d), s=Math.sin(om), mag=(1-t)*na+t*nb;
+  if(Math.abs(s)<1e-8) return a.map((v,i)=>(1-t)*v+t*b[i]);
+  return ua.map((v,i)=> (Math.sin((1-t)*om)/s*v + Math.sin(t*om)/s*ub[i]) * mag);
+}
+
+// ---------- interference bookkeeping ----------
+const EPS = 0.15;
+const CONFLICT = [], AGREE = [];
+for(let i=0;i<D;i++){
+  const a=TAU_A[i], b=TAU_B[i];
+  if(Math.abs(a)>EPS && Math.abs(b)>EPS) (Math.sign(a)!==Math.sign(b)?CONFLICT:AGREE).push(i);
+}
+
+const state = { method:'avg', la:0.5, lb:0.5, k:0.5, p:0.5, t:0.5 };
+
+function buildMerged(){
+  const lams=[state.la,state.lb];
+  if(state.method==='avg')   { const w=addv(BASE,[[0.5,TAU_A],[0.5,TAU_B]]); return {w, delta:w.map((v,i)=>v-BASE[i]), kind:'avg'}; }
+  if(state.method==='task')  { const w=addv(BASE,[[state.la,TAU_A],[state.lb,TAU_B]]); return {w, delta:w.map((v,i)=>v-BASE[i]), kind:'task'}; }
+  if(state.method==='ties')  { const r=ties(BASE,[TAU_A,TAU_B],state.k,lams); return {w:r.w, delta:r.delta, trimmed:r.trimmed, elected:r.elected, kind:'ties'}; }
+  if(state.method==='dare')  { const r=dare(BASE,[TAU_A,TAU_B],state.p,lams,777); return {w:r.w, delta:r.delta, kept:r.kept, kind:'dare'}; }
+  const w = slerp(TH_A,TH_B,state.t); return {w, delta:w.map((v,i)=>v-BASE[i]), kind:'slerp'};
+}
+/* MODEL-MERGING-ENGINE-END */
+
+// ============================ rendering ============================
+const pct = x => (100*x).toFixed(1) + '%';
+const COL = { base:'#94a3b8', a:'#2563eb', b:'#ea580c', m:'#7c3aed' };
+
+function accBar(name,val,color){
+  return '<div class="accrow"><div class="accname">'+name+'</div><div class="bartrack"><div class="barfill" style="width:'+(val*100).toFixed(1)+'%;background:'+color+'"></div><div class="chance"></div><div class="barlbl">'+pct(val)+'</div></div></div>';
+}
+function renderAcc(m){
+  const rows = t => accBar('Base',accuracy(BASE,t),COL.base) + accBar('Model A',accuracy(TH_A,t),COL.a)
+                  + accBar('Model B',accuracy(TH_B,t),COL.b) + accBar('<b>Merged</b>',accuracy(m.w,t),COL.m);
+  $("accA").innerHTML = rows(A_EV);
+  $("accB").innerHTML = rows(B_EV);
+}
+
+function tile(k,v,s,color){ return '<div class="tile"><div class="k">'+esc(k)+'</div><div class="v"'+(color?' style="color:'+color+'"':'')+'>'+v+'</div><div class="s">'+s+'</div></div>'; }
+function renderTiles(m){
+  const mA=accuracy(m.w,A_EV), mB=accuracy(m.w,B_EV), avg=(mA+mB)/2;
+  const bestSingle = Math.max((accuracy(TH_A,A_EV)+accuracy(TH_A,B_EV))/2,(accuracy(TH_B,A_EV)+accuracy(TH_B,B_EV))/2);
+  let nz = m.delta.filter(v=>Math.abs(v)>1e-9).length;
+  $("tiles").innerHTML =
+    tile('Task A · sentiment', pct(mA), 'model A alone: '+pct(accuracy(TH_A,A_EV)), mA>=0.85?'#047857':mA>=0.65?'#b45309':'#dc2626') +
+    tile('Task B · spam', pct(mB), 'model B alone: '+pct(accuracy(TH_B,B_EV)), mB>=0.85?'#047857':mB>=0.65?'#b45309':'#dc2626') +
+    tile('Both-task average', pct(avg), 'best single model: '+pct(bestSingle), avg>bestSingle?'#7c3aed':'#dc2626') +
+    tile('Merged Δ · live params', nz+' / '+DIM, CONFLICT.length+' sign conflicts in weight space', '#0f172a');
+}
+
+function wbar(v,scale,color){
+  const w = Math.min(50, Math.abs(v)/scale*50);
+  const side = v>=0 ? 'left:50%;' : ('right:50%;');
+  if(Math.abs(v)<1e-9) return '<div class="wcell"><div class="zero"></div></div>';
+  return '<div class="wcell"><div class="zero"></div><div class="wbar" style="'+side+'width:'+w.toFixed(1)+'%;background:'+color+'"></div></div>';
+}
+function renderWeights(m){
+  const scale = Math.max(...TAU_A.concat(TAU_B).concat(m.delta).map(Math.abs), 0.5);
+  let html='';
+  for(let i=0;i<D;i++){
+    const conf = CONFLICT.includes(i);
+    html += '<div class="'+(conf?'conflict':'')+'" style="display:contents">'
+          + '<div class="wlabel">'+(conf?'⚡ ':'')+esc(VOCAB[i])+'</div>'
+          + wbar(TAU_A[i],scale,COL.a) + wbar(TAU_B[i],scale,COL.b) + wbar(m.delta[i],scale,COL.m)
+          + '</div>';
+  }
+  $("wspace").innerHTML = html;
+}
+
+function renderSamples(m){
+  const rows=[];
+  const add=(set,i,taskName,posLbl,negLbl)=>{
+    const x=set.X[i], y=set.Y[i];
+    const z=dotp(m.w,x), pred=z>0?1:0, ok=pred===y;
+    const words=set.T[i].join(' ');
+    rows.push('<div class="sent '+(ok?'ok':'bad')+'"><span class="mono font-bold text-slate-800" style="min-width:190px">"'+esc(words)+'"</span>'
+      +'<span class="text-[10px] font-bold text-slate-400">'+taskName+'</span>'
+      +'<span class="ml-auto text-[11px] mono text-slate-500">z='+z.toFixed(2)+'</span>'
+      +'<span class="chip '+(ok?'chip-m':'chip-x')+'">'+(pred?posLbl:negLbl)+'</span>'
+      +'<span class="text-[13px]">'+(ok?'✓':'✗')+'</span></div>');
+  };
+  [1,3,4].forEach(i=>add(A_EV,i,'review','positive','negative'));
+  [1,2,5].forEach(i=>add(B_EV,i,'inbox','spam','ham'));
+  $("samples").innerHTML = rows.join('');
+}
+
+function renderVerdict(m){
+  const mA=accuracy(m.w,A_EV), mB=accuracy(m.w,B_EV), avg=(mA+mB)/2;
+  const el = avg>=0.92 ? '<span class="verdict v-good">✓ one model, both skills — '+pct(avg)+' avg</span>'
+           : avg>=0.72 ? '<span class="verdict v-mid">~ partly merged — '+pct(avg)+' avg</span>'
+           : '<span class="verdict v-fail">✗ this merge does not work — '+pct(avg)+' avg</span>';
+  $("verdict").innerHTML = el;
+}
+
+function renderNarr(m){
+  const mA=accuracy(m.w,A_EV), mB=accuracy(m.w,B_EV);
+  const c0 = CONFLICT.length? VOCAB[CONFLICT[0]] : '—';
+  let n='';
+  if(state.method==='avg'){
+    n = '<b style="color:#7c3aed">Model soup.</b> The merged weights are literally <span class="mono">(θ<sub>A</sub>+θ<sub>B</sub>)/2</span> — identical to adding both task vectors at λ=0.5. One vector of numbers now scores '
+      + '<b>'+pct(mA)+'</b> on sentiment and <b>'+pct(mB)+'</b> on spam, from two models that each managed only one. But look at <span class="mono">'+esc(c0)+'</span> in the weight panel: the two skills pull it in opposite directions, so the average lands near zero and <em>both</em> lose it. That is interference — and it is what TIES exists to fix.';
+  } else if(state.method==='task'){
+    const neg = state.la<0 || state.lb<0;
+    n = '<b style="color:#7c3aed">Task arithmetic.</b> <span class="mono">θ = θ_base + '+state.la.toFixed(2)+'·τ<sub>A</sub> + '+state.lb.toFixed(2)+'·τ<sub>B</sub></span>. '
+      + (neg ? 'A <b style="color:#dc2626">negative λ subtracts</b> a skill: the model gets actively <em>worse</em> than the base at that task — below coin-flip, because you have handed it the anti-skill — while the other task barely moves. This is the cheapest known unlearning. '
+             : 'λ is the dial. Push both to 1.0 and the merged vector over-shoots: the two skills\' noise now stacks instead of averaging, and accuracy <em>drops</em> below the plain 0.5/0.5 soup. ')
+      + 'Right now: <b>'+pct(mA)+'</b> sentiment · <b>'+pct(mB)+'</b> spam.';
+  } else if(state.method==='ties'){
+    const kept = m.trimmed[0].filter(v=>v!==0).length;
+    const agreeCnt = m.elected.filter((s,i)=> s!==0 && Math.sign(TAU_A[i])===s && Math.sign(TAU_B[i])===s).length;
+    n = '<b style="color:#7c3aed">TIES — trim, elect, disjoint-merge.</b> <b>Trim</b> kept the top '+Math.round(state.k*100)+'% of each task vector by magnitude ('+kept+' of '+DIM+' entries) and zeroed the rest — the noise is gone. '
+      + '<b>Elect</b> then chose <em>one</em> sign per parameter by total magnitude, and <b>disjoint merge</b> averaged only the models that agreed, so on <span class="mono">'+esc(c0)+'</span> the winner keeps its full strength instead of being cancelled. '
+      + agreeCnt+' parameters had both skills agreeing outright. Result: <b>'+pct(mA)+'</b> · <b>'+pct(mB)+'</b>. Trim too hard (k below ~25%) and you start deleting real signal.';
+  } else if(state.method==='dare'){
+    const kept = m.kept[0].filter(v=>v!==0).length;
+    n = '<b style="color:#7c3aed">DARE — drop and rescale.</b> Each task vector had a random <b>'+Math.round(state.p*100)+'%</b> of its entries deleted ('+kept+' of '+DIM+' survive in τ<sub>A</sub>) and the survivors multiplied by <span class="mono">1/(1−p)</span>, so the <em>expected</em> vector is unchanged. '
+      + 'Task vectors are so redundant that this barely hurts — and two sparser vectors collide on far fewer parameters, which is the point. Score: <b>'+pct(mA)+'</b> · <b>'+pct(mB)+'</b>. Push p toward 0.9 and it finally breaks.';
+  } else {
+    n = '<b style="color:#7c3aed">SLERP — spherical interpolation.</b> Instead of the straight line between θ<sub>A</sub> and θ<sub>B</sub> (which is <em>shorter</em> than either, shrinking every activation), SLERP walks the arc at t='+state.t.toFixed(2)+' and interpolates the magnitude separately, so the weight norm is preserved: <span class="mono">'+nrm(m.w).toFixed(2)+'</span> vs <span class="mono">'+nrm(addv(BASE,[[0.5,TAU_A],[0.5,TAU_B]])).toFixed(2)+'</span> for the plain average. '
+      + 'At t=0 you get exactly Model A, at t=1 exactly Model B. Score: <b>'+pct(mA)+'</b> · <b>'+pct(mB)+'</b>. SLERP only takes two models — for three or more, use TIES.';
+  }
+  $("narr").innerHTML = n;
+}
+
+// ============================ controls ============================
+const NOTES = {
+  avg:  'The one-line merge: average the two fine-tunes parameter by parameter. Equivalent to task arithmetic at λ=0.5 each. Ignores every conflict.',
+  task: 'θ_base + λ_A·τ_A + λ_B·τ_B. Independent dials per skill — and a negative λ <b>removes</b> a skill instead of adding it.',
+  ties: 'Trim each task vector to its top-k% by magnitude, elect one sign per parameter by total mass, then average only the models that agree.',
+  dare: 'Randomly drop a fraction p of each task vector and rescale the survivors by 1/(1−p) — same expected vector, far less overlap.',
+  slerp:'Interpolate along the arc between the two weight vectors instead of the chord, so the merged norm does not collapse. Exactly two models.'
+};
+function renderControls(){
+  document.querySelectorAll('#methodPick button').forEach(b=>b.classList.toggle('on', b.dataset.m===state.method));
+  $("methodNote").innerHTML = NOTES[state.method];
+  const on = (el,yes)=> $(el).classList.toggle('off', !yes);
+  on('rowLA', state.method==='task' || state.method==='ties' || state.method==='dare');
+  on('rowLB', state.method==='task' || state.method==='ties' || state.method==='dare');
+  on('rowK',  state.method==='ties');
+  on('rowP',  state.method==='dare');
+  on('rowT',  state.method==='slerp');
+  $("laLbl").textContent = state.la.toFixed(2); $("lbLbl").textContent = state.lb.toFixed(2);
+  $("kLbl").textContent = Math.round(state.k*100); $("pLbl").textContent = state.p.toFixed(2); $("tLbl").textContent = state.t.toFixed(2);
+}
+function renderAll(){
+  const m = buildMerged();
+  renderControls(); renderTiles(m); renderAcc(m); renderWeights(m); renderSamples(m); renderVerdict(m); renderNarr(m);
+}
+
+document.querySelectorAll('#methodPick button').forEach(b=> b.onclick = () => { state.method=b.dataset.m; renderAll(); });
+document.querySelectorAll('.preset').forEach(b => b.onclick = () => {
+  const p=b.dataset.p;
+  if(p==='base'){ state.method='task'; state.la=0; state.lb=0; }
+  if(p==='a')   { state.method='task'; state.la=1; state.lb=0; }
+  if(p==='b')   { state.method='task'; state.la=0; state.lb=1; }
+  if(p==='best'){ state.method='ties'; state.la=1; state.lb=1; state.k=0.5; }
+  if(p==='neg') { state.method='task'; state.la=-1; state.lb=0; }
+  if(p==='over'){ state.method='task'; state.la=1.5; state.lb=1.5; }
+  $("laS").value=Math.round(state.la*100); $("lbS").value=Math.round(state.lb*100); $("kS").value=Math.round(state.k*100);
+  renderAll();
+});
+$("laS").oninput = e => { state.la=+e.target.value/100; renderAll(); };
+$("lbS").oninput = e => { state.lb=+e.target.value/100; renderAll(); };
+$("kS").oninput  = e => { state.k =+e.target.value/100; renderAll(); };
+$("pS").oninput  = e => { state.p =+e.target.value/100; renderAll(); };
+$("tS").oninput  = e => { state.t =+e.target.value/100; renderAll(); };
+
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Why merge — combine models without training one",
+   why:"Fine-tuning is expensive: GPUs, data, hyper-parameter sweeps, and a fresh run for every new skill you want. Merging asks a different question — if you already have two models that were each fine-tuned from the <em>same</em> base, can you get one model that does both jobs <em>without</em> training anything? The answer is yes, and it costs minutes of CPU instead of GPU-days. You also don't need the original training data, which matters when it's licensed, private, or simply gone. This is why a large share of the open-weight models you see on Hugging Face leaderboards are merges rather than fresh fine-tunes.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center">fine-tune #1 (sentiment) &nbsp;+&nbsp; fine-tune #2 (spam)<br><span class="mono text-slate-400">&darr; merge (no GPU, no data, minutes)</span><br><b style="color:#7c3aed">one checkpoint that does both</b><br><br><span class="text-slate-500 text-[12px]">vs. re-training on the union of both datasets: hours-to-days on GPUs</span></div>`,
+   code:`# the two options
+# A) retrain on combined data   -> GPUs, data access, hours to days
+# B) merge existing checkpoints -> CPU, no data, minutes
+
+merged = merge(base, [finetune_a, finetune_b])   # that's the whole cost` },
+
+ { title:"2. A checkpoint is just a vector of numbers",
+   why:"Strip away the framework and a trained model is one enormous list of floats — every weight matrix flattened end to end. Two models with the same architecture therefore live in the <em>same</em> space and have the same coordinates, so <span class='mono'>θ₁ − θ₂</span>, <span class='mono'>θ₁ + θ₂</span> and <span class='mono'>0.5·θ₁</span> are all perfectly well-defined operations. That's the entire conceptual leap: once you see the checkpoint as a point in weight space, merging stops being magic and becomes linear algebra. It also tells you the hard requirement — the shapes and parameter names must match exactly, element for element.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">&theta; = [ w&#8321;, w&#8322;, w&#8323;, &hellip;, w&#8345; ]  &nbsp;&nbsp;n &asymp; 7,000,000,000<br><br>same architecture &rArr; same coordinates<br><br>&theta;&#8321; &minus; &theta;&#8322; &nbsp;·&nbsp; &theta;&#8321; + &theta;&#8322; &nbsp;·&nbsp; 0.5&middot;&theta; &nbsp; all defined</div>`,
+   code:`# a checkpoint is a dict of tensors -> conceptually one long vector
+theta = {"layer0.weight": tensor(...), "layer0.bias": tensor(...), ...}
+
+# arithmetic is elementwise and shape-checked
+assert a["layer0.weight"].shape == b["layer0.weight"].shape
+diff = {k: a[k] - b[k] for k in a}` },
+
+ { title:"3. The shared ancestor — merging needs a common base",
+   why:"Weight space is only meaningful <em>relative to a common origin</em>. Two models trained from scratch with different random seeds can compute the exact same function while having wildly different weights — neurons get permuted, signs flip, scales shift — so averaging them produces garbage. Fine-tunes of a single base don't have that problem: they start at the same point and move a short distance, so they stay in the same low-loss basin and the straight line between them stays low-loss too. That property is called <strong>linear mode connectivity</strong>, and it is the reason merging works at all. The practical rule follows directly: same base, same architecture, same tokenizer.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><b style="color:#047857">✓ mergeable</b><br>base &rarr; ft&#8321; &nbsp;&nbsp; base &rarr; ft&#8322; &nbsp;&nbsp;<span class="text-slate-400">same basin</span><br><br><b style="color:#dc2626">✗ not mergeable</b><br>scratch-seed-1 &nbsp;vs&nbsp; scratch-seed-2<br><span class="text-slate-400 text-[11px]">same function, permuted neurons &rarr; average = noise</span></div>`,
+   code:`# REQUIRED: a shared pre-trained ancestor
+base   = "mistralai/Mistral-7B-v0.1"
+ft_a   = "org/mistral-7b-sentiment"    # fine-tuned FROM base
+ft_b   = "org/mistral-7b-spam"         # fine-tuned FROM base
+
+# two independent from-scratch runs are NOT mergeable:
+# identical behaviour, permuted weights -> averaging destroys both` },
+
+ { title:"4. Task vectors — a skill is a direction",
+   why:"Subtract the base from a fine-tune and everything the base already knew cancels out, leaving only what fine-tuning changed: <span class='mono'>τ = θ_finetuned − θ_base</span>. This difference is the <strong>task vector</strong>, and the striking empirical fact is that it behaves like an object you can manipulate — it points in a consistent direction, its length controls how strongly the skill is expressed, and different tasks give roughly orthogonal vectors. In the demo the two task vectors barely overlap: the sentiment vector lights up <span class='mono'>great / terrible</span>, the spam vector lights up <span class='mono'>prize / invoice</span>, and most entries are near zero. That near-orthogonality is precisely what makes it possible to carry both at once.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">&tau;<sub>A</sub> = &theta;<sub>sentiment</sub> &minus; &theta;<sub>base</sub><br>&tau;<sub>B</sub> = &theta;<sub>spam</sub> &minus; &theta;<sub>base</sub><br><br><span class="text-slate-500 text-[12px]">&theta;<sub>base</sub> + &tau;<sub>A</sub> = the sentiment model, exactly</span><br><span class="text-slate-500 text-[12px]">most entries of &tau; are &asymp; 0 &mdash; fine-tuning moves little</span></div>`,
+   code:`tau_a = {k: ft_a[k] - base[k] for k in base}     # the "sentiment" direction
+tau_b = {k: ft_b[k] - base[k] for k in base}     # the "spam" direction
+
+# reconstruction is exact by construction
+base[k] + tau_a[k] == ft_a[k]
+
+# and the two directions are nearly orthogonal:
+cos(tau_a, tau_b) ~ 0   ->  they can coexist` },
+
+ { title:"5. Model soup — just average them",
+   why:"The crudest merge is a plain parameter-wise average of the fine-tunes, called a <strong>model soup</strong>. Written in task-vector form it is <span class='mono'>θ_base + 0.5·τ_A + 0.5·τ_B</span> — task arithmetic with the coefficients forced to sum to one. Surprisingly often this is already most of the win: in the demo it takes two models that each score ~50% on the other's task and produces one that scores in the high nineties on both. Soups were first shown to help when averaging many fine-tunes of the <em>same</em> task with different hyper-parameters (it acts like an ensemble that costs one model), and they extend naturally to different tasks. The weakness is that averaging is blind — it treats a decisive parameter and a noise parameter identically.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">&theta;<sub>merged</sub> = (&theta;<sub>A</sub> + &theta;<sub>B</sub>) / 2<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&equiv; &theta;<sub>base</sub> + 0.5&tau;<sub>A</sub> + 0.5&tau;<sub>B</sub><br><br><span class="text-slate-500 text-[12px]">demo: 100/32 and 42/100 &rarr; <b>97/98</b></span><br><span class="text-slate-500 text-[12px]">one forward pass, one set of weights, both skills</span></div>`,
+   code:`def soup(models, weights=None):
+    w = weights or [1/len(models)] * len(models)
+    return {k: sum(wi * m[k] for wi, m in zip(w, models))
+            for k in models[0]}
+
+merged = soup([ft_a, ft_b])          # equal soup
+merged = soup([ft_a, ft_b], [0.7, 0.3])   # favour the sentiment model` },
+
+ { title:"6. Task arithmetic — one dial per skill",
+   why:"Give each task vector its own coefficient and the merge becomes a mixing desk: <span class='mono'>θ = θ_base + λ_A·τ_A + λ_B·τ_B</span>. λ = 0 returns the base exactly, λ = 1 on a single vector returns that fine-tune exactly, and everything in between trades the skills off against each other. λ is the single most important knob in merging, and it is <em>not</em> free: push both to 1.0 in the demo and accuracy <em>falls</em> below the 0.5 soup, because the two vectors' off-task noise now stacks rather than averaging. The sweep in this demo peaks near λ ≈ 0.4 for both — which is why every real merge recipe ends with a hyper-parameter search against a held-out eval.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">&theta; = &theta;<sub>base</sub> + &lambda;<sub>A</sub>&tau;<sub>A</sub> + &lambda;<sub>B</sub>&tau;<sub>B</sub><br><br>&lambda;=0.0 &rarr; base &nbsp;·&nbsp; &lambda;=1.0 &rarr; the fine-tune<br><br><span class="text-slate-500 text-[12px]">demo sweep: best uniform &lambda; &asymp; 0.4 (99.2% avg)<br>&lambda;=1.0 on both &rarr; 89% &mdash; over-shoot</span></div>`,
+   code:`def task_arithmetic(base, taus, lambdas):
+    return {k: base[k] + sum(l * t[k] for t, l in zip(taus, lambdas))
+            for k in base}
+
+# sweep it - lambda is a hyper-parameter, not a constant
+for lam in [0.2, 0.3, 0.4, 0.5, 0.7, 1.0]:
+    m = task_arithmetic(base, [tau_a, tau_b], [lam, lam])
+    print(lam, evaluate(m))` },
+
+ { title:"7. Negation — subtract a vector to unlearn",
+   why:"Because a skill is a direction, reversing the sign walks the model <em>away</em> from that skill: <span class='mono'>θ_base − λ·τ_A</span>. In the demo this pushes sentiment accuracy <em>below</em> 50% — worse than a coin flip — because the model hasn't merely forgotten the task, it has been handed the anti-skill and now predicts the opposite label. Meanwhile the other task doesn't move at all, since the two vectors are nearly orthogonal. The same trick is used seriously to reduce toxicity, strip a memorised style, or remove a capability from a released checkpoint, and it is by far the cheapest form of machine unlearning — though it is a blunt instrument, and aggressive negation degrades general ability too.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">&theta; = &theta;<sub>base</sub> &minus; 1.0 &middot; &tau;<sub>A</sub><br><br><span class="text-slate-500 text-[12px]">task A: 50% &rarr; <b style="color:#dc2626">20%</b> &nbsp;(below chance = anti-skill)<br>task B: 50% &rarr; 50% &nbsp;(untouched)</span><br><br>subtracting a direction removes the behaviour</div>`,
+   code:`# unlearn: walk backwards along the task vector
+forget = {k: base[k] - 1.0 * tau_toxic[k] for k in base}
+
+# used for: detoxification, removing a memorised style,
+# stripping a capability - cheapest unlearning that exists.
+# caution: large |lambda| also damages unrelated ability` },
+
+ { title:"8. Interference — why naive merging degrades",
+   why:"Merging isn't free, and it fails in two specific ways. <strong>Redundancy</strong>: the vast majority of a task vector's entries are noise-sized, contributing nothing but diluting the entries that matter once you average. <strong>Sign conflict</strong>: on parameters that <em>both</em> skills care about, they often want opposite directions — one pushes <span class='mono'>+0.42</span>, the other <span class='mono'>−0.73</span>. Average those and you get <span class='mono'>−0.15</span>: a value neither model wanted, weak enough that both skills lose that parameter. In the demo the words <span class='mono'>urgent</span>, <span class='mono'>delivery</span> and <span class='mono'>service</span> are exactly this case — praise in a review, but red flags (or routine) in an inbox. Interference is why merging more models keeps getting worse, and it's the problem the next two methods solve.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><span class="mono">&tau;<sub>A</sub>["service"] = <b style="color:#2563eb">+0.42</b></span> &nbsp; (good review)<br><span class="mono">&tau;<sub>B</sub>["service"] = <b style="color:#ea580c">&minus;0.73</b></span> &nbsp; (routine inbox)<br><span class="mono text-slate-400">average &rarr; &minus;0.15</span><br><br><b style="color:#dc2626">both skills just lost that parameter</b></div>`,
+   code:`# two distinct problems
+# 1. REDUNDANCY - most |tau| entries are noise, they only dilute
+# 2. SIGN CONFLICT - shared params where the skills disagree
+
+conflicts = ((tau_a.sign() != tau_b.sign())
+             & (tau_a.abs() > eps) & (tau_b.abs() > eps)).sum()
+# averaging a +0.42 and a -0.73 gives -0.15: nobody's answer` },
+
+ { title:"9. TIES — Trim, Elect sign, Disjoint Merge",
+   why:"TIES attacks both failure modes in three passes. <strong>Trim</strong>: within each task vector keep only the top-k% of entries by magnitude and zero the rest — typically k = 20%, which deletes the redundancy without touching the signal. <strong>Elect</strong>: for each parameter, sum the surviving values across models and take the sign of that sum, so one direction wins outright instead of being averaged away. <strong>Disjoint merge</strong>: average only the models whose value agrees with the elected sign, ignoring the dissenters entirely — so the winner keeps its full magnitude. In the demo this is the best merge on the board, beating the plain soup, and it scales to many models where averaging collapses.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><b>1 · TRIM</b> keep top-k% by |value|, zero the rest<br><b>2 · ELECT</b> sign = sign(&Sigma; surviving values)<br><b>3 · DISJOINT MERGE</b> mean of the agreeing entries only<br><br><span class="mono text-slate-500">+0.42 vs &minus;0.73 &rarr; elect &minus; &rarr; keep &minus;0.73</span><br><span class="text-slate-500 text-[12px]">not &minus;0.15 &mdash; no cancellation</span></div>`,
+   code:`stack = torch.stack([t[k].flatten() for t in taus])   # [n_models, P]
+
+# 1. trim to top-k% by magnitude, per model
+keep   = int(k * stack.shape[1])
+thresh = stack.abs().kthvalue(stack.shape[1]-keep+1, dim=1, keepdim=True).values
+stack  = stack * (stack.abs() >= thresh)
+
+# 2. elect one sign per parameter
+elected = stack.sum(0).sign()
+
+# 3. disjoint mean over the agreeing entries
+agree  = (stack.sign() == elected) & (stack != 0)
+merged = (stack * agree).sum(0) / agree.sum(0).clamp(min=1)` },
+
+ { title:"10. DARE — drop 90%, rescale, lose nothing",
+   why:"DARE takes the redundancy observation to its extreme: delete a random fraction <span class='mono'>p</span> of each task vector's entries, then multiply the survivors by <span class='mono'>1/(1−p)</span> so the expected vector is unchanged. Empirically you can drop <strong>90–99%</strong> of a fine-tune's delta and the model still performs, which is a remarkable statement about how little fine-tuning actually changes. For merging the benefit is geometric: two vectors that are each 10% dense collide on roughly 1% of parameters instead of 100%, so interference nearly vanishes. Note the drop is <em>random</em>, not magnitude-based — that's the difference from TIES trimming — and the two compose, which mergekit exposes as <span class='mono'>dare_ties</span>.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">mask ~ Bernoulli(1&minus;p) &nbsp;·&nbsp; &tau;&#771; = &tau; &odot; mask / (1&minus;p)<br><br>E[&tau;&#771;] = &tau; &nbsp; <span class="text-slate-500">same direction, 10% of the entries</span><br><br><span class="text-slate-500 text-[12px]">two 10%-dense vectors overlap on ~1% of params<br>&rarr; interference collapses</span></div>`,
+   code:`def dare(tau, p=0.9):
+    mask = torch.rand_like(tau) >= p      # keep each entry w.p. 1-p
+    return tau * mask / (1 - p)           # rescale so E[.] is unchanged
+
+# random drop (DARE) != magnitude drop (TIES trim) - they compose:
+merge_method: dare_ties       # mergekit
+# density: 0.1  ->  keep 10% of each delta` },
+
+ { title:"11. SLERP, and what merging can't do",
+   why:"One more geometry fix: the straight line between two weight vectors passes <em>through</em> the sphere they sit on, so a linear average is shorter than either parent and every activation shrinks. <strong>SLERP</strong> walks the arc instead, at constant angular speed, interpolating the magnitude separately — norm preserved, and at t = 0 or 1 you recover a parent exactly. It handles exactly two models; for more, use TIES or DARE. The real limits are elsewhere: models must share an architecture, tokenizer and ancestor; merging cannot create a skill neither parent had; and every knob (λ, k, p, t) is a hyper-parameter. Treat a merge as a hypothesis and let a held-out eval decide — <span class='mono'>mergekit</span> makes producing candidates cheap, which makes evaluating them the actual job.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><span class="mono">linear:</span> chord &rarr; ‖&theta;<sub>m</sub>‖ &lt; ‖&theta;<sub>A</sub>‖ &nbsp;<span style="color:#dc2626">(shrinks)</span><br><span class="mono">SLERP:</span> arc &rarr; norm preserved<br><br><span class="text-slate-500 text-[12px]">t=0 &rarr; exactly A &nbsp;·&nbsp; t=1 &rarr; exactly B<br>2 models only &mdash; use TIES for 3+</span><br><br><b>the eval set is the only judge</b></div>`,
+   code:`# mergekit recipe - the industry-standard tool
+base_model: mistralai/Mistral-7B-v0.1
+merge_method: ties        # linear | task_arithmetic | ties | dare_ties | slerp
+models:
+  - model: org/mistral-sentiment
+    parameters: {weight: 0.5, density: 0.5}
+  - model: org/mistral-spam
+    parameters: {weight: 0.5, density: 0.5}
+# $ mergekit-yaml merge.yml ./merged
+# then sweep weight/density and EVALUATE - merging is cheap, judging is not` },
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-violet-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-violet-500 bg-violet-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-violet-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
