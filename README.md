@@ -61,6 +61,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 57 — Hybrid Search](https://dev48v.infy.uk/ai/days/day57-hybrid-search.html) — `day57-hybrid-search.html`
 - [AIFromZero · Day 58 — Prompt Compression](https://dev48v.infy.uk/ai/days/day58-prompt-compression.html) — `day58-prompt-compression.html`
 - [AIFromZero · Day 59 — Model Merging](https://dev48v.infy.uk/ai/days/day59-model-merging.html) — `day59-model-merging.html`
+- [AIFromZero · Day 60 — Continuous Batching](https://dev48v.infy.uk/ai/days/day60-continuous-batching.html) — `day60-continuous-batching.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

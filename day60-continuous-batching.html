@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 60 — Continuous Batching (from scratch)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  /* on phones the sticky intro must not eat the whole viewport */
+  @media (max-width: 767px){ header h1 { max-height: 34vh; overflow-y:auto; } }
+
+  /* ===== controls ===== */
+  .seg { display:inline-flex; flex-wrap:wrap; border:1px solid #e2e8f0; border-radius:11px; overflow:hidden; max-width:100%; }
+  .seg button { padding:7px 13px; font-size:12.5px; font-weight:800; background:#fff; color:#475569; border-right:1px solid #e2e8f0; transition:all .18s; }
+  .seg button:last-child { border-right:0; }
+  .seg button.on { background:#7c3aed; color:#fff; }
+
+  .preset { padding:5px 11px; font-size:11.5px; font-weight:800; border-radius:999px; border:1.5px solid #e2e8f0; background:#fff; color:#475569; transition:all .16s; }
+  .preset:hover { border-color:#7c3aed; color:#7c3aed; }
+
+  input[type=range] { -webkit-appearance:none; appearance:none; height:7px; border-radius:999px; background:#e2e8f0; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:22px; height:22px; border-radius:999px; background:#7c3aed; cursor:pointer; border:3px solid #fff; box-shadow:0 2px 8px rgba(124,58,237,.5); }
+  input[type=range]::-moz-range-thumb { width:20px; height:20px; border-radius:999px; background:#7c3aed; cursor:pointer; border:3px solid #fff; }
+  .ctlrow { transition:opacity .18s; min-width:0; }
+  .ctlrow.off { opacity:.32; pointer-events:none; }
+
+  /* ===== stat tiles ===== */
+  .tile { border:1.5px solid #e2e8f0; border-radius:13px; padding:11px 13px; background:#fff; min-width:0; }
+  .tile .k { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; }
+  .tile .v { font-size:19px; font-weight:900; color:#0f172a; margin-top:2px; line-height:1.2; }
+  .tile .s { font-size:10.5px; color:#64748b; margin-top:2px; }
+
+  /* ===== occupancy timeline ===== */
+  .tlwrap { display:flex; gap:7px; align-items:flex-start; min-width:0; }
+  .tlgutter { flex:0 0 46px; }
+  .tlgutter div { height:13px; margin-bottom:2px; font-size:9px; font-weight:800; color:#94a3b8; text-align:right; line-height:13px; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .tlscroll { flex:1 1 auto; min-width:0; overflow-x:auto; overflow-y:hidden; padding-bottom:4px; }
+  .tlrow { display:flex; height:13px; margin-bottom:2px; }
+  .tlcell { flex:0 0 6px; height:13px; margin-right:0; }
+  .tlaxis { display:flex; height:12px; margin-top:2px; font-size:9px; color:#94a3b8; font-family:ui-monospace,Menlo,Consolas,monospace; }
+
+  .lg { display:inline-flex; align-items:center; gap:5px; font-size:10.5px; font-weight:700; color:#475569; }
+  .sw { width:11px; height:11px; border-radius:3px; display:inline-block; flex:0 0 11px; }
+
+  /* ===== comparison table ===== */
+  .cmpwrap { overflow-x:auto; }
+  table.cmp { width:100%; border-collapse:collapse; font-size:12px; min-width:430px; }
+  table.cmp th, table.cmp td { padding:6px 9px; border-bottom:1px solid #f1f5f9; text-align:right; white-space:nowrap; }
+  table.cmp th:first-child, table.cmp td:first-child { text-align:left; color:#475569; font-weight:700; white-space:normal; }
+  table.cmp thead th { font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; }
+  table.cmp td.num { font-family:ui-monospace,Menlo,Consolas,monospace; font-weight:800; color:#0f172a; }
+  .win { color:#047857; }
+  .lose { color:#dc2626; }
+
+  /* ===== bar charts ===== */
+  .qrow { display:flex; align-items:flex-end; height:44px; gap:1px; min-width:0; }
+  .qbar { flex:1 1 auto; background:#c4b5fd; border-radius:1px 1px 0 0; min-width:1px; }
+  .swrow { display:grid; grid-template-columns:repeat(11, minmax(0,1fr)); gap:4px; align-items:end; height:104px; }
+  .swcol { display:flex; flex-direction:column; justify-content:flex-end; height:100%; min-width:0; }
+  .swbar { border-radius:3px 3px 0 0; background:linear-gradient(180deg,#a78bfa,#7c3aed); }
+  .swlbl { font-size:8.5px; text-align:center; color:#94a3b8; font-weight:800; margin-top:3px; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .swval { font-size:8.5px; text-align:center; color:#7c3aed; font-weight:900; font-family:ui-monospace,Menlo,Consolas,monospace; }
+
+  .chip { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:800; padding:2px 9px; border-radius:999px; }
+  .chip-c { background:#f5f3ff; color:#6d28d9; }
+  .chip-s { background:#fff7ed; color:#c2410c; }
+  .chip-x { background:#fef2f2; color:#dc2626; }
+
+  .verdict { display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:800; }
+  .v-good { background:#ecfdf5; color:#047857; }
+  .v-mid  { background:#fffbeb; color:#b45309; }
+  .v-fail { background:#fef2f2; color:#dc2626; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-violet-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between flex-wrap gap-3">
+    <div style="min-width:0">
+      <div class="text-xs text-violet-600 font-bold uppercase tracking-wider">AIFromZero · Day 60</div>
+      <h1 class="text-xl font-bold">🚂 Continuous Batching — <strong>how an LLM server keeps the GPU full by swapping finished sequences out mid-flight.</strong> Generation is <em>autoregressive</em>: the model runs one forward pass per output token, and nobody — not even the model — knows how many tokens a request will produce until it emits <span class="mono">EOS</span>. Old-school <strong>static (request-level) batching</strong> collects N requests, runs them in lockstep, and returns the whole batch together — so the batch is <strong>held hostage by its longest sequence</strong>. A request that finished after 12 tokens sits in its slot emitting <em>padding</em> for another 400 steps while the GPU computes nothing of value. <strong>Continuous (iteration-level) batching</strong> — the <span class="mono">Orca</span> idea that vLLM and TGI ship — flips the loop inside out: the scheduler runs <em>one step at a time</em>, and the instant any sequence emits EOS its slot is freed and the next queued request is admitted <em>at the very next step</em>. Same GPU, same weights, far higher throughput. Below is a <strong>real discrete-event scheduler</strong>: a seeded workload of arrivals, prompts and unknown output lengths is generated once, then run through <em>both</em> policies over the identical trace, with throughput, TTFT p50/p95, queue depth and a live slot×step occupancy timeline all computed from the simulation — <strong>every number here is measured, none is hard-coded</strong>, and 60 assertions verify the engine against independent brute-force implementations.</h1>
+    </div>
+    <div class="flex gap-2" id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-4 sm:p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-bold mb-1">Same GPU, same requests — <span style="color:#7c3aed">one scheduler is twice as fast</span>.</h2>
+        <p class="text-slate-500 max-w-3xl mx-auto">One seeded workload is generated: arrival times, prompt lengths, and output lengths nobody knows in advance. That <b>exact same trace</b> is then run through two schedulers — <b style="color:#c2410c">static batching</b> (fill a batch, run it to completion, return together) and <b style="color:#7c3aed">continuous batching</b> (one step at a time, free a slot the moment a sequence hits EOS). Every metric below is computed by stepping the simulator; the timeline is the real slot-occupancy log. This page is about <b>scheduling many sequences</b> — for the memory of a <em>single</em> sequence see <a href="day22-kv-cache.html" class="text-violet-600 font-semibold">Day 22 · the KV-cache</a>.</p>
+      </div>
+
+      <!-- ===================== CARD A · controls ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 mb-5">
+        <div class="grid md:grid-cols-2 gap-5">
+          <div style="min-width:0">
+            <div class="text-[10px] uppercase font-bold text-violet-600 mb-2">📏 Output-length distribution <span class="text-slate-400 normal-case font-normal">— how skewed are the answers?</span></div>
+            <div class="seg mb-3" id="distPick">
+              <button data-d="uniform">Uniform</button>
+              <button data-d="longtail">Long tail</button>
+              <button data-d="bimodal">Bimodal</button>
+            </div>
+            <div class="text-[10px] uppercase font-bold text-violet-600 mb-2">🚦 Arrival pattern</div>
+            <div class="seg mb-3" id="arrPick">
+              <button data-a="steady">Steady stream (Poisson)</button>
+              <button data-a="burst">All at once (burst)</button>
+            </div>
+            <div class="text-[11px] text-slate-500 min-h-[42px]" id="distNote"></div>
+            <div class="mt-2 pt-3 border-t border-slate-200">
+              <div class="text-[10px] uppercase font-bold text-slate-400 mb-2">Jump to</div>
+              <div class="flex flex-wrap gap-2">
+                <button class="preset" data-p="win">Skewed long tail · the win</button>
+                <button class="preset" data-p="equal">Equal lengths · no win</button>
+                <button class="preset" data-p="bimodal">Chat + summarise mix</button>
+                <button class="preset" data-p="cap1">One slot · identical</button>
+                <button class="preset" data-p="burst">Burst of 64</button>
+                <button class="preset" data-p="bigpf">Huge prompts, no chunking</button>
+                <button class="preset" data-p="chunk">Chunked prefill fixes it</button>
+              </div>
+            </div>
+          </div>
+          <div class="space-y-3" style="min-width:0">
+            <div class="ctlrow">
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">Length skew</div>
+                <div class="text-[11px] font-black mono" style="color:#7c3aed" id="skewLbl">0.60</div>
+              </div>
+              <input id="skewS" type="range" min="0" max="100" step="5" value="60" class="w-full" />
+              <div class="flex justify-between text-[9px] text-slate-400 font-bold mono"><span>0 · all equal</span><span>1 · wildly uneven</span></div>
+            </div>
+            <div class="ctlrow">
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">Batch slots (concurrency cap)</div>
+                <div class="text-[11px] font-black mono" style="color:#7c3aed" id="capLbl">8</div>
+              </div>
+              <input id="capS" type="range" min="1" max="24" step="1" value="8" class="w-full" />
+              <div class="flex justify-between text-[9px] text-slate-400 font-bold mono"><span>1</span><span>set by KV-cache memory, not FLOPs</span><span>24</span></div>
+            </div>
+            <div class="ctlrow" id="rowRate">
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">Arrival rate · requests per step</div>
+                <div class="text-[11px] font-black mono" style="color:#7c3aed" id="rateLbl">0.150</div>
+              </div>
+              <input id="rateS" type="range" min="1" max="40" step="1" value="15" class="w-full" />
+            </div>
+            <div class="ctlrow">
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">Requests in the trace</div>
+                <div class="text-[11px] font-black mono" style="color:#7c3aed" id="nLbl">64</div>
+              </div>
+              <input id="nS" type="range" min="4" max="96" step="4" value="64" class="w-full" />
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="ctlrow">
+                <div class="flex items-center justify-between gap-2 mb-1">
+                  <div class="text-[10px] uppercase font-bold text-slate-500">Prompt ≈</div>
+                  <div class="text-[11px] font-black mono" style="color:#f59e0b" id="pmLbl">240</div>
+                </div>
+                <input id="pmS" type="range" min="32" max="2048" step="32" value="240" class="w-full" />
+              </div>
+              <div class="ctlrow">
+                <div class="flex items-center justify-between gap-2 mb-1">
+                  <div class="text-[10px] uppercase font-bold text-slate-500">Prefill chunk</div>
+                  <div class="text-[11px] font-black mono" style="color:#f59e0b" id="chLbl">512</div>
+                </div>
+                <input id="chS" type="range" min="64" max="2048" step="64" value="512" class="w-full" />
+              </div>
+            </div>
+            <div class="ctlrow">
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <div class="text-[10px] uppercase font-bold text-slate-500">Workload seed</div>
+                <div class="text-[11px] font-black mono" style="color:#7c3aed" id="seedLbl">7</div>
+              </div>
+              <input id="seedS" type="range" min="1" max="60" step="1" value="7" class="w-full" />
+            </div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4 pt-4 border-t border-slate-200" id="tiles"></div>
+      </div>
+
+      <!-- ===================== CARD B · occupancy timelines ===================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 mb-5">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <div class="text-xs uppercase font-bold text-violet-600">Slot × step occupancy <span class="text-slate-400 normal-case font-normal">— rows are batch slots, columns are scheduler steps. This is the whole argument in one picture.</span></div>
+          <div id="verdict"></div>
+        </div>
+
+        <div class="mt-4 mb-1 flex items-center gap-2 flex-wrap">
+          <span class="chip chip-s">STATIC · request-level batching</span>
+          <span class="text-[11px] text-slate-500" id="staticSub"></span>
+        </div>
+        <div class="tlwrap"><div class="tlgutter" id="gutS"></div><div class="tlscroll"><div id="tlS"></div><div class="tlaxis" id="axS"></div></div></div>
+
+        <div class="mt-5 mb-1 flex items-center gap-2 flex-wrap">
+          <span class="chip chip-c">CONTINUOUS · iteration-level batching</span>
+          <span class="text-[11px] text-slate-500" id="contSub"></span>
+        </div>
+        <div class="tlwrap"><div class="tlgutter" id="gutC"></div><div class="tlscroll"><div id="tlC"></div><div class="tlaxis" id="axC"></div></div></div>
+
+        <div class="mt-4 pt-3 border-t border-slate-200 flex flex-wrap gap-x-4 gap-y-2">
+          <span class="lg"><span class="sw" style="background:#7c3aed"></span> decoding · 1 real token</span>
+          <span class="lg"><span class="sw" style="background:#f59e0b"></span> prefill · chewing the prompt</span>
+          <span class="lg"><span class="sw" style="background:#fca5a5"></span> <b style="color:#dc2626">padding</b> · finished, slot still held</span>
+          <span class="lg"><span class="sw" style="background:#e2e8f0"></span> free slot · GPU idle</span>
+        </div>
+      </div>
+
+      <!-- ===================== CARD C · metrics + queue ===================== -->
+      <div class="grid lg:grid-cols-2 gap-5 mb-5">
+        <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5" style="min-width:0">
+          <div class="text-xs uppercase font-bold text-violet-600 mb-3">Measured head-to-head <span class="text-slate-400 normal-case font-normal">— identical workload, identical hardware model.</span></div>
+          <div class="cmpwrap"><table class="cmp" id="cmp"></table></div>
+        </div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5" style="min-width:0">
+          <div class="text-xs uppercase font-bold text-violet-600 mb-1">Queue depth over time <span class="text-slate-400 normal-case font-normal">— requests that have arrived but have no slot yet.</span></div>
+          <div class="mt-3 text-[10px] uppercase font-bold text-orange-600 mb-1">Static <span class="text-slate-400 normal-case font-normal" id="qsSub"></span></div>
+          <div class="qrow" id="qS"></div>
+          <div class="mt-4 text-[10px] uppercase font-bold text-violet-600 mb-1">Continuous <span class="text-slate-400 normal-case font-normal" id="qcSub"></span></div>
+          <div class="qrow" id="qC"></div>
+          <div class="mt-5 pt-3 border-t border-slate-200">
+            <div class="text-[10px] uppercase font-bold text-violet-600 mb-2">Throughput speed-up vs length skew <span class="text-slate-400 normal-case font-normal">— re-simulated at 11 skew values</span></div>
+            <div class="swrow" id="sweep"></div>
+            <div class="grid" style="grid-template-columns:repeat(11,minmax(0,1fr)); gap:4px;" id="sweepLbl"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CARD D · narration ===================== -->
+      <div class="rounded-2xl border-2 border-violet-200 bg-violet-50 p-4 sm:p-5 mb-5">
+        <div class="text-[10px] uppercase font-bold text-violet-700 mb-2">What's happening</div>
+        <div id="narr" class="text-sm text-slate-700"></div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-6 text-center max-w-3xl mx-auto"><strong>Continuous batching is the single biggest throughput win in LLM serving, and it is pure scheduling — no new kernels, no smaller model, no quantisation.</strong> The insight is that a batch does not have to be a <em>unit of work</em>; it only has to be a unit of one <em>forward pass</em>. Once the scheduler is allowed to change the batch membership between iterations, finished sequences stop burning slots and the queue drains as fast as the GPU can physically go. The costs are real and worth knowing: a giant prefill can stall everyone's decode (fix: chunked prefill), the batch size is capped by <strong>KV-cache memory</strong> rather than FLOPs, and any individual request may be a little slower because it now shares the GPU with more neighbours. Every serious server — vLLM, TGI, TensorRT-LLM, SGLang — does this by default.</p>
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-4 sm:p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2" style="min-width:0">
+      <h3 class="font-bold text-lg mb-3">A batch is one forward pass, not one job</h3>
+      <p class="text-sm text-slate-500 mb-4">Click any step.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2 flex-wrap">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">← Prev</button>
+        <button id="next-btn" class="bg-violet-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next →</button>
+        <button id="auto" class="bg-violet-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">▶ Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4" style="min-width:0">
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6"><div class="text-xs uppercase font-bold text-violet-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step →</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6"><div class="text-xs uppercase font-bold text-violet-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">—</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6"><div class="text-xs uppercase font-bold text-violet-600 tracking-wider mb-2">CODE / MATH FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-4 sm:p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build a continuous-batching scheduler</h2>
+    <p class="text-slate-500 mb-8">Rebuild the LOOK engine as real code. Generate a workload with unknown output lengths, write the static baseline that everyone starts with, measure the padding it wastes, then replace it with an iteration-level loop that admits and retires sequences between forward passes — plus prefill accounting, the KV-cache budget that actually sets your batch size, and the metrics you must watch in production. Every block is the same logic running in the demo above.</p>
+    <ol class="space-y-6">
+      <li class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold flex-none">1</div><h3 class="font-bold text-lg">A request, and the length you do not know</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Everything downstream follows from one fact: <span class="mono">out_tokens</span> is decided by the model, one token at a time, and is not known when the request is scheduled. The simulator draws it from a distribution only so it can <em>replay</em> the same trace under two policies — the scheduler itself never reads it.</p>
+        <div class="relative"><pre>import math, random
+
+def make_workload(n=48, seed=7, rate=0.10, mean_out=90, skew=0.7, prompt_mean=240):
+    rng, t, reqs = random.Random(seed), 0.0, []
+    for i in range(n):
+        t += -math.log(rng.random()) / rate          # Poisson arrivals, in steps
+        sigma = 0.15 + 1.7 * skew                    # long-tail output lengths
+        out   = max(1, round(mean_out * math.exp(sigma * rng.gauss(0, 1) - sigma**2 / 2)))
+        prompt = max(8, round(prompt_mean * (1 + 0.8 * rng.uniform(-1, 1))))
+        reqs.append(dict(id=i, arrive=int(t), prompt=prompt, out=out))
+    return sorted(reqs, key=lambda r: r["arrive"])
+
+# the scheduler may look at .arrive and .prompt - NEVER at .out</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold flex-none">2</div><h3 class="font-bold text-lg">The static baseline — the batch is a job</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Request-level batching fills a batch of <span class="mono">cap</span>, waits for every member to arrive, runs the whole group in lockstep, and returns them together. Its makespan has a closed form: for each group, the time it takes is the group's <em>longest</em> member. That closed form is exactly what the verification harness checks the simulator against.</p>
+        <div class="relative"><pre>def static_makespan(reqs, cap, chunk):
+    t = 0
+    for g in [reqs[i:i + cap] for i in range(0, len(reqs), cap)]:
+        start   = max(t, max(r["arrive"] for r in g))        # wait for the batch to fill
+        max_pf  = max(prefill_steps(r["prompt"], chunk) for r in g)
+        max_out = max(r["out"] for r in g)                   # the hostage-taker
+        t = start + max_pf + max_out - 1                     # lockstep, return together
+    return t
+
+# every member of the group pays the MAXIMUM, whatever it asked for</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold flex-none">3</div><h3 class="font-bold text-lg">Measure the padding before you fix it</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Utilisation here means <strong>useful slot-steps ÷ total slot-steps</strong>. A slot-step is one sequence occupying one batch slot for one forward pass; it is <em>useful</em> only if a real token came out. Under static batching, everything between a sequence's EOS and its group's end is pure waste — and with skewed lengths that is most of the picture.</p>
+        <div class="relative"><pre>def utilisation(log, cap):
+    steps  = len(log)
+    useful = sum(e["active"] for e in log)      # slots that produced a token
+    return useful / (cap * steps)               # the rest is padding + idle
+
+# static, long-tail lengths, 8 slots:  ~0.22
+# continuous, same trace:              ~0.69
+wasted = cap * steps - sum(e["active"] for e in log)
+print(f"{wasted} slot-steps of the GPU bought nothing")</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold flex-none">4</div><h3 class="font-bold text-lg">The continuous-batching loop</h3></div>
+        <p class="text-sm text-slate-600 mb-3">This is the whole idea, and it is about fifteen lines. <strong>Admit</strong> into free slots, run <strong>one</strong> forward pass over whatever is currently resident, <strong>retire</strong> anything that just hit EOS, repeat. The batch membership changes between iterations, so a sequence that finishes at step <span class="mono">t</span> is replaced at step <span class="mono">t+1</span>.</p>
+        <div class="relative"><pre>def run_continuous(reqs, cap, chunk):
+    slots, t, qi, done, log = [None] * cap, 0, 0, 0, []
+    while done &lt; len(reqs):
+        # 1. ADMIT - fill every free slot from the head of the queue
+        for s in range(cap):
+            if slots[s] is None and qi &lt; len(reqs) and reqs[qi]["arrive"] &lt;= t:
+                slots[s] = new_state(reqs[qi], chunk); qi += 1
+
+        # 2. STEP - exactly one forward pass over the resident sequences
+        active = 0
+        for r in filter(None, slots):
+            r.advance()                      # prefill chunk, or emit one token
+            active += 1
+        log.append({"t": t, "active": active})
+
+        # 3. RETIRE - EOS frees the slot immediately, not at batch end
+        for s in range(cap):
+            if slots[s] and slots[s].finished:
+                slots[s] = None; done += 1
+        t += 1
+    return log</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold flex-none">5</div><h3 class="font-bold text-lg">Admission policy — who gets the free slot</h3></div>
+        <p class="text-sm text-slate-600 mb-3">FCFS is the default because it is starvation-free and predictable. Shortest-job-first would cut mean latency, but you cannot know the job length — so schedulers use proxies (prompt length, a predicted-length model, a user tier) and must bound the wait to avoid starving long requests. Two invariants are non-negotiable and are asserted in the test harness: never exceed <span class="mono">cap</span>, and never start a request before it arrives.</p>
+        <div class="relative"><pre>def admit(slots, queue, t, cap, policy="fcfs"):
+    ready = [r for r in queue if r["arrive"] &lt;= t]
+    if policy == "fcfs":       ready.sort(key=lambda r: r["arrive"])
+    elif policy == "short_prompt":  ready.sort(key=lambda r: r["prompt"])   # proxy, not truth
+    elif policy == "priority":      ready.sort(key=lambda r: (-r["tier"], r["arrive"]))
+
+    for r in ready:
+        free = next((s for s in range(cap) if slots[s] is None), None)
+        if free is None: break
+        slots[free] = new_state(r); queue.remove(r)
+
+# INVARIANTS: len([s for s in slots if s]) &lt;= cap ; r.start &gt;= r.arrive</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold flex-none">6</div><h3 class="font-bold text-lg">Prefill vs decode, and chunked prefill</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The two phases have opposite characters. Prefill processes the whole prompt in parallel and is <strong>compute-bound</strong>; decode processes one token per sequence and is <strong>memory-bandwidth-bound</strong>. Drop a 4 000-token prefill into a decode batch and every other user's stream freezes for that iteration. <strong>Chunked prefill</strong> slices the prompt into fixed pieces so a prefill never monopolises a step.</p>
+        <div class="relative"><pre>def prefill_steps(prompt, chunk):
+    return max(1, math.ceil(prompt / chunk))     # chunk=None -> one giant step
+
+def step_cost_ms(batch, prefill_tokens):
+    return (22.0                                  # fixed: kernel launches, weight reads
+            + 0.35 * batch                        # decode is bandwidth-bound: nearly free
+            + 60.0 * prefill_tokens / 1000)       # prefill is compute-bound: it hurts
+
+# vLLM: --enable-chunked-prefill --max-num-batched-tokens 512
+# the LAST prefill chunk also emits the first output token -> that is TTFT</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold flex-none">7</div><h3 class="font-bold text-lg">What really sets <span class="mono">cap</span>: KV-cache memory</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Batch size is not limited by arithmetic — a decode step barely notices ten extra sequences. It is limited by the <strong>KV-cache</strong>, which grows with every token every sequence has ever produced. Compute the budget from what is left after the weights, and admit only while it fits. Paged KV-cache (vLLM's PagedAttention) is the memory-side partner of this scheduler: it removes the fragmentation that otherwise wastes most of that budget.</p>
+        <div class="relative"><pre>def kv_bytes_per_token(layers, kv_heads, head_dim, dtype_bytes=2):
+    return 2 * layers * kv_heads * head_dim * dtype_bytes    # 2 = K and V
+
+# Llama-3-8B, bf16, GQA: 32 layers x 8 kv-heads x 128 dim
+per_token = kv_bytes_per_token(32, 8, 128)                   #   131,072 B = 128 KiB
+free      = 80e9 - 16e9                                      #   80 GB card - weights
+max_tokens = free / per_token                                # ~ 488,000 tokens total
+
+# a 2k-token conversation costs 256 MiB of KV - THAT is your batch limit
+cap = int(max_tokens // 2048)                                # ~238 concurrent seqs
+# admission must check MEMORY, not just a slot count</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold flex-none">8</div><h3 class="font-bold text-lg">Preemption — when the cache runs out mid-flight</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Because output length is unknown, a batch that fitted at admission can overflow later: every resident sequence keeps growing its KV. The server must then <strong>preempt</strong> — either swap a victim's KV to host memory and restore it, or drop it and recompute the prefill when it is rescheduled. Recompute is usually cheaper than a PCIe round trip. Preemption is a <em>correctness</em> mechanism, not an optimisation; without it you get an out-of-memory crash under load.</p>
+        <div class="relative"><pre>def step_with_preemption(slots, kv_used, kv_budget):
+    while kv_used &gt; kv_budget:
+        victim = max(filter(None, slots), key=lambda r: r.tokens)  # newest / largest
+        kv_used -= victim.kv_tokens
+        if SWAP: swap_out(victim)          # KV -> host RAM, restore later
+        else:    requeue(victim)           # drop KV, recompute prefill on retry
+        slots[victim.slot] = None
+        victim.preempted += 1
+    return kv_used
+
+# vLLM logs it: "Sequence group ... is preempted by RECOMPUTE mode"
+# rising preemption count == you over-committed; lower max_num_seqs</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold flex-none">9</div><h3 class="font-bold text-lg">The metrics that decide whether it worked</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Throughput alone is a trap — you can always raise it by queueing longer. Report the pair: <strong>TTFT</strong> (arrival → first token, dominated by queueing + prefill) and <strong>TPOT</strong> (inter-token latency during decode, which rises with batch size). <strong>Goodput</strong> is the honest metric: requests per second that still met your TTFT/TPOT service level.</p>
+        <div class="relative"><pre>def percentile(xs, p):                       # nearest-rank, no interpolation
+    a = sorted(xs)
+    return a[max(1, math.ceil(p / 100 * len(a))) - 1]
+
+ttft = [r.first_token_ms - r.arrive_ms for r in done]
+tpot = [(r.end_ms - r.first_token_ms) / max(1, r.out - 1) for r in done]
+good = sum(1 for r in done
+           if (r.first_token_ms - r.arrive_ms) &lt;= 500 and tpot_of(r) &lt;= 50)
+
+print(f"TTFT p50 {percentile(ttft,50):.0f}ms  p95 {percentile(ttft,95):.0f}ms")
+print(f"goodput  {good / wall_seconds:.2f} req/s  (of {len(done) / wall_seconds:.2f} raw)")</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+      <li class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-violet-600 text-white rounded-full flex items-center justify-center font-bold flex-none">10</div><h3 class="font-bold text-lg">In practice — the knobs on a real server</h3></div>
+        <p class="text-sm text-slate-600 mb-3">You will never write this loop for production; you will tune it. Every mainstream server does continuous batching by default, and the settings below are the ones that actually move the numbers. Start by raising <span class="mono">gpu_memory_utilization</span> until preemptions appear, then back off.</p>
+        <div class="relative"><pre>from vllm import LLM, SamplingParams
+
+llm = LLM(
+    model="meta-llama/Meta-Llama-3-8B-Instruct",
+    gpu_memory_utilization=0.92,   # more KV cache -> bigger batch -> more throughput
+    max_num_seqs=256,              # the slot cap in this demo
+    max_num_batched_tokens=2048,   # per-iteration token budget (prefill + decode)
+    enable_chunked_prefill=True,   # stop big prefills stalling everyone's decode
+    enable_prefix_caching=True,    # share the KV of common system prompts
+)
+outs = llm.generate(prompts, SamplingParams(max_tokens=256))   # batched continuously
+
+# $ vllm serve ... --max-num-seqs 256 --enable-chunked-prefill
+# TGI:      --max-batch-total-tokens / --waiting-served-ratio
+# watch:    vllm:num_preemptions_total, vllm:time_to_first_token_seconds</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+    </ol>
+    <div class="mt-10 bg-violet-50 border border-violet-200 rounded-2xl p-6 text-center"><h3 class="font-bold text-lg text-violet-900">🎉 Day 60 of AIFromZero done.</h3><p class="text-sm text-violet-700 mt-2"><strong>Continuous batching</strong> replaces request-level batching with <strong>iteration-level</strong> scheduling: the server runs one forward pass at a time and rewrites the batch between passes, so an EOS frees its slot immediately and a queued request starts at the very next step instead of waiting for the batch's longest sequence. Because output lengths are unknown and wildly skewed, static batching wastes most of the GPU on <strong>padding</strong>; continuous batching packs it tight and typically multiplies throughput. The costs are honest ones — a large prefill can stall the batch (use <strong>chunked prefill</strong>), the concurrency cap is set by <strong>KV-cache memory</strong> rather than FLOPs, preemption is mandatory once the cache overflows, and each individual request may be marginally slower even as the fleet gets much faster. <strong>👉 Tomorrow — Day 61: continuing AIFromZero.</strong></p></div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+});
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* CB-ENGINE-START */
+// ===== Day 60 · Continuous Batching — a real discrete-event scheduler.
+//       One seeded workload (arrivals, prompts, unknown output lengths) is
+//       replayed through TWO policies: static (request-level) batching and
+//       continuous (iteration-level) batching. Time is measured in STEPS,
+//       where one step = one forward pass of the server over its batch.
+//       Nothing below touches the DOM — this block is unit-tested in node. =====
+
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+// --- hardware cost model (ms per forward pass) ---------------------------------
+const STEP_BASE_MS    = 22;    // fixed: kernel launches + streaming the weights
+const STEP_PER_SEQ_MS = 0.35;  // marginal cost of one more resident sequence
+const PREFILL_MS_PER_1K = 60;  // extra cost of chewing 1000 prompt tokens in a step
+
+function prefillSteps(prompt, chunk){ return Math.max(1, Math.ceil(prompt / chunk)); }
+function stepMs(occupied, prefillTokens){
+  return STEP_BASE_MS + STEP_PER_SEQ_MS * occupied + PREFILL_MS_PER_1K * (prefillTokens / 1000);
+}
+
+// --- workload generation ------------------------------------------------------
+function sampleLen(rng, mean, skew, dist){
+  if(skew <= 0) return Math.max(1, Math.round(mean));
+  if(dist === 'uniform'){
+    const lo = Math.max(1, mean*(1 - 0.9*skew)), hi = mean*(1 + 0.9*skew);
+    return Math.max(1, Math.round(lo + rng()*(hi - lo)));
+  }
+  if(dist === 'bimodal'){
+    return rng() < 0.75 ? Math.max(1, Math.round(mean*(1 - 0.85*skew)))
+                        : Math.max(1, Math.round(mean*(1 + 3.5*skew)));
+  }
+  const s = 0.15 + 1.7*skew;                       // long tail: lognormal, mean preserved
+  let u = 0; while(u <= 0) u = rng();
+  let v = 0; while(v <= 0) v = rng();
+  const z = Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v);        // Box–Muller
+  return Math.max(1, Math.round(mean * Math.exp(s*z - s*s/2)));
+}
+
+function makeWorkload(cfg){
+  const c = Object.assign({ n:48, seed:7, rate:0.10, meanOut:90, skew:0.7,
+                            dist:'longtail', promptMean:240, promptSkew:0.8, burst:false }, cfg);
+  const rng = mulberry32(c.seed);
+  const reqs = []; let t = 0;
+  for(let i=0;i<c.n;i++){
+    if(!c.burst){ let u = 0; while(u <= 0) u = rng(); t += -Math.log(u)/Math.max(1e-6, c.rate); }
+    const out    = sampleLen(rng, c.meanOut, c.skew, c.dist);
+    const prompt = Math.max(8, Math.round(c.promptMean * (1 + c.promptSkew*(rng()*2 - 1))));
+    reqs.push({ id:i, arrive: c.burst ? 0 : Math.floor(t), prompt, out });
+  }
+  reqs.sort((a,b)=> a.arrive - b.arrive || a.id - b.id);
+  reqs.forEach((r,i)=> r.id = i);                  // id === position in arrival order
+  return { reqs, cfg:c };
+}
+
+// --- shared bookkeeping -------------------------------------------------------
+function newStates(reqs, chunk){
+  return reqs.map(r => ({ id:r.id, arrive:r.arrive, prompt:r.prompt, out:r.out,
+    pfTotal: prefillSteps(r.prompt, chunk), pfLeft: prefillSteps(r.prompt, chunk),
+    decLeft: r.out - 1, emitted:0, slot:-1,
+    startStep:-1, firstTokenStep:-1, endStep:-1 }));
+}
+const idleEntry = (t, cap) => ({ t, cells:new Array(cap).fill(null), occupied:0, active:0, ptok:0, ms:0 });
+
+function percentile(arr, p){
+  if(!arr.length) return 0;
+  const a = arr.slice().sort((x,y)=> x - y);
+  return a[Math.max(1, Math.ceil(p/100 * a.length)) - 1];
+}
+
+// --- CONTINUOUS (iteration-level) batching ------------------------------------
+function runContinuous(R, cap, chunk){
+  const log = [], slots = new Array(cap).fill(null);
+  let t = 0, qi = 0, done = 0, guard = 0;
+  const N = R.length;
+  while(done < N && guard++ < 2000000){
+    for(let s=0;s<cap;s++){                                   // 1. ADMIT (FCFS)
+      if(slots[s] !== null) continue;
+      if(qi >= N || R[qi].arrive > t) break;
+      const r = R[qi++]; r.slot = s; r.startStep = t; slots[s] = r;
+    }
+    if(!slots.some(x => x !== null)){                         // GPU idle: jump to next arrival
+      if(qi >= N) break;
+      for(let k=t;k<R[qi].arrive;k++) log.push(idleEntry(k, cap));
+      t = R[qi].arrive; continue;
+    }
+    const cells = new Array(cap).fill(null);
+    let ptok = 0, active = 0, occupied = 0;
+    for(let s=0;s<cap;s++){                                   // 2. ONE forward pass
+      const r = slots[s]; if(!r) continue;
+      occupied++; active++;
+      if(r.pfLeft > 0){
+        const already = (r.pfTotal - r.pfLeft) * chunk;
+        ptok += Math.max(0, Math.min(chunk, r.prompt - already));
+        r.pfLeft--;
+        cells[s] = { id:r.id, phase:'prefill' };
+        if(r.pfLeft === 0){ r.emitted++; r.firstTokenStep = t; }   // last chunk emits token 1
+      } else {
+        r.decLeft--; r.emitted++;
+        cells[s] = { id:r.id, phase:'decode' };
+      }
+    }
+    log.push({ t, cells, occupied, active, ptok, ms:0 });
+    for(let s=0;s<cap;s++){                                   // 3. RETIRE on EOS
+      const r = slots[s]; if(!r) continue;
+      if(r.pfLeft === 0 && r.decLeft <= 0){ r.endStep = t; slots[s] = null; done++; }
+    }
+    t++;
+  }
+  return log;
+}
+
+// --- STATIC (request-level) batching ------------------------------------------
+function runStatic(R, cap, chunk){
+  const log = []; let t = 0;
+  for(let i=0;i<R.length;i+=cap){
+    const g = R.slice(i, Math.min(i + cap, R.length));
+    const start  = Math.max(t, ...g.map(r => r.arrive));      // wait for the batch to fill
+    for(let k=t;k<start;k++) log.push(idleEntry(k, cap));
+    const maxPf  = Math.max(...g.map(r => r.pfTotal));
+    const maxOut = Math.max(...g.map(r => r.out));
+    const dur    = maxPf + maxOut - 1;                        // the longest member rules
+    g.forEach((r,s)=>{ r.slot = s; r.startStep = start;
+                       r.endStep = start + (r.out > 1 ? maxPf + r.out - 2 : r.pfTotal - 1); });
+    for(let k=0;k<dur;k++){
+      const cells = new Array(cap).fill(null);
+      let ptok = 0, active = 0;
+      g.forEach((r,s)=>{
+        if(k < r.pfTotal){                                    // prefilling its own prompt
+          ptok += Math.max(0, Math.min(chunk, r.prompt - k*chunk));
+          cells[s] = { id:r.id, phase:'prefill' }; active++;
+          if(k === r.pfTotal - 1){ r.emitted++; r.firstTokenStep = start + k; }
+        } else if(k < maxPf){                                 // waiting for the batch's prefill
+          cells[s] = { id:r.id, phase:'pad' };
+        } else if(k < maxPf + r.out - 1){                     // decoding
+          r.emitted++; cells[s] = { id:r.id, phase:'decode' }; active++;
+        } else {                                              // finished — slot held hostage
+          cells[s] = { id:r.id, phase:'pad' };
+        }
+      });
+      log.push({ t:start + k, cells, occupied:g.length, active, ptok, ms:0 });
+    }
+    t = start + dur;
+  }
+  return log;
+}
+
+// --- the public entry point ---------------------------------------------------
+function simulate(wl, policy, cap, chunk){
+  const R   = newStates(wl.reqs, chunk);
+  const log = policy === 'static' ? runStatic(R, cap, chunk) : runContinuous(R, cap, chunk);
+
+  const wallStart = [], wallEnd = []; let ms = 0;
+  for(const e of log){ wallStart.push(ms); e.ms = stepMs(e.occupied, e.ptok); ms += e.ms; wallEnd.push(ms); }
+
+  const steps = log.length;
+  const recs = R.map(r => ({
+    id:r.id, arrive:r.arrive, prompt:r.prompt, out:r.out, emitted:r.emitted, slot:r.slot,
+    startStep:r.startStep, firstTokenStep:r.firstTokenStep, endStep:r.endStep,
+    ttftSteps: r.firstTokenStep - r.arrive + 1,
+    latSteps:  r.endStep - r.arrive + 1,
+    ttftMs: wallEnd[r.firstTokenStep] - wallStart[r.arrive],
+    latMs:  wallEnd[r.endStep]        - wallStart[r.arrive]
+  }));
+
+  const qd = new Array(steps + 1).fill(0);                    // queue depth by step
+  recs.forEach(r => { if(r.arrive < steps) qd[r.arrive]++; if(r.startStep < steps) qd[r.startStep]--; });
+  let acc = 0; const queueDepth = qd.slice(0, steps).map(v => (acc += v));
+
+  const tokens     = recs.reduce((s,r)=> s + r.emitted, 0);
+  const useful     = log.reduce((s,e)=> s + e.active, 0);
+  const slotSteps  = cap * steps;
+  const totalMs    = ms;
+  const ttfts      = recs.map(r => r.ttftMs), lats = recs.map(r => r.latMs);
+
+  return { policy, cap, chunk, steps, log, recs, tokens, queueDepth,
+    usefulSlotSteps: useful, slotSteps, wastedSlotSteps: slotSteps - useful,
+    util: slotSteps ? useful / slotSteps : 0,
+    totalMs, tokPerSec: tokens / (totalMs/1000), reqPerSec: recs.length / (totalMs/1000),
+    ttftP50: percentile(ttfts, 50), ttftP95: percentile(ttfts, 95),
+    latP50:  percentile(lats, 50),  latP95:  percentile(lats, 95),
+    maxQueue: queueDepth.length ? Math.max(...queueDepth) : 0 };
+}
+
+function compare(cfg, cap, chunk){
+  const wl = makeWorkload(cfg);
+  const s  = simulate(wl, 'static', cap, chunk);
+  const c  = simulate(wl, 'continuous', cap, chunk);
+  return { wl, s, c, speedup: c.tokPerSec / s.tokPerSec, stepSpeedup: s.steps / c.steps };
+}
+
+function sweepSkew(cfg, cap, chunk, points){
+  const P = points || 11, out = [];
+  for(let i=0;i<P;i++){
+    const skew = i/(P-1);
+    const r = compare(Object.assign({}, cfg, { skew, n: Math.min(cfg.n || 48, 64) }), cap, chunk);
+    out.push({ skew, speedup:r.speedup, utilS:r.s.util, utilC:r.c.util });
+  }
+  return out;
+}
+/* CB-ENGINE-END */
+
+// ============================ rendering ============================
+const COLS = 170;
+const PHCOL = { decode:'#7c3aed', prefill:'#f59e0b', pad:'#fca5a5', free:'#e2e8f0' };
+const fmt  = (x,d) => Number(x).toFixed(d === undefined ? 1 : d);
+const pctS = x => (100*x).toFixed(1) + '%';
+const kfmt = x => x >= 1000 ? (x/1000).toFixed(1) + 'k' : String(Math.round(x));
+
+const state = { dist:'longtail', burst:false, skew:0.60, cap:8, rate:0.15, n:64,
+                promptMean:240, chunk:512, seed:7 };
+
+function cfgOf(){
+  return { n:state.n, seed:state.seed, rate:state.rate, meanOut:90, skew:state.skew,
+           dist:state.dist, promptMean:state.promptMean, promptSkew:0.8, burst:state.burst };
+}
+
+// ---- occupancy timeline: bucket the step log into COLS columns ----
+function buildTimeline(sim, gutId, tlId, axId){
+  const cap = sim.cap, steps = sim.steps;
+  const bucket = Math.max(1, Math.ceil(steps / COLS));
+  const nCols = Math.ceil(steps / bucket);
+  const counts = [];
+  for(let s=0;s<cap;s++){ counts.push(new Array(nCols).fill(null).map(()=>({decode:0,prefill:0,pad:0,free:0}))); }
+  for(let t=0;t<steps;t++){
+    const b = Math.floor(t/bucket), e = sim.log[t];
+    for(let s=0;s<cap;s++){
+      const c = e.cells[s];
+      counts[s][b][c ? c.phase : 'free']++;
+    }
+  }
+  let rows = '';
+  for(let s=0;s<cap;s++){
+    let row = '<div class="tlrow">';
+    for(let b=0;b<nCols;b++){
+      const k = counts[s][b];
+      let best = 'free', bv = -1;
+      ['decode','prefill','pad','free'].forEach(p => { if(k[p] > bv){ bv = k[p]; best = p; } });
+      row += '<div class="tlcell" style="background:'+PHCOL[best]+'"></div>';
+    }
+    rows += row + '</div>';
+  }
+  $(tlId).innerHTML = rows;
+  $(tlId).style.width = (nCols*6) + 'px';
+  $(gutId).innerHTML = Array.from({length:cap}, (_,s)=>'<div>slot '+s+'</div>').join('');
+  let ax = '';
+  const ticks = 5;
+  for(let i=0;i<ticks;i++){
+    ax += '<div style="flex:0 0 '+(nCols*6/ticks)+'px">'+Math.round(i*steps/ticks)+'</div>';
+  }
+  $(axId).innerHTML = ax + '<div style="flex:0 0 auto">step '+steps+'</div>';
+  $(axId).style.width = (nCols*6 + 60) + 'px';
+}
+
+function tile(k,v,s,color){ return '<div class="tile"><div class="k">'+esc(k)+'</div><div class="v"'+(color?' style="color:'+color+'"':'')+'>'+v+'</div><div class="s">'+s+'</div></div>'; }
+
+function renderTiles(R){
+  const s = R.s, c = R.c, sp = R.speedup;
+  $("tiles").innerHTML =
+    tile('Throughput speed-up', '×'+fmt(sp,2), 'continuous vs static, same trace', sp>=1.6?'#047857':sp>=1.15?'#b45309':'#dc2626') +
+    tile('Tokens / sec', fmt(c.tokPerSec,0)+' vs '+fmt(s.tokPerSec,0), 'continuous vs static', '#7c3aed') +
+    tile('GPU utilisation', pctS(c.util)+' vs '+pctS(s.util), 'useful slot-steps ÷ slots × steps', c.util>=0.75?'#047857':'#b45309') +
+    tile('Makespan · steps', kfmt(c.steps)+' vs '+kfmt(s.steps), 'forward passes to drain the trace', '#0f172a') +
+    tile('TTFT p95', fmt(c.ttftP95/1000,2)+'s vs '+fmt(s.ttftP95/1000,2)+'s', 'arrival → first token', c.ttftP95<=s.ttftP95?'#047857':'#dc2626') +
+    tile('Latency p50', fmt(c.latP50/1000,2)+'s vs '+fmt(s.latP50/1000,2)+'s', 'end-to-end per request', c.latP50<=s.latP50?'#047857':'#dc2626') +
+    tile('Padding wasted', kfmt(s.wastedSlotSteps)+' slot-steps', 'static only — '+kfmt(c.wastedSlotSteps)+' under continuous', '#dc2626') +
+    tile('Tokens emitted', kfmt(c.tokens), 'identical under both policies ✓', '#0f172a');
+}
+
+function renderCompare(R){
+  const s = R.s, c = R.c;
+  const row = (label, sv, cv, better, unit) => {
+    const good = better === 'lower' ? (cv <= sv) : (cv >= sv);
+    return '<tr><td>'+label+'</td><td class="num" style="color:#c2410c">'+sv+unit+'</td>'
+         + '<td class="num '+(good?'win':'lose')+'">'+cv+unit+'</td></tr>';
+  };
+  $("cmp").innerHTML =
+    '<thead><tr><th>Metric</th><th>Static</th><th>Continuous</th></tr></thead><tbody>'
+    + row('Makespan (forward passes)', kfmt(s.steps), kfmt(c.steps), 'lower', '')
+    + row('Wall clock', fmt(s.totalMs/1000,1), fmt(c.totalMs/1000,1), 'lower', 's')
+    + row('Throughput', fmt(s.tokPerSec,0), fmt(c.tokPerSec,0), 'higher', ' tok/s')
+    + row('Completed requests', fmt(s.reqPerSec,2), fmt(c.reqPerSec,2), 'higher', ' req/s')
+    + row('GPU utilisation', pctS(s.util), pctS(c.util), 'higher', '')
+    + row('Wasted slot-steps', kfmt(s.wastedSlotSteps), kfmt(c.wastedSlotSteps), 'lower', '')
+    + row('TTFT p50', fmt(s.ttftP50/1000,2), fmt(c.ttftP50/1000,2), 'lower', 's')
+    + row('TTFT p95', fmt(s.ttftP95/1000,2), fmt(c.ttftP95/1000,2), 'lower', 's')
+    + row('Latency p50', fmt(s.latP50/1000,2), fmt(c.latP50/1000,2), 'lower', 's')
+    + row('Latency p95', fmt(s.latP95/1000,2), fmt(c.latP95/1000,2), 'lower', 's')
+    + row('Peak queue depth', s.maxQueue, c.maxQueue, 'lower', '')
+    + row('Tokens emitted', kfmt(s.tokens), kfmt(c.tokens), 'higher', '')
+    + '</tbody>';
+}
+
+function renderQueue(sim, elId, subId){
+  const N = 90, steps = sim.steps, b = Math.max(1, Math.ceil(steps/N));
+  const buckets = [];
+  for(let t=0;t<steps;t+=b){
+    let m = 0; for(let k=t;k<Math.min(steps,t+b);k++) m = Math.max(m, sim.queueDepth[k]);
+    buckets.push(m);
+  }
+  const mx = Math.max(1, ...buckets);
+  $(elId).innerHTML = buckets.map(v => '<div class="qbar" style="height:'+Math.max(1, 100*v/mx)+'%"></div>').join('');
+  $(subId).textContent = '· peak ' + sim.maxQueue + ' waiting';
+}
+
+function renderSweep(sw){
+  const mx = Math.max(1.05, ...sw.map(p=>p.speedup));
+  $("sweep").innerHTML = sw.map(p =>
+    '<div class="swcol"><div class="swval">'+fmt(p.speedup,1)+'</div><div class="swbar" style="height:'+Math.max(3, 100*(p.speedup-0.9)/(mx-0.9)*0.86)+'%"></div></div>').join('');
+  $("sweepLbl").innerHTML = sw.map(p => '<div class="swlbl">'+fmt(p.skew,1)+'</div>').join('');
+}
+
+function renderNarr(R, sw){
+  const s = R.s, c = R.c, sp = R.speedup;
+  const lens = R.wl.reqs.map(r=>r.out);
+  const lo = Math.min(...lens), hi = Math.max(...lens);
+  const gMax = [];
+  for(let i=0;i<R.wl.reqs.length;i+=state.cap) gMax.push(Math.max(...R.wl.reqs.slice(i,i+state.cap).map(r=>r.out)));
+  const hostage = gMax.reduce((a,b)=>a+b,0);
+  const realWork = lens.reduce((a,b)=>a+b,0);
+  let n = '';
+  n += '<b style="color:#7c3aed">The same '+R.wl.reqs.length+' requests, twice.</b> This seeded trace asks for output lengths from <span class="mono">'+lo+'</span> to <span class="mono">'+hi+'</span> tokens — a '+fmt(hi/lo,1)+'× spread that nobody knows in advance. '
+     + 'Static batching runs them as '+gMax.length+' lockstep groups of up to '+state.cap+', and each group costs its <em>longest</em> member: <span class="mono">'+hostage+'</span> decode steps of batch time to produce <span class="mono">'+realWork+'</span> tokens\' worth of real work spread across '+state.cap+' slots. '
+     + 'That gap is the red padding in the timeline above — <b style="color:#dc2626">'+kfmt(s.wastedSlotSteps)+' slot-steps</b> of GPU bought and thrown away, leaving utilisation at <b>'+pctS(s.util)+'</b>. ';
+  n += '<br><br><b style="color:#7c3aed">Continuous batching changes one thing:</b> the scheduler owns a <em>step</em>, not a batch. The moment a sequence emits EOS its slot is released, and the next queued request is admitted on the following forward pass — which is why its timeline is a dense violet block instead of a red-striped one. Utilisation rises to <b>'+pctS(c.util)+'</b>, the trace drains in <b>'+kfmt(c.steps)+'</b> forward passes instead of <b>'+kfmt(s.steps)+'</b>, and throughput goes from '+fmt(s.tokPerSec,0)+' to <b>'+fmt(c.tokPerSec,0)+' tokens/s — ×'+fmt(sp,2)+'</b>. Identical weights, identical hardware model, identical requests. ';
+  if(c.ttftP95 <= s.ttftP95)
+    n += 'TTFT p95 also improves ('+fmt(s.ttftP95/1000,2)+'s → <b>'+fmt(c.ttftP95/1000,2)+'s</b>) because requests stop waiting for a batch to fill.';
+  else
+    n += '<b>Note the honest cost:</b> TTFT p95 got <em>worse</em> here ('+fmt(s.ttftP95/1000,2)+'s → '+fmt(c.ttftP95/1000,2)+'s) — with more neighbours resident, each step is fractionally slower. Throughput is up, per-request latency is not always.';
+
+  n += '<br><br>';
+  if(state.cap === 1){
+    n += '<b style="color:#b45309">Capacity 1 — the degenerate case.</b> With a single slot there is no batch to hold hostage, so the two policies are <em>the same algorithm</em>: same makespan, same tokens, speed-up ×'+fmt(sp,2)+'. Continuous batching is worth exactly nothing until you have concurrency to reclaim.';
+  } else if(state.skew <= 0.001){
+    n += '<b style="color:#b45309">Skew 0 — the honest null result.</b> Every request asks for exactly '+lo+' tokens, so no member of a group finishes early and there is no padding to reclaim: speed-up ×'+fmt(sp,2)+'. '
+       + (state.burst ? 'With a burst arrival it is exactly 1.00 — the two schedules are identical step for step. ' : 'The small residue is arrival gating: static still waits for a group of '+state.cap+' to fill before it starts. ')
+       + 'Drag the skew slider right and watch the sweep chart below climb — <b>the win is a function of variance, not of batching</b>.';
+  } else {
+    const sw0 = sw[0].speedup, sw1 = sw[sw.length-1].speedup;
+    n += '<b style="color:#047857">The win scales with skew.</b> The sweep chart re-simulates the whole workload at 11 skew values: at skew 0 (every answer the same length) the speed-up is ×'+fmt(sw0,2)+', at skew 1 it is ×'+fmt(sw1,2)+'. '
+       + 'That is the real story — continuous batching does not make the GPU faster, it stops <em>variance in output length</em> from wasting it. Real traffic is extremely skewed (a yes/no answer and a 2 000-token essay hit the same endpoint), which is why every production server ships this on by default.';
+  }
+  const pfShare = 100 * PREFILL_MS_PER_1K * (state.promptMean/1000) / (STEP_BASE_MS + PREFILL_MS_PER_1K*(state.promptMean/1000));
+  if(state.promptMean / state.chunk > 1.5){
+    n += '<br><br><b style="color:#b45309">Prefill is chunked here.</b> A '+state.promptMean+'-token prompt needs '+Math.ceil(state.promptMean/state.chunk)+' passes at a '+state.chunk+'-token chunk, so no single prefill can monopolise a step — the amber cells are spread thin. Widen the chunk to '+state.promptMean+'+ and each prefill becomes one fat, expensive step that stalls everyone else\'s decode.';
+  } else if(pfShare > 55){
+    n += '<br><br><b style="color:#dc2626">Prefill is stalling the batch.</b> With '+state.promptMean+'-token prompts arriving in one unchunked pass, a prefill step costs roughly '+fmt(pfShare,0)+'% more than a decode step, and every other user\'s stream freezes while it runs. This is exactly what <b>chunked prefill</b> exists to fix — drag the chunk slider down.';
+  }
+  $("narr").innerHTML = n;
+  const good = sp >= 1.6, mid = sp >= 1.12;
+  $("verdict").innerHTML = good ? '<span class="verdict v-good">✓ ×'+fmt(sp,2)+' throughput, same GPU</span>'
+                         : mid  ? '<span class="verdict v-mid">~ ×'+fmt(sp,2)+' — modest win</span>'
+                                : '<span class="verdict v-fail">= ×'+fmt(sp,2)+' — nothing to reclaim here</span>';
+}
+
+const NOTES = {
+  uniform:  'Output lengths spread evenly around the mean. Mild skew — the mildest case for continuous batching, and the one where the win is smallest.',
+  longtail: 'Lognormal lengths: most answers short, a few enormous. This is what real LLM traffic looks like, and it is where static batching hurts most.',
+  bimodal:  'Two populations: 75% short chat replies and 25% long summaries hitting the same endpoint. One long member poisons an entire static group.'
+};
+
+function renderControls(){
+  document.querySelectorAll('#distPick button').forEach(b => b.classList.toggle('on', b.dataset.d === state.dist));
+  document.querySelectorAll('#arrPick button').forEach(b => b.classList.toggle('on', (b.dataset.a === 'burst') === state.burst));
+  $("distNote").textContent = NOTES[state.dist];
+  $("rowRate").classList.toggle('off', state.burst);
+  $("skewLbl").textContent = fmt(state.skew,2);
+  $("capLbl").textContent  = state.cap;
+  $("rateLbl").textContent = fmt(state.rate,3);
+  $("nLbl").textContent    = state.n;
+  $("pmLbl").textContent   = state.promptMean;
+  $("chLbl").textContent   = state.chunk;
+  $("seedLbl").textContent = state.seed;
+  $("skewS").value = Math.round(state.skew*100); $("capS").value = state.cap;
+  $("rateS").value = Math.round(state.rate*100); $("nS").value = state.n;
+  $("pmS").value = state.promptMean; $("chS").value = state.chunk; $("seedS").value = state.seed;
+}
+
+function renderAll(){
+  const cfg = cfgOf();
+  const R = compare(cfg, state.cap, state.chunk);
+  const sw = sweepSkew(cfg, state.cap, state.chunk, 11);
+  renderControls();
+  renderTiles(R);
+  renderCompare(R);
+  buildTimeline(R.s, 'gutS', 'tlS', 'axS');
+  buildTimeline(R.c, 'gutC', 'tlC', 'axC');
+  $("staticSub").textContent = R.s.steps + ' steps · ' + pctS(R.s.util) + ' useful · ' + kfmt(R.s.wastedSlotSteps) + ' slot-steps padded';
+  $("contSub").textContent   = R.c.steps + ' steps · ' + pctS(R.c.util) + ' useful · ' + kfmt(R.c.wastedSlotSteps) + ' slot-steps idle';
+  renderQueue(R.s, 'qS', 'qsSub');
+  renderQueue(R.c, 'qC', 'qcSub');
+  renderSweep(sw);
+  renderNarr(R, sw);
+}
+
+// ============================ controls ============================
+document.querySelectorAll('#distPick button').forEach(b => b.onclick = () => { state.dist = b.dataset.d; renderAll(); });
+document.querySelectorAll('#arrPick button').forEach(b => b.onclick = () => { state.burst = (b.dataset.a === 'burst'); renderAll(); });
+document.querySelectorAll('.preset').forEach(b => b.onclick = () => {
+  const p = b.dataset.p;
+  if(p==='win')    { Object.assign(state, {dist:'longtail', skew:0.60, burst:false, cap:8, rate:0.15, n:64, promptMean:240, chunk:512}); }
+  if(p==='equal')  { Object.assign(state, {dist:'longtail', skew:0,    burst:true,  cap:8, n:64}); }
+  if(p==='bimodal'){ Object.assign(state, {dist:'bimodal',  skew:0.80, burst:false, cap:8, rate:0.15, n:64}); }
+  if(p==='cap1')   { Object.assign(state, {cap:1, n:24}); }
+  if(p==='burst')  { Object.assign(state, {burst:true, n:64, cap:8, dist:'longtail', skew:0.7}); }
+  if(p==='bigpf')  { Object.assign(state, {promptMean:2048, chunk:2048, dist:'longtail', skew:0.6}); }
+  if(p==='chunk')  { Object.assign(state, {promptMean:2048, chunk:256,  dist:'longtail', skew:0.6}); }
+  renderAll();
+});
+$("skewS").oninput = e => { state.skew = +e.target.value/100; renderAll(); };
+$("capS").oninput  = e => { state.cap  = +e.target.value; renderAll(); };
+$("rateS").oninput = e => { state.rate = +e.target.value/100; renderAll(); };
+$("nS").oninput    = e => { state.n    = +e.target.value; renderAll(); };
+$("pmS").oninput   = e => { state.promptMean = +e.target.value; renderAll(); };
+$("chS").oninput   = e => { state.chunk = +e.target.value; renderAll(); };
+$("seedS").oninput = e => { state.seed = +e.target.value; renderAll(); };
+
+renderAll();
+
+// ===================== UNDERSTAND step engine =====================
+const STEPS = [
+ { title:"1. Generation is autoregressive — and the length is a surprise",
+   why:"A language model does not write an answer in one shot. It runs a full forward pass to produce one token, appends that token to its own input, and runs again — so a 300-token reply costs 300 sequential passes through billions of parameters. Crucially, nobody knows in advance how many passes that will be: the loop ends when the model itself emits the end-of-sequence token, which depends on what it decided to say. Your serving system therefore schedules work whose duration it cannot measure, cannot predict reliably, and cannot cancel early. Every difficulty on this page flows from that one fact, and every fix is a way of not committing to a guess.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center">prompt &rarr; <span class="mono">pass</span> &rarr; "The" &rarr; <span class="mono">pass</span> &rarr; " capital" &rarr; <span class="mono">pass</span> &rarr; " is" &rarr; &hellip;<br><br><b style="color:#dc2626">how many passes?</b> &nbsp;<span class="text-slate-500">unknown until EOS appears</span><br><br><span class="text-slate-500 text-[12px]">one forward pass per token, strictly sequential</span></div>`,
+   code:`# the decode loop - one forward pass per output token
+tokens = tokenize(prompt)
+while True:
+    logits = model(tokens)          # a FULL forward pass
+    nxt    = sample(logits[-1])
+    tokens.append(nxt)
+    if nxt == EOS: break            # <- nobody knew when this would fire
+
+# duration is data-dependent: 12 tokens or 2000, same endpoint` },
+
+ { title:"2. Why batch at all — the GPU is starved, not busy",
+   why:"During decode the GPU is not short of arithmetic, it is short of memory bandwidth: to produce a single token for a single user it must stream every weight in the model from HBM into the compute units, then do a trivial amount of maths with them. Serving one request at a time therefore wastes almost all of the card. If you batch thirty-two sequences, you stream those same weights <em>once</em> and reuse them for thirty-two tokens — thirty-two times the output for barely more time. That is why batching is the foundation of LLM serving, and why the batch size, not the clock speed, is what your throughput graph really tracks.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]">one decode step, batch = 1<br><span class="mono text-slate-500">stream 16 GB of weights &rarr; produce 1 token</span><br><br>one decode step, batch = 32<br><span class="mono" style="color:#047857">stream 16 GB of weights &rarr; produce 32 tokens</span><br><br><b>same time, 32&times; the output</b><br><span class="text-slate-500 text-[12px]">decode is memory-bandwidth-bound, not compute-bound</span></div>`,
+   code:`# step time barely moves with batch size during decode
+step_ms(batch=1)   ~ 22.4 ms       # dominated by streaming the weights
+step_ms(batch=8)   ~ 24.8 ms
+step_ms(batch=32)  ~ 33.2 ms       # 32x output for 1.5x the time
+
+throughput = batch / step_time     # <- grows almost linearly with batch` },
+
+ { title:"3. Static batching — the batch is treated as one job",
+   why:"The obvious way to batch is the way you would batch anything else: collect N requests, pad them into one tensor, run the generation loop until they are <em>all</em> done, return the results together, then take the next N. This is called static or request-level batching and it is what every framework did before 2022. The flaw is structural rather than accidental: because the loop only exits when the slowest member finishes, a request that emitted EOS after twelve tokens keeps occupying its row of the tensor for however many hundreds of steps the longest member needs. Its slot is computed on every pass and contributes nothing.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><span class="mono">slot 0</span> &#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608; <span class="text-slate-500">400 tokens</span><br><span class="mono">slot 1</span> &#9608;<span style="color:#dc2626">&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;</span> <span style="color:#dc2626">12 tokens, then 388 wasted</span><br><span class="mono">slot 2</span> &#9608;&#9608;&#9608;<span style="color:#dc2626">&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;</span> <span style="color:#dc2626">70 tokens</span><br><span class="mono">slot 3</span> &#9608;&#9608;<span style="color:#dc2626">&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;</span> <span style="color:#dc2626">45 tokens</span><br><br><b style="color:#dc2626">the batch ends when the LONGEST ends</b></div>`,
+   code:`# request-level (static) batching
+while queue:
+    batch = queue.take(cap)                 # fill it, wait if you must
+    while not all(s.finished for s in batch):
+        model_step(batch)                   # finished rows are still computed
+    emit(batch)                             # everyone returns together
+
+# makespan = sum over groups of max(output length in that group)` },
+
+ { title:"4. Padding is the tax — and it is enormous",
+   why:"Put a number on the waste. Define a <em>slot-step</em> as one batch slot occupied for one forward pass, and call it useful only if a real token came out of it. Total capacity is <span class='mono'>slots × steps</span>; utilisation is useful ÷ total. In the simulation on the LOOK tab, a realistic long-tailed workload on eight slots lands near <strong>22%</strong> under static batching — more than three quarters of a very expensive GPU spent computing padding. And it gets worse as the batch gets bigger, because a larger group is more likely to contain one very long member that everyone else must wait for.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono">utilisation = useful slot-steps / (slots &times; steps)<br><br><span style="color:#dc2626">static, long-tail lengths &rarr; ~0.22</span><br><span style="color:#047857">continuous, same trace &rarr; ~0.69</span><br><br><span class="text-slate-500 text-[12px]">bigger static batch &rarr; more likely to contain one giant &rarr; WORSE</span></div>`,
+   code:`useful = sum(step["active"] for step in log)     # slots that emitted a token
+total  = cap * len(log)
+print(useful / total)                            # 0.22 static / 0.69 continuous
+
+# the waste is not a constant overhead - it scales with LENGTH VARIANCE
+wasted = total - useful` },
+
+ { title:"5. Iteration-level scheduling — the Orca idea",
+   why:"The fix is to stop treating the batch as a unit of work. A batch only has to be a unit of <em>one forward pass</em>; nothing requires the same sequences to be in it next pass. So the scheduler runs a single step, looks at what just happened, evicts anything that emitted EOS, admits whatever is waiting in the queue, and runs the next step with a freshly composed batch. This was published as <strong>Orca</strong> (OSDI 2022) under the name iteration-level scheduling, and it is what vLLM, TGI, TensorRT-LLM and SGLang all ship today under the name continuous or in-flight batching. The reported throughput gains are large — several times, not several percent.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><b>static:</b> &nbsp;<span class="mono">schedule &rarr; [ run to completion ] &rarr; schedule</span><br><br><b style="color:#7c3aed">continuous:</b> &nbsp;<span class="mono">schedule &rarr; step &rarr; schedule &rarr; step &rarr; &hellip;</span><br><br><span class="text-slate-500 text-[12px]">batch membership is re-decided between every forward pass<br>EOS at step t &rarr; a new request runs at step t+1</span></div>`,
+   code:`# iteration-level (continuous) batching - the entire idea
+while not done:
+    admit(slots, queue)              # fill every free slot, right now
+    model_step([s for s in slots if s])   # ONE forward pass
+    retire(slots)                    # EOS -> slot free immediately
+                                     # loop: the batch is different next pass` },
+
+ { title:"6. The scheduler loop, line by line",
+   why:"Three phases, in this order, every single iteration. <strong>Admit</strong>: walk the free slots and pull requests off the queue that have already arrived — in first-come-first-served order, so nobody starves. <strong>Step</strong>: run exactly one forward pass over whatever is resident, advancing each sequence by one token (or one prefill chunk). <strong>Retire</strong>: any sequence whose sampled token was EOS is removed and its slot marked free for the <em>next</em> admit. Two invariants must hold at every step and are asserted by this page's test harness: the number of resident sequences never exceeds the slot cap, and no request ever starts before it arrives.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><b>1 &middot; ADMIT</b> &nbsp;<span class="text-slate-500">free slots &larr; head of queue (FCFS)</span><br><b>2 &middot; STEP</b> &nbsp;<span class="text-slate-500">one forward pass over the residents</span><br><b>3 &middot; RETIRE</b> &nbsp;<span class="text-slate-500">EOS &rarr; free the slot now</span><br><br><span class="mono text-[12px]">invariant: |resident| &le; cap</span><br><span class="mono text-[12px]">invariant: start(r) &ge; arrive(r)</span></div>`,
+   code:`while done < N:
+    for s in free_slots(slots):                 # 1. ADMIT
+        if queue and queue[0].arrive <= t:
+            slots[s] = state(queue.pop(0))
+
+    for r in residents(slots):                  # 2. STEP - one pass
+        r.advance()                             #    prefill chunk or 1 token
+
+    for s, r in enumerate(slots):               # 3. RETIRE
+        if r and r.finished:
+            slots[s] = None; done += 1
+    t += 1` },
+
+ { title:"7. Prefill and decode are two different animals",
+   why:"A request has two phases with opposite bottlenecks. <strong>Prefill</strong> reads the entire prompt at once and computes its key/value tensors in parallel — thousands of tokens of matrix multiplication, so it is compute-bound and expensive. <strong>Decode</strong> then produces one token per sequence per step, which is a tiny amount of maths dominated by streaming weights, so it is memory-bandwidth-bound and nearly free per extra sequence. Mixing them naively causes the classic serving pathology: one user pastes a 4 000-token document, its prefill lands in a decode iteration, and every other user's token stream visibly freezes for that step.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><b style="color:#f59e0b">PREFILL</b> &nbsp;whole prompt at once &nbsp;&middot;&nbsp; compute-bound<br><span class="text-slate-500">4000 tokens &rarr; one very expensive pass</span><br><br><b style="color:#7c3aed">DECODE</b> &nbsp;one token per sequence &nbsp;&middot;&nbsp; bandwidth-bound<br><span class="text-slate-500">+1 sequence &asymp; +0.35 ms</span><br><br><b style="color:#dc2626">a prefill inside a decode batch stalls everyone</b></div>`,
+   code:`# the cost model used by the simulator on the LOOK tab
+def step_cost_ms(batch, prefill_tokens):
+    return (22.0                       # fixed weight-streaming cost
+            + 0.35 * batch             # decode: another sequence is cheap
+            + 60.0 * prefill_tokens / 1000)   # prefill: this is what hurts
+
+step_cost_ms(batch=16, prefill_tokens=0)     #  27.6 ms  - smooth
+step_cost_ms(batch=16, prefill_tokens=4000)  # 267.6 ms  - everyone stalls` },
+
+ { title:"8. Chunked prefill — never let one prompt own a step",
+   why:"The fix is to stop doing a prompt in one bite. Chunked prefill splits the prompt into fixed-size pieces — 512 tokens is a common default — and processes one piece per iteration, alongside the decodes that are already running. No single step is ever dominated by one user's prompt, so inter-token latency stays smooth for everybody, at the cost of that user's own prefill taking a few more steps. It also lets the scheduler keep a constant token budget per iteration, which is what <span class='mono'>max_num_batched_tokens</span> configures in vLLM. Note the useful detail: the <em>last</em> prefill chunk already produces the first output token, which is why TTFT is essentially prefill time plus queueing.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><span class="mono">unchunked:</span> [&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608; 4000 tok] &nbsp;<span style="color:#dc2626">one 270 ms step</span><br><span class="mono">chunked:&nbsp;&nbsp;</span> [&#9608;][&#9608;][&#9608;][&#9608;][&#9608;][&#9608;][&#9608;][&#9608;] &nbsp;<span style="color:#047857">8 &times; ~55 ms, interleaved</span><br><br><span class="text-slate-500 text-[12px]">the LAST chunk emits token #1 &rarr; that moment is TTFT</span></div>`,
+   code:`def prefill_steps(prompt, chunk):
+    return max(1, math.ceil(prompt / chunk))
+
+# vLLM
+llm = LLM(model=..., enable_chunked_prefill=True,
+          max_num_batched_tokens=512)     # per-iteration token budget
+
+# trade: this request's TTFT rises slightly,
+#        everyone else's TPOT stops spiking` },
+
+ { title:"9. KV-cache memory, not FLOPs, is what caps the batch",
+   why:"It is tempting to think batch size is limited by arithmetic, but a decode step barely notices ten extra sequences. What actually runs out is memory: every resident sequence holds a <strong>KV-cache</strong> that grows by one entry per layer per attention head for every token it has ever seen, and that cache lives in the same HBM as the weights. For Llama-3-8B in bf16 that is about 128 KiB per token, so a 2 000-token conversation costs a quarter of a gigabyte just to keep alive. Whatever is left after the weights, divided by that, is your real concurrency limit — which is also why <a href='day22-kv-cache.html' class='text-violet-600 font-semibold'>Day 22's KV-cache</a> and continuous batching are two halves of one story: that page is about the memory of <em>one</em> sequence, this one is about scheduling <em>many</em>.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center mono text-[12.5px]">kv_per_token = 2 &times; layers &times; kv_heads &times; head_dim &times; 2 B<br>Llama-3-8B: 2 &times; 32 &times; 8 &times; 128 &times; 2 = <b>128 KiB / token</b><br><br>80 GB card &minus; 16 GB weights = 64 GB for KV<br>&rarr; ~488,000 tokens &rarr; ~238 &times; 2k-token chats<br><br><b style="color:#dc2626">that number IS your max batch size</b></div>`,
+   code:`def kv_bytes_per_token(layers, kv_heads, head_dim, dtype=2):
+    return 2 * layers * kv_heads * head_dim * dtype   # K and V
+
+per_token  = kv_bytes_per_token(32, 8, 128)      # 131072 B
+kv_budget  = 0.92 * 80e9 - 16e9                  # gpu_memory_utilization
+max_tokens = kv_budget / per_token
+
+# admission control must check MEMORY, not just a free slot
+if kv_used + estimated_kv(req) > kv_budget:
+    wait()      # or preempt someone` },
+
+ { title:"10. Paged KV-cache — the memory partner of this scheduler",
+   why:"Continuous batching creates a memory problem it cannot solve alone. Because output length is unknown, a naive server reserves the maximum possible KV block per sequence up front, and most of that reservation is never used — so the card fills up long before the compute does. <strong>PagedAttention</strong> borrows the idea of virtual memory: the KV-cache is stored in small fixed-size blocks with a page table per sequence, so a sequence grows a block at a time and fragmentation nearly vanishes. That is what makes the slot cap large enough for continuous batching to have anything to schedule. Treat them as a pair — the scheduler decides <em>who</em> runs, paging decides <em>how many</em> can fit.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><b style="color:#dc2626">contiguous reservation</b><br><span class="mono">[used 200 | reserved-but-empty 1848]</span> &times; every seq<br><br><b style="color:#047857">paged blocks</b><br><span class="mono">[16][16][16] &rarr; grow on demand, page table per seq</span><br><br><span class="text-slate-500 text-[12px]">scheduling decides WHO runs &middot; paging decides HOW MANY fit</span></div>`,
+   code:`# conceptually: virtual memory for the KV-cache
+BLOCK = 16                              # tokens per physical block
+page_table[seq_id] = [block_7, block_2, block_9, ...]
+
+# grow one block at a time instead of reserving max_len up front
+if len(seq) % BLOCK == 0:
+    page_table[seq_id].append(allocator.alloc())
+
+# blocks can also be SHARED - identical system prompts cost one copy` },
+
+ { title:"11. Preemption — the batch that no longer fits",
+   why:"Here is the consequence of scheduling work whose length you cannot know: a set of sequences that comfortably fitted in the KV-cache at admission time can overflow it twenty steps later, because every one of them keeps growing. The server cannot simply crash, so it <strong>preempts</strong>: it picks a victim, either swapping its KV-cache out to host RAM and restoring it later, or discarding the cache entirely and recomputing the prefill when the request is rescheduled. Recompute is usually cheaper than a PCIe round trip. Preemption is a correctness mechanism, not a tuning option — but a rising preemption counter is the clearest signal that you have over-committed and should lower your concurrency limit.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]">step 40: &nbsp;8 seqs &times; 300 tok &nbsp;<span style="color:#047857">fits</span><br>step 90: &nbsp;8 seqs &times; 900 tok &nbsp;<span style="color:#dc2626">KV cache full</span><br><br><b>preempt a victim</b><br><span class="mono">SWAP</span> KV &rarr; host RAM, restore later<br><span class="mono">RECOMPUTE</span> drop KV, redo prefill on retry<br><br><span class="text-slate-500 text-[12px]">rising preemptions = lower your max_num_seqs</span></div>`,
+   code:`while kv_used > kv_budget:
+    victim = pick_victim(residents)       # usually the newest / largest
+    if SWAP:  swap_to_host(victim)        # PCIe round trip
+    else:     requeue(victim)             # recompute prefill later - often cheaper
+    kv_used -= victim.kv_tokens
+
+# vLLM: "Sequence group 42 is preempted by PreemptionMode.RECOMPUTE"
+# metric to watch: vllm:num_preemptions_total` },
+
+ { title:"12. The honest trade-offs, and when the win disappears",
+   why:"Continuous batching is not free and it is not universal. Because more sequences are resident at once, each individual forward pass is fractionally slower, so a single request can finish <em>later</em> than it would have on an idle machine even while the fleet gets several times faster — throughput and per-request latency are different objectives and the scheduler is optimising the first. It also does nothing at all when there is nothing to reclaim: set the slot cap to 1, or make every request the same length, and the demo's speed-up collapses to about 1.0, because static batching wastes nothing in those cases. The win is a function of <em>variance</em> in output length, and real traffic has plenty. The metric to report is <strong>goodput</strong>: requests per second that still met your TTFT and inter-token latency targets.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-sm w-full text-center text-[13px]"><b>where the win comes from</b><br><span class="mono">skew 0.0 &rarr; &times;1.00</span> &nbsp;<span class="text-slate-500">nothing to reclaim</span><br><span class="mono">skew 0.3 &rarr; &times;2.31</span><br><span class="mono">skew 0.6 &rarr; &times;3.11</span><br><span class="mono">skew 1.0 &rarr; &times;2.83</span> &nbsp;<span class="text-slate-500">one giant now stalls both</span><br><br><span style="color:#dc2626">cost: bigger batch &rarr; slightly slower per token</span><br><b>report goodput, not raw throughput</b></div>`,
+   code:`# throughput alone is gameable - just queue harder
+ttft = [r.first_token_ms - r.arrive_ms for r in done]
+tpot = [(r.end_ms - r.first_token_ms) / max(1, r.out - 1) for r in done]
+
+goodput = sum(1 for r in done
+              if ttft_of(r) <= 500 and tpot_of(r) <= 50) / wall_seconds
+
+# tune: max_num_seqs up until p95 TTFT breaks your SLO, then stop` },
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-violet-400 text-sm"; bn.innerHTML = `<div class="font-semibold">${s.title}</div>`; bn.onclick = () => show(i); stepsEl.appendChild(bn); });
+function show(i){ curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = `<div class="fade-in w-full flex items-center justify-center">${s.concept}</div>`;
+  document.getElementById("why").innerHTML = `<span class="fade-in inline-block">${s.why}</span>`;
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-violet-500 bg-violet-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-violet-400 text-sm"; });
+}
+prevB.onclick = () => show(Math.max(0, curS - 1)); nextB.onclick = () => show(Math.min(STEPS.length - 1, curS + 1));
+let tm = null; autoB.onclick = () => { if (tm){ clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; } autoB.textContent = "⏸ Pause"; show(0); tm = setInterval(() => { if (curS >= STEPS.length - 1){ clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } show(curS + 1); }, 3600); };
+show(0);
+
+function copy(btn){ const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+</script>
+</body>
+</html>
