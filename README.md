@@ -62,6 +62,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 58 — Prompt Compression](https://dev48v.infy.uk/ai/days/day58-prompt-compression.html) — `day58-prompt-compression.html`
 - [AIFromZero · Day 59 — Model Merging](https://dev48v.infy.uk/ai/days/day59-model-merging.html) — `day59-model-merging.html`
 - [AIFromZero · Day 60 — Continuous Batching](https://dev48v.infy.uk/ai/days/day60-continuous-batching.html) — `day60-continuous-batching.html`
+- [AIFromZero · Day 61 — Differential Privacy](https://dev48v.infy.uk/ai/days/day61-differential-privacy.html) — `day61-differential-privacy.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

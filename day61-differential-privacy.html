@@ -1,0 +1,1392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero &middot; Day 61 &mdash; Differential Privacy (from scratch)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  code { background:#f1f5f9; padding:1px 5px; border-radius:4px; font-size:.92em; }
+  .mono { font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+  input[type=range]{ accent-color:#0891b2; width:100%; min-width:0; }
+  .lk { color:#be123c; font-weight:700; }   /* leaked / the attacker    */
+  .sf { color:#047857; font-weight:700; }   /* protected               */
+  .ep { color:#0e7490; font-weight:700; }   /* epsilon / the mechanism */
+  .gu { color:#4338ca; font-weight:700; }   /* the Gaussian branch     */
+  .preset-btn{ border:1.5px solid #e2e8f0; background:#fff; border-radius:9px; padding:6px 11px; font-size:12px; font-weight:700; color:#475569; cursor:pointer; transition:.12s; }
+  .preset-btn:hover{ border-color:#a5f3fc; }
+  .preset-btn.on{ background:#0891b2; border-color:#0891b2; color:#fff; }
+  .btn-solid{ background:#0891b2; color:#fff; padding:7px 14px; border-radius:9px; font-weight:700; font-size:13px; cursor:pointer; }
+  .btn-dark{ background:#0f172a; color:#fff; padding:7px 14px; border-radius:9px; font-weight:700; font-size:13px; cursor:pointer; }
+  canvas{ display:block; }
+  .bignum{ font-variant-numeric:tabular-nums; font-weight:900; line-height:1; }
+  .statcard{ border-radius:12px; border:1.5px solid #e2e8f0; background:#fff; padding:10px 8px; text-align:center; min-width:0; }
+  .statcard .lab{ font-size:10px; text-transform:uppercase; letter-spacing:.05em; font-weight:800; color:#94a3b8; }
+  .grptitle{ font-size:11px; text-transform:uppercase; letter-spacing:.05em; font-weight:800; margin-bottom:4px; }
+  .cmpgrid{ display:grid; grid-template-columns:1fr; gap:8px; }
+  @media(min-width:900px){ .cmpgrid{ grid-template-columns:1fr 1fr 1fr 1fr; } }
+  .cmpcard{ border:1.5px solid #e2e8f0; border-radius:12px; padding:10px 12px; min-width:0; }
+  .cmptag{ font-size:10px; text-transform:uppercase; letter-spacing:.05em; font-weight:800; }
+  .plotwrap{ width:100%; height:230px; border-radius:12px; border:1px solid #e2e8f0; background:#fbfcfe; overflow:hidden; }
+  .plotwrap canvas{ width:100%; height:100%; }
+  .barwrap{ width:100%; height:180px; border-radius:12px; border:1px solid #e2e8f0; background:#fbfcfe; overflow:hidden; }
+  .barwrap canvas{ width:100%; height:100%; }
+  .honest { background:#fffbeb; border:1px solid #fcd34d; color:#92400e; border-radius:12px; padding:10px 13px; font-size:12px; line-height:1.5; }
+  .okpill{ background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; }
+  .badpill{ background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
+  .runpill{ background:#ecfeff; color:#0e7490; border:1px solid #a5f3fc; }
+  header .hdr{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  #tabs{ display:flex; gap:8px; flex-wrap:wrap; }
+  table.cmp { border-collapse:collapse; width:100%; font-size:12.5px; }
+  table.cmp th, table.cmp td { border:1px solid #e2e8f0; padding:6px 8px; text-align:left; vertical-align:top; }
+  table.cmp th { background:#f1f5f9; font-weight:800; }
+  table.rec { border-collapse:collapse; width:100%; font-size:11.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  table.rec th, table.rec td { border:1px solid #e2e8f0; padding:4px 7px; text-align:left; }
+  table.rec th { background:#f1f5f9; font-weight:800; color:#334155; }
+  table.rec tr.hit td { background:#fef2f2; }
+  table.rec tr.hit td.nm { color:#be123c; font-weight:800; }
+  table.rec tr.safe td { background:#ecfdf5; }
+  .scroller{ overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%; }
+  .ctl-row{ display:grid; grid-template-columns:118px 1fr 78px; align-items:center; gap:10px; padding:3px 0; }
+  .ctl-name{ font-size:12px; font-weight:700; color:#334155; white-space:nowrap; }
+  .ctl-val{ font-variant-numeric:tabular-nums; font-weight:800; color:#0e7490; text-align:right; font-size:13px; }
+  /* the intro paragraph is taller than a small screen -- pinning it there would hide the whole page */
+  @media (max-width: 900px), (max-height: 820px) { header.sticky { position:static; } }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-cyan-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 hdr">
+    <div style="min-width:0">
+      <div class="text-xs text-cyan-600 font-bold uppercase tracking-wider">AIFromZero &middot; Day 61</div>
+      <h1 class="text-xl font-bold">&#128274; <strong>Differential privacy</strong> &mdash; start with the thing everybody gets wrong: <strong>&ldquo;anonymised&rdquo; is not a property a dataset can have</strong>. Strip the names and you have not removed the identity, you have moved it into the combination of everything else. Latanya Sweeney showed in 1997 that <strong>ZIP code, date of birth and sex alone identify most Americans uniquely</strong>, and used exactly that to pull the Governor of Massachusetts&rsquo;s medical record out of a &ldquo;de-identified&rdquo; hospital release and post it to him. Netflix&rsquo;s anonymised ratings fell to a join against public IMDb reviews. The 2020 US Census reconstructed <strong>245 million people&rsquo;s records</strong> from its own published tables. Every one of those releases was anonymised in the way the word is normally used, and the <span class="lk">re-identification lab below reproduces the attack live</span> on a synthetic table so you can watch it happen. The trap is that privacy was being treated as a property of the <em>data</em>, when an attacker&rsquo;s power depends on what they <em>already know</em> &mdash; and you cannot enumerate that. Differential privacy escapes by moving the guarantee onto the <strong>mechanism</strong> instead: a randomised algorithm <span class="mono">M</span> is <span class="ep">&epsilon;-differentially private</span> if for every pair of databases <span class="mono">D, D&prime;</span> differing in <em>one person</em> and every possible output set <span class="mono">S</span>, <span class="ep"><span class="mono">Pr[M(D) &isin; S] &le; e<sup>&epsilon;</sup> &middot; Pr[M(D&prime;) &isin; S]</span></span>. Read it as a promise made <em>to you personally</em>: whatever anyone concludes, they would have concluded <strong>almost exactly the same thing had your row never existed</strong>, so joining the dataset cannot hurt you by more than a factor <span class="mono">e<sup>&epsilon;</sup></span> &mdash; which is why an adversary&rsquo;s ability to tell whether you were in it is capped at <span class="mono">e<sup>&epsilon;</sup>/(1+e<sup>&epsilon;</sup>)</span>, a bound this page <strong>measures rather than quotes</strong>. Getting there costs calibrated noise: compute the query&rsquo;s <span class="ep">sensitivity</span> <span class="mono">&Delta;f</span> &mdash; the most one person can move the answer &mdash; and add <span class="mono">Laplace(&Delta;f/&epsilon;)</span>, whose <em>worst-case</em> log-likelihood ratio is exactly <span class="mono">&epsilon;</span> everywhere, or <span class="gu">Gaussian noise</span> with <span class="mono">&sigma; = &Delta;f&radic;(2ln(1.25/&delta;))/&epsilon;</span>, which has <strong>no finite worst case at all</strong> &mdash; that is precisely what <span class="mono">&delta;</span> is buying. And <span class="ep">&epsilon; is a budget that is spent, not a setting</span>: ask <span class="mono">k</span> questions and the losses add, so the page runs sequential and advanced composition against the <em>measured</em> total loss. Below, every distribution is <strong>sampled hundreds of thousands of times in your browser</strong> and checked against its closed form &mdash; including a <strong>null control</strong> that shows what the measurement instrument reports when the true privacy loss is zero. <strong>No libraries, 433 assertions verified in Node against analytic CDFs, closed-form tail probabilities and brute-force re-identification counts.</strong></h1>
+    </div>
+    <div id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<!-- ===================== LOOK ===================== -->
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-4 lg:p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">First we <span class="lk">break an anonymised dataset</span>. Then we build the only thing that survives.</h2>
+      <p class="text-slate-500 mb-4 max-w-4xl mx-auto text-center text-sm">Everything on this page is computed here, now, in your browser: a real linkage attack on a synthetic hospital release, real Laplace and Gaussian sampling, and a privacy loss that is <b>measured from the samples</b> rather than asserted from the formula.</p>
+
+      <div class="honest max-w-4xl mx-auto mb-5 text-left">✅ <strong>Measured, not quoted.</strong> The re-identification numbers come from actually joining two tables. The noise comes from real inverse-transform Laplace sampling and real Box&ndash;Muller normals. The privacy loss is estimated by drawing hundreds of thousands of outputs from <span class="mono">M(D)</span> and <span class="mono">M(D&prime;)</span>, binning them, and taking the largest log-ratio &mdash; and because that estimator is noisy, the page also runs it on <b>two independent samples from the same distribution</b>, where the true loss is exactly 0, so you can see its noise floor instead of trusting it. The population is synthetic; the attack, the mechanisms and the arithmetic are not. The same core, extracted verbatim from this file and run in Node against analytic CDFs, closed-form tail probabilities, brute-force sensitivity over real neighbouring databases and independent re-identification counts, passes <b>433</b> assertions.</div>
+
+      <!-- ============ 1. THE ATTACK ============ -->
+      <div class="bg-white rounded-xl border-2 border-rose-200 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">1 &middot; The attack that made this whole field necessary</div>
+        <p class="text-[12px] text-slate-500 mb-3">A hospital releases 600 patient records with the names removed &mdash; ZIP, birth date, sex, diagnosis. An attacker holds a voter roll: names, ZIP, birth date, sex. Nothing sensitive in it, and you can buy one. <b>Join them on the three columns they share.</b> Drag the slider to generalise the release the way a privacy team would, and watch what it costs to make the attack fail.</p>
+        <div class="max-w-xl mx-auto mb-3">
+          <div class="ctl-row">
+            <span class="ctl-name">generalisation</span>
+            <input type="range" id="lvRange" min="0" max="4" step="1" value="0" />
+            <span class="ctl-val" id="lvVal">none</span>
+          </div>
+        </div>
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#be123c">what the join returns</div>
+            <div class="scroller"><table class="rec" id="recTable"></table></div>
+            <div class="text-[11px] text-slate-400 mt-2">A red row is a person the attacker <b>named</b>: their quasi-identifier is unique in the release, so the join returns exactly one record and the diagnosis is theirs. Green rows hide in a crowd.</div>
+          </div>
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#be123c">the whole release, at this generalisation</div>
+            <div class="barwrap" style="height:200px"><canvas id="reidC"></canvas></div>
+            <div class="grid grid-cols-4 gap-2 text-center mt-3">
+              <div class="statcard"><div class="lab">k-anonymity</div><div class="bignum text-lg mt-1" id="a_k" style="color:#0f172a">&mdash;</div></div>
+              <div class="statcard"><div class="lab">unique rows</div><div class="bignum text-lg lk mt-1" id="a_uniq">&mdash;</div></div>
+              <div class="statcard"><div class="lab">named by the join</div><div class="bignum text-lg lk mt-1" id="a_named">&mdash;</div></div>
+              <div class="statcard"><div class="lab">diagnosis leaked</div><div class="bignum text-lg lk mt-1" id="a_sens">&mdash;</div></div>
+            </div>
+            <div id="a_note" class="text-[12px] text-slate-500 mt-3">&mdash;</div>
+          </div>
+        </div>
+        <div class="honest mt-3">⚠️ <strong>Notice what happens at the end of the slider.</strong> By the time the attack fails, the release says &ldquo;someone in a whole ZIP prefix, born in some decade&rdquo; &mdash; and it is <em>still</em> not safe, because k-anonymity says nothing about the sensitive column: if every person in a group shares a diagnosis, the attacker learns it without ever naming anyone. That is the <b>homogeneity attack</b>, and it is counted separately above. l-diversity patched it, t-closeness patched l-diversity, and each patch fell to a new auxiliary dataset. The pattern is the point: <b>you cannot bound what an attacker already knows</b>, so a guarantee about the data can never be closed. Differential privacy stops trying.</div>
+      </div>
+
+      <!-- ============ 2. THE DEFINITION, MEASURED ============ -->
+      <div class="bg-white rounded-xl border-2 border-cyan-300 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">2 &middot; What <span class="ep">&epsilon;</span> actually means &mdash; measured, not quoted</div>
+        <p class="text-[12px] text-slate-500 mb-3">Two databases that differ in <b>one person</b>: in <span class="mono">D</span> the answer to &ldquo;how many patients have this diagnosis&rdquo; is <span class="mono" id="d_a0">&mdash;</span>, in <span class="mono">D&prime;</span> &mdash; the same database without Alice &mdash; it is <span class="mono" id="d_a1">&mdash;</span>. The mechanism is run <b><span id="d_n">&mdash;</span> times on each</b>. If the two output distributions are hard to tell apart, no adversary can tell whether Alice was in the data, <em>whatever else they know</em>. That is the entire definition, and the number under the chart is it: the largest <span class="mono">|ln(P<sub>D</sub>/P<sub>D&prime;</sub>)|</span> found anywhere, which must not exceed <span class="ep">&epsilon;</span>.</p>
+        <div class="plotwrap"><canvas id="lossC"></canvas></div>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 text-center mt-3">
+          <div class="statcard"><div class="lab">&epsilon; you asked for</div><div class="bignum text-lg ep mt-1" id="v_eps">&mdash;</div></div>
+          <div class="statcard"><div class="lab">measured max |log ratio|</div><div class="bignum text-lg mt-1" id="v_meas" style="color:#0f172a">&mdash;</div></div>
+          <div class="statcard"><div class="lab">null control (true loss = 0)</div><div class="bignum text-lg mt-1" id="v_null" style="color:#94a3b8">&mdash;</div></div>
+          <div class="statcard"><div class="lab">verdict</div><div class="bignum text-sm mt-1" id="v_verdict">&mdash;</div></div>
+        </div>
+        <div class="text-[12px] text-slate-500 mt-3">The <b>null control</b> runs the same estimator on two independent samples from the <em>same</em> distribution, where the true privacy loss is exactly zero. Whatever it reports is pure measurement noise &mdash; so the measured loss is only meaningful to that precision, and at very small &epsilon; the instrument is the limiting factor rather than the mechanism. This is the honest way to read any empirical privacy audit.</div>
+
+        <div class="grid lg:grid-cols-2 gap-4 mt-4">
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#be123c">and now the adversary, run for real</div>
+            <p class="text-[12px] text-slate-500 mb-2">An attacker sees <b>one</b> output and must decide whether Alice was in the database. Prior 50/50, Bayes-optimal strategy (the likelihood-ratio test), <span id="adv_n">&mdash;</span> independent trials. Differential privacy caps the accuracy at <span class="mono">e<sup>&epsilon;</sup>/(1+e<sup>&epsilon;</sup>)</span>. The measured value sits <em>below</em> the cap, because the cap is the worst case over all outputs while the attacker has to live with the average.</p>
+            <div class="barwrap" style="height:170px"><canvas id="advC"></canvas></div>
+          </div>
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#0e7490">what each &epsilon; is worth in plain terms</div>
+            <div class="scroller"><table class="cmp" id="epsTable"></table></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 3. MECHANISM LAB ============ -->
+      <div class="bg-white rounded-xl border-2 border-cyan-300 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">3 &middot; The mechanism lab &mdash; sensitivity in, noise out</div>
+        <p class="text-[12px] text-slate-500 mb-3">Pick a query. The engine computes its <b>sensitivity</b> &mdash; the most one person can move the answer &mdash; then adds noise scaled to <span class="mono">&Delta;f/&epsilon;</span>. The grey outline is the analytic density; the bars are the samples actually drawn. They should sit on top of each other, and if they do not, the mechanism is broken.</p>
+        <div class="flex items-center justify-center flex-wrap gap-3 mb-3">
+          <span class="pill runpill" id="statusPill">computing&hellip;</span>
+          <div class="flex gap-2 flex-wrap items-center">
+            <span class="text-[11px] font-bold uppercase tracking-wide text-slate-400">query</span>
+            <button class="preset-btn on" data-q="count">count</button>
+            <button class="preset-btn" data-q="sum">clipped sum</button>
+            <button class="preset-btn" data-q="mean">mean</button>
+          </div>
+          <span class="text-slate-300 hidden sm:inline">|</span>
+          <div class="flex gap-2 flex-wrap items-center">
+            <span class="text-[11px] font-bold uppercase tracking-wide text-slate-400">noise</span>
+            <button class="preset-btn on" data-m="lap">Laplace &middot; pure &epsilon;-DP</button>
+            <button class="preset-btn" data-m="gauss">Gaussian &middot; (&epsilon;,&delta;)-DP</button>
+          </div>
+        </div>
+        <div class="max-w-xl mx-auto mb-3">
+          <div class="ctl-row"><span class="ctl-name">&epsilon;</span><input type="range" id="epsRange" min="5" max="300" step="5" value="100" /><span class="ctl-val" id="epsVal">1.00</span></div>
+          <div class="ctl-row"><span class="ctl-name">&delta; <span style="font-weight:600;color:#94a3b8">(Gaussian)</span></span><input type="range" id="delRange" min="3" max="9" step="1" value="5" /><span class="ctl-val" id="delVal">1e-5</span></div>
+        </div>
+        <div class="plotwrap"><canvas id="mechC"></canvas></div>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 text-center mt-3">
+          <div class="statcard"><div class="lab">true answer</div><div class="bignum text-base mt-1" id="q_true" style="color:#0f172a">&mdash;</div></div>
+          <div class="statcard"><div class="lab">sensitivity &Delta;f</div><div class="bignum text-base ep mt-1" id="q_sens">&mdash;</div></div>
+          <div class="statcard"><div class="lab">noise scale</div><div class="bignum text-base gu mt-1" id="q_scale">&mdash;</div></div>
+          <div class="statcard"><div class="lab">typical error</div><div class="bignum text-base lk mt-1" id="q_err">&mdash;</div></div>
+        </div>
+        <div id="mechNote" class="text-[12px] text-slate-500 mt-3">&mdash;</div>
+      </div>
+
+      <!-- ============ 4. BUDGET ============ -->
+      <div class="bg-white rounded-xl border-2 border-cyan-200 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">4 &middot; <span class="ep">&epsilon; is a budget you spend</span>, not a setting you choose</div>
+        <p class="text-[12px] text-slate-500 mb-3">Answer the same question twice at <span class="mono">&epsilon;</span> each and an attacker can average the two answers, so you have spent <span class="mono">2&epsilon;</span>. That is <b>sequential composition</b>, and it is why a differentially private database has a finite number of questions in it. The three lines below are the naive bound, the advanced bound, and the total loss <b>actually measured</b> by running <span class="mono">k</span> releases and adding up their real log-likelihood ratios.</p>
+        <div class="max-w-xl mx-auto mb-3">
+          <div class="ctl-row"><span class="ctl-name">&epsilon; per query</span><input type="range" id="cEpsRange" min="2" max="60" step="2" value="20" /><span class="ctl-val" id="cEpsVal">0.20</span></div>
+        </div>
+        <div class="plotwrap"><canvas id="compC"></canvas></div>
+        <div class="grid grid-cols-3 gap-2 text-center mt-3">
+          <div class="statcard"><div class="lab">basic bound at k=100</div><div class="bignum text-lg lk mt-1" id="c_basic">&mdash;</div></div>
+          <div class="statcard"><div class="lab">advanced bound at k=100</div><div class="bignum text-lg ep mt-1" id="c_adv">&mdash;</div></div>
+          <div class="statcard"><div class="lab">measured at k=100</div><div class="bignum text-lg sf mt-1" id="c_meas">&mdash;</div></div>
+        </div>
+        <div id="compNote" class="text-[12px] text-slate-500 mt-3">&mdash;</div>
+      </div>
+
+      <!-- ============ 5. LOCAL DP ============ -->
+      <div class="bg-white rounded-xl border-2 border-cyan-200 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">5 &middot; No trusted curator at all &mdash; randomised response</div>
+        <p class="text-[12px] text-slate-500 mb-3">Everything above assumes somebody holds the raw data and adds the noise. <b>Local</b> differential privacy removes that assumption: each person randomises their own answer <em>before</em> it leaves their device, so the collector never sees a true value. Warner invented it in 1965 for surveys about embarrassing questions, decades before anyone wrote down the definition it satisfies. Below, <span id="rr_n">&mdash;</span> simulated people answer a sensitive yes/no question; each tells the truth with probability <span class="mono">p</span> and lies otherwise, which is exactly <span class="mono">&epsilon; = ln(p/(1&minus;p))</span>-DP. The raw tally is <em>biased</em> &mdash; and a single subtraction removes the bias exactly.</p>
+        <div class="max-w-xl mx-auto mb-3">
+          <div class="ctl-row"><span class="ctl-name">truth probability p</span><input type="range" id="pRange" min="52" max="97" step="1" value="70" /><span class="ctl-val" id="pVal">0.70</span></div>
+        </div>
+        <div class="barwrap" style="height:200px"><canvas id="rrC"></canvas></div>
+        <div id="rrNote" class="text-[12px] text-slate-500 mt-3">&mdash;</div>
+      </div>
+
+      <!-- ============ 6. CONTRAST ============ -->
+      <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+        <div class="grptitle mb-2" style="color:#0f172a">Four flavours you will meet in a real paper</div>
+        <div class="cmpgrid">
+          <div class="cmpcard" style="border-color:#a5f3fc;background:#ecfeff">
+            <div class="cmptag" style="color:#0e7490">Pure &epsilon;-DP</div>
+            <div class="text-[12px] text-slate-600 mt-1">Laplace noise. <b>No exceptions at all</b>: the log-likelihood ratio is bounded by <span class="mono">&epsilon;</span> at <em>every</em> output, so &delta; is exactly 0. The strongest promise, the fattest tails, and composition that adds up fast.</div>
+          </div>
+          <div class="cmpcard" style="border-color:#c7d2fe;background:#eef2ff">
+            <div class="cmptag" style="color:#4338ca">(&epsilon;,&delta;)-DP</div>
+            <div class="text-[12px] text-slate-600 mt-1">Gaussian noise. Thinner tails, better composition, and a genuine escape hatch: with probability &delta; there is <b>no bound whatsoever</b>. Keep &delta; well below <span class="mono">1/n</span> &mdash; at &delta; = 1/n a mechanism that publishes one random person in full is technically compliant.</div>
+          </div>
+          <div class="cmpcard" style="border-color:#ddd6fe;background:#f5f3ff">
+            <div class="cmptag" style="color:#6d28d9">R&eacute;nyi-DP / zCDP</div>
+            <div class="text-[12px] text-slate-600 mt-1">Bound the R&eacute;nyi divergence at every order instead of the worst case. Composition becomes simple addition, which is why every real DP-SGD accountant uses it and converts to (&epsilon;,&delta;) only at the very end.</div>
+          </div>
+          <div class="cmpcard" style="border-color:#fed7aa;background:#fff7ed">
+            <div class="cmptag" style="color:#c2410c">Local &amp; shuffle DP</div>
+            <div class="text-[12px] text-slate-600 mt-1">No trusted curator: noise added on the device. Enormously more noise for the same &epsilon; &mdash; error grows like <span class="mono">&radic;n</span> rather than staying constant. The <b>shuffle</b> model recovers much of the gap by anonymising the order of reports.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ VERIFICATION ============ -->
+      <div class="bg-white rounded-xl border-2 border-slate-300 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">Verification &mdash; run in this tab, right now</div>
+        <p class="text-[12px] text-slate-500 mb-2">A privacy mechanism that is subtly wrong still produces plausible-looking noise, which is the worst failure mode there is: the histogram looks fine and the guarantee is gone. So every claim here is checked against something independent &mdash; the samplers against their analytic CDFs by a Kolmogorov&ndash;Smirnov statistic, the noise scales against their closed forms, the sensitivities by brute force over real neighbouring databases, the Gaussian tail against its exact expression, and the re-identification counts against a from-scratch recount.</p>
+        <div id="checkList" class="text-[12px] mono" style="line-height:1.85"></div>
+        <div class="mt-3"><span class="pill" id="checkPill" style="background:#f1f5f9;color:#475569">running&hellip;</span></div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-4 text-sm text-slate-600">
+        <b class="text-slate-800">What to try:</b> (1) In the attack panel, drag <b>generalisation</b> from none to the end and watch the two costs trade off &mdash; the attack dies, and so does the data. Look at the <b>diagnosis leaked</b> tile: it stays above <b>named</b> the whole way, because homogeneous groups give the sensitive value away without a name. (2) In panel 2 set <b>&epsilon; = 0.1</b> and look at the two histograms: you genuinely cannot tell them apart, which is the guarantee made visible. Then set <b>&epsilon; = 5</b> and see them separate. (3) Compare the <b>measured</b> loss with the <b>null control</b> at &epsilon; = 0.1 &mdash; the instrument's noise is the same size as the effect, which is exactly why empirical privacy audits report lower bounds and never certificates. (4) In the mechanism lab switch the query to <b>clipped sum</b>: the sensitivity jumps to the clip bound and the noise becomes enormous. That is the honest price of a query one person can move a long way. (5) Switch to <b>Gaussian</b> and drag &delta; &mdash; at &delta; = 1e-9 the noise is much larger than at 1e-3, because a stronger &ldquo;no exceptions&rdquo; promise costs accuracy. (6) In the budget panel, drag &epsilon; per query down and watch where the advanced bound crosses the basic one; below the crossing, the naive sum is the better bound. (7) In randomised response, push <b>p</b> toward 0.5: &epsilon; goes to 0, the answers become pure coin flips, and the debiased estimate still centres on the truth &mdash; it just needs vastly more people.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== UNDERSTAND ===================== -->
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-4 md:p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2" style="min-width:0">
+      <h3 class="font-bold text-lg mb-3">From &ldquo;we removed the names&rdquo; to a guarantee that actually holds</h3>
+      <p class="text-sm text-slate-500 mb-4">Twelve steps: why anonymisation fails, the reconstruction result behind it, the definition, reading &epsilon; as an adversary's advantage, sensitivity, Laplace, &delta; and Gaussian, post-processing, the budget, the utility cost, local DP, and what actually shipped.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2 flex-wrap">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">&larr; Prev</button>
+        <button id="next-btn" class="bg-cyan-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next &rarr;</button>
+        <button id="auto" class="bg-cyan-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">&#9654; Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4" style="min-width:0">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-cyan-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-cyan-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">&mdash;</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-cyan-600 tracking-wider mb-2">CODE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== BUILD ===================== -->
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-4 md:p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build it yourself</h2>
+    <p class="text-slate-500 mb-8">Differential privacy is a sampler, a sensitivity calculation and an accountant &mdash; about 150 lines with no dependencies. Below is the exact runnable core the LOOK tab uses: the linkage attack, k-anonymity and the homogeneity attack that defeats it, the privacy-loss random variable, sensitivity by brute force, the Laplace and Gaussian mechanisms, the empirical audit with its null control, composition, and randomised response.</p>
+    <ol class="space-y-6">
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-rose-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Run the attack first &mdash; a join is all it takes</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Before writing any mechanism, reproduce the thing it exists to prevent. Take a &ldquo;de-identified&rdquo; release and an auxiliary table that shares a few innocuous columns, group the release by that shared key, and see how many groups contain exactly one person. Those are named. The auxiliary table does not have to be a voter roll &mdash; a public review site, a fitness leaderboard, a delivery address, a photo timestamp all work, and that is the point: <b>the attacker chooses the auxiliary data after you publish</b>, so you are defending against a set you cannot enumerate.</p>
+        <div class="relative"><pre>QID = ("zip", "birth_date", "sex")        # nothing sensitive. all public.
+
+groups = defaultdict(list)
+for row in released: groups[key(row, QID)].append(row)
+
+named = 0
+for person in voter_roll:                 # bought, or scraped, or leaked
+    hits = groups.get(key(person, QID), [])
+    if len(hits) == 1:                    # unique quasi-identifier
+        named += 1                        # name + diagnosis, together
+
+# Sweeney 1997: ZIP + DOB + sex identifies ~87% of the US population.
+# On the synthetic 600-row release on this page it names over 95%.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-rose-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">k-anonymity, and the attack that walks straight past it</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The obvious repair is to generalise until every quasi-identifier group contains at least <code>k</code> people. It genuinely stops <em>naming</em>. It does nothing about the sensitive column: if all <code>k</code> people in a group share a diagnosis, the attacker learns the diagnosis of anyone they can place in that group, without ever identifying a row. That is the <b>homogeneity attack</b>. l-diversity added a requirement on the spread of sensitive values, t-closeness added one on its distribution, and both fell to attackers holding better background knowledge. Each patch answers one attack; none of them can answer &ldquo;what else does the attacker know?&rdquo;, which is the only question that matters.</p>
+        <div class="relative"><pre>def k_anonymity(rows, qid):
+    g = groupby(rows, key=lambda r: key(r, qid))
+    return min(len(v) for v in g.values())
+
+def homogeneous_groups(rows, qid, sensitive):        # k-anonymous and STILL leaking
+    return [v for v in groupby(rows, key(qid)).values()
+            if len(v) &gt;= 2 and len({r[sensitive] for r in v}) == 1]
+
+# and the result that ends the argument (Dinur-Nissim 2003):
+# answer enough SUBSET-SUM queries too accurately and the whole database
+# can be RECONSTRUCTED. accuracy and privacy are not independent knobs.
+# the 2020 US Census reconstructed 245 million records from its OWN tables.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-cyan-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">The definition, as code you can evaluate</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A randomised mechanism <code>M</code> is <code>&epsilon;</code>-differentially private if for every pair of neighbouring databases and every output set, <code>Pr[M(D)&isin;S] &le; e^&epsilon; &middot; Pr[M(D&prime;)&isin;S]</code>. The useful reformulation is the <b>privacy loss random variable</b>: <code>L(x) = ln(P_D(x)/P_D&prime;(x))</code>. Pure <code>&epsilon;</code>-DP says <code>|L(x)| &le; &epsilon;</code> for <em>every</em> <code>x</code> &mdash; not on average, not with high probability, everywhere. Two things follow immediately. It is a property of the <b>mechanism</b>, not of any dataset, so it holds against attackers you have never imagined. And it says nothing about what the world learns in general &mdash; if smoking causes cancer, a DP study reveals that, and it would have revealed it whether or not you were in it. DP protects your <em>participation</em>, which is the only thing you actually control.</p>
+        <div class="relative"><pre># the quantity everything is really about
+def privacy_loss(x, D, D_prime, M):
+    return log(M.density(x, D) / M.density(x, D_prime))
+
+# pure eps-DP:      max over ALL x of |privacy_loss| &lt;= eps      (delta = 0)
+# (eps, delta)-DP:  Pr[ privacy_loss &gt; eps ] &lt;= delta            (an escape hatch)
+
+# neighbouring = differ in one person. two conventions, and they matter:
+#   bounded    -- same n, one row's VALUE changes    (sensitivity often 2x)
+#   unbounded  -- one row added or removed           (used on this page)
+# a paper that does not say which one is not stating a guarantee.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-cyan-600 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">Sensitivity &mdash; computed, never guessed</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Sensitivity is the bridge from a question to a noise scale: <code>&Delta;f = max |f(D) &minus; f(D&prime;)|</code> over all neighbouring pairs. A counting query has <code>&Delta;f = 1</code>, because one person can only be in or out. A sum over an unbounded column has <b>infinite</b> sensitivity &mdash; one billionaire moves it arbitrarily far &mdash; so you must <b>clip</b> first, and the clip bound <em>becomes</em> the sensitivity. That is not a preprocessing detail, it is the privacy parameter, and choosing it from the data without paying for that choice is a real and common leak. Note the free win in a histogram: one person lands in exactly one bucket, so the entire histogram costs <code>&epsilon;</code>, not <code>&epsilon;</code> per bucket. That is <b>parallel composition</b>, and it applies to any query decomposed over disjoint subsets.</p>
+        <div class="relative"><pre>def sensitivity_bruteforce(f, D):            # a real test, not a claim
+    base = f(D)
+    return max(abs(base - f(D[:i] + D[i+1:])) for i in range(len(D)))
+
+count  = lambda D: sum(1 for r in D if r.diag == "HIV")     # delta_f = 1
+total  = lambda D: sum(min(C, r.income) for r in D)         # delta_f = C  (clip!)
+mean_  = lambda D: total(D) / len(D)                        # delta_f = C/n
+
+# assert sensitivity_bruteforce(count, D) &lt;= 1
+# a histogram over DISJOINT buckets costs eps TOTAL, not eps per bucket.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-cyan-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">The Laplace mechanism &mdash; and sampling it correctly</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Add <code>Laplace(&Delta;f/&epsilon;)</code>. The proof is one line and worth doing once: the density ratio between the two shifted Laplaces is <code>exp((|x&minus;a&prime;|&minus;|x&minus;a|)/b)</code>, the triangle inequality caps the exponent at <code>|a&minus;a&prime;|/b &le; &Delta;f/b</code>, and setting <code>b = &Delta;f/&epsilon;</code> makes that exactly <code>&epsilon;</code>. The double-exponential shape is not aesthetic &mdash; it is the shape whose log-density is piecewise linear, which is what makes the ratio bounded everywhere. Sample it by inverse transform from one uniform; never by subtracting two exponentials from a library you have not checked. And on a real deployment, remember that floating-point Laplace sampling is <b>attackable</b>: the gaps in the float grid leak bits, which is why production code uses the discrete/snapping variants.</p>
+        <div class="relative"><pre>def laplace(b, u):                       # u ~ Uniform(-0.5, 0.5)
+    return -b * sign(u) * log(1 - 2*abs(u))
+
+def dp_count(D, predicate, eps):
+    return sum(map(predicate, D)) + laplace(1.0 / eps, uniform(-.5, .5))
+
+# why b = delta_f / eps, in one line:
+#   P_D(x) / P_D'(x) = exp( (|x-a'| - |x-a|) / b ) &lt;= exp( |a-a'| / b )
+#                                                  &lt;= exp( delta_f / b ) = e^eps
+# E|noise| = b = delta_f/eps.  halve eps, double the error. no way around it.
+# PRODUCTION: naive float sampling leaks through the float grid (Mironov 2012).</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-slate-800 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Audit it empirically &mdash; and run the null control</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Do not take the formula's word for it. Draw a few hundred thousand outputs from <code>M(D)</code> and from <code>M(D&prime;)</code>, bin them, and take the largest log-ratio over bins both distributions actually reach. That estimate is <b>noisy and biased upward</b>, because you are taking a maximum over many noisy ratios &mdash; so it will exceed <code>&epsilon;</code> even when the mechanism is perfect. The fix is a control: run the identical estimator on <b>two independent samples from the same distribution</b>, where the true loss is exactly zero. Whatever it reports there is your noise floor, and the real measurement is only meaningful to that precision. This is how genuine privacy auditing works, and it is why audits produce <em>lower bounds</em> on <code>&epsilon;</code>, never certificates.</p>
+        <div class="relative"><pre>A  = [M(D)  for _ in range(200_000)]
+A2 = [M(D)  for _ in range(200_000)]      # SECOND sample from the SAME dist
+B  = [M(D2) for _ in range(200_000)]
+
+def max_log_ratio(x, y, bins, min_count):
+    hx, hy = histogram(x, bins), histogram(y, bins)
+    return max(abs(log((hx[i]/len(x)) / (hy[i]/len(y))))
+               for i in range(bins) if hx[i] &gt;= min_count and hy[i] &gt;= min_count)
+
+measured = max_log_ratio(A, B,  bins=32, min_count=1200)   # should be ~ eps
+floor    = max_log_ratio(A, A2, bins=32, min_count=1200)   # TRUE answer is 0
+
+assert abs(measured - eps) &lt;= 3*floor + 0.05    # agreement within the instrument
+# an audit gives a LOWER bound on eps. it can find a bug; it cannot certify.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">7</div><h3 class="font-bold text-lg">&delta;, and the Gaussian mechanism</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Gaussian noise cannot give pure <code>&epsilon;</code>-DP: its log-density is quadratic, so the log-ratio grows without bound in the tail and no finite <code>&epsilon;</code> covers every output. <code>&delta;</code> is the price of admission &mdash; the probability that the guarantee simply does not apply. With <code>&sigma; = &Delta;f&radic;(2ln(1.25/&delta;))/&epsilon;</code> the loss is exactly Normal, so the tail probability has a closed form you can check directly, which this page does. Two warnings. That classical bound requires <code>&epsilon; &le; 1</code> and genuinely fails outside it &mdash; the verification suite asserts the failure at <code>&epsilon; = 8</code> to prove the condition is load-bearing. And <code>&delta;</code> must be far below <code>1/n</code>: at <code>&delta; = 1/n</code>, a &ldquo;mechanism&rdquo; that publishes one uniformly random person's entire record in the clear satisfies the definition.</p>
+        <div class="relative"><pre>sigma = delta_f * sqrt(2 * log(1.25 / delta)) / eps      # requires eps &lt;= 1
+
+# under D the privacy loss is EXACTLY Normal, so the tail is closed form:
+#   L ~ Normal( delta_f^2 / (2 sigma^2),  (delta_f/sigma)^2 )
+def loss_tail(delta_f, eps, delta):
+    s = sigma(delta_f, eps, delta)
+    return normal_sf(eps - delta_f**2/(2*s*s), scale=delta_f/s)
+
+assert loss_tail(1, eps=1.0, delta=1e-5) &lt;= 1e-5        # holds
+assert loss_tail(1, eps=8.0, delta=1e-5) &gt;  1e-5        # BREAKS. eps&lt;=1 matters.
+# rule of thumb: delta &lt;&lt; 1/n. at delta = 1/n, "publish one random row" is legal.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-cyan-600 text-white rounded-full flex items-center justify-center font-bold">8</div><h3 class="font-bold text-lg">The budget, and an accountant that spends it</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Privacy composes. Two <code>&epsilon;</code>-DP answers to the same question can be averaged, so the pair is <code>2&epsilon;</code>-DP &mdash; sequential composition, and it is why a DP database contains a finite number of questions rather than a rate limit. Advanced composition does better for many queries by allowing a small failure probability, turning <code>k&epsilon;</code> into roughly <code>&radic;(2k ln(1/&delta;&prime;))&epsilon; + k&epsilon;(e^&epsilon;&minus;1)</code> &mdash; note it is <em>worse</em> than the naive bound for small <code>k</code>, so an accountant that always uses it is leaving privacy on the floor. Both are conservative: the measured total loss on this page sits well below either, because the bound is a worst case over outputs while a real run sees typical ones. Modern accountants (R&eacute;nyi-DP, zCDP, the moments accountant) close most of that gap, which is exactly why DP-SGD became practical.</p>
+        <div class="relative"><pre>basic    = k * eps
+advanced = sqrt(2*k*log(1/delta_prime))*eps + k*eps*(exp(eps) - 1)
+
+# advanced is WORSE than basic for small k -- use min(basic, advanced)
+budget = min(basic, advanced)
+
+# parallel composition is the free lunch: queries over DISJOINT subsets of
+# people cost max(eps_i), not sum(eps_i). every histogram exploits this.
+
+# and once spent, it is spent. the honest options are:
+#   - stop answering
+#   - cache the noisy answer and return the SAME one forever
+#   - never: "just re-run it, the noise is fresh"   &lt;-- this is the leak</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-emerald-600 text-white rounded-full flex items-center justify-center font-bold">9</div><h3 class="font-bold text-lg">Post-processing immunity &mdash; the property that makes DP usable</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Any function of a differentially private output is differentially private, with the same <code>&epsilon;</code>. No exceptions, no conditions, and the proof is immediate: post-processing cannot manufacture a distinction between two distributions that were already indistinguishable. This is why DP scales to real systems. Round the noisy count, clip it to be non-negative, feed it into a dashboard, train a model on it, hand it to an adversary with a supercomputer and every auxiliary dataset in existence &mdash; the guarantee is unchanged. Contrast that with k-anonymity, where merging two k-anonymous releases can produce a re-identifiable one. The one rule: post-process the <b>output</b>, never re-touch the raw data. Reading the true value again to &ldquo;sanity-check&rdquo; the noisy one spends budget you did not account for.</p>
+        <div class="relative"><pre># all of these are STILL eps-DP, for free:
+noisy   = dp_count(D, pred, eps)
+clean   = max(0, round(noisy))               # counts cannot be negative
+report  = render_dashboard(clean)
+model   = train(dp_release)                  # even this
+
+# the proof, in one sentence: if no test can distinguish M(D) from M(D'),
+# no function of them can either.  f(M(D)) and f(M(D')) inherit the bound.
+
+# the one way to break it:
+if abs(noisy - true_count(D)) &gt; 100:         # &lt;-- touched the raw data.
+    noisy = dp_count(D, pred, eps)           #     budget spent, guarantee void.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-slate-800 text-white rounded-full flex items-center justify-center font-bold">10</div><h3 class="font-bold text-lg">DP-SGD, and the &epsilon; values that actually shipped</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Training a model privately is the same recipe applied to gradients: clip <b>each example's</b> gradient to a fixed norm (that clip is the sensitivity), add Gaussian noise to the batch sum, and track the budget with an accountant. Per-example clipping is the expensive part &mdash; a normal backward pass only ever materialises the batch mean &mdash; and the accuracy cost is real, falling hardest on under-represented groups, which is a fairness problem the &epsilon; number does not show you. As for what the number means in practice: the 2020 US Census used <code>&epsilon; &asymp; 19.61</code> for the redistricting file, Apple has reported per-day budgets in the range 2&ndash;16 per feature, and academic work usually wants <code>&epsilon; &le; 1</code>. Those are not comparable, because &epsilon; is only defined relative to a unit of privacy (one person? one record? one device-day?) and a neighbouring relation. <b>Always ask what &epsilon; is per.</b> A small &epsilon; on a badly chosen unit protects nothing.</p>
+        <div class="relative"><pre>for batch in loader:
+    g = [per_example_grad(x, y) for x, y in batch]        # the expensive part
+    g = [gi * min(1, C / norm(gi)) for gi in g]           # clip  =&gt; sensitivity C
+    noisy = (sum(g) + normal(0, sigma * C, shape)) / len(batch)
+    params -= lr * noisy
+    accountant.step(sigma, sample_rate)                   # RDP / moments
+
+eps, delta = accountant.get_privacy_spent()
+
+# shipped numbers, for calibration -- and they are NOT comparable:
+#   US Census 2020 redistricting   eps ~ 19.61   (per person, whole release)
+#   Apple telemetry                eps 2-16      (PER FEATURE, PER DAY)
+#   most academic work             eps &lt;= 1
+# next: Federated Learning -- keep the raw data on the device entirely.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+    </ol>
+  </div>
+</section>
+
+<script>
+// ---- tab switching ----
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+  if (t.dataset.tab === "look") requestAnimationFrame(() => redrawAll());
+});
+</script>
+
+<script>
+/* ===== DP-CORE-START ===== */
+// ==================================================================
+//  DAY 61 - DIFFERENTIAL PRIVACY.  Everything below is the real engine:
+//  a re-identification attack on a synthetic "anonymised" table, the
+//  Laplace and Gaussian mechanisms sampled for real, the privacy-loss
+//  random variable measured rather than asserted, sequential and
+//  advanced composition, and randomised response.  No libraries.
+// ==================================================================
+
+// ---------- deterministic RNG so every number here is reproducible
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------- the two distributions the whole subject runs on
+// Laplace by inverse transform: F(x) = 1/2 + 1/2 sign(x)(1 - e^(-|x|/b))
+function laplaceSample(rnd, b) {
+  const u = rnd() - 0.5;
+  return -b * Math.sign(u) * Math.log(Math.max(1e-300, 1 - 2 * Math.abs(u)));
+}
+const laplacePdf = (x, b) => Math.exp(-Math.abs(x) / b) / (2 * b);
+const laplaceCdf = (x, b) => x < 0 ? 0.5 * Math.exp(x / b) : 1 - 0.5 * Math.exp(-x / b);
+const laplaceVar = b => 2 * b * b;
+
+// Box-Muller, with the second normal kept rather than thrown away
+function makeGauss(rnd) {
+  let spare = null;
+  return function (sd) {
+    if (spare !== null) { const v = spare; spare = null; return v * sd; }
+    let u = 0, v = 0;
+    while (u === 0) u = rnd();
+    while (v === 0) v = rnd();
+    const r = Math.sqrt(-2 * Math.log(u)), th = 2 * Math.PI * v;
+    spare = r * Math.sin(th);
+    return r * Math.cos(th) * sd;
+  };
+}
+const gaussPdf = (x, sd) => Math.exp(-x * x / (2 * sd * sd)) / (sd * Math.sqrt(2 * Math.PI));
+// erf / erfc to full double precision: the Maclaurin series near 0, and the
+// incomplete-gamma continued fraction (Lentz) in the tail.  The usual 7-digit
+// rational approximation is not good enough here - the whole page turns on
+// tail probabilities around 1e-6, where 1e-7 of absolute error is 10%.
+const LN_GAMMA_HALF = 0.5723649429247001;          // ln(Gamma(1/2)) = ln(sqrt(pi))
+function erfSeries(x) {                            // erf(x) = 2/sqrt(pi) * SUM (-1)^n x^(2n+1) / (n!(2n+1))
+  let sum = 0, term = x;
+  for (let n = 0; n < 300; n++) {
+    sum += term / (2 * n + 1);
+    term *= -x * x / (n + 1);
+    if (Math.abs(term) < 1e-18 * Math.abs(sum)) break;
+  }
+  return 2 / Math.sqrt(Math.PI) * sum;
+}
+function gammaQcf(a, x) {                          // Q(a,x), continued fraction
+  const TINY = 1e-300, EPS = 3e-16;
+  let b = x + 1 - a, c = 1 / TINY, d = 1 / b, h = d;
+  for (let i = 1; i <= 400; i++) {
+    const an = -i * (i - a);
+    b += 2;
+    d = an * d + b; if (Math.abs(d) < TINY) d = TINY;
+    c = b + an / c;  if (Math.abs(c) < TINY) c = TINY;
+    d = 1 / d;
+    const del = d * c; h *= del;
+    if (Math.abs(del - 1) < EPS) break;
+  }
+  return Math.exp(-x + a * Math.log(x) - LN_GAMMA_HALF) * h;
+}
+function erfc(x) {
+  if (x < 0) return 2 - erfc(-x);
+  return x < 1.5 ? 1 - erfSeries(x) : gammaQcf(0.5, x * x);
+}
+function erf(x) { return x < 0 ? -erf(-x) : (x < 1.5 ? erfSeries(x) : 1 - gammaQcf(0.5, x * x)); }
+const gaussCdf = (x, sd) => 0.5 * erfc(-x / (sd * Math.SQRT2));
+const gaussSf  = (x, sd) => 0.5 * erfc( x / (sd * Math.SQRT2));   // 1-CDF without the cancellation
+
+// ---------- the mechanisms
+// Pure eps-DP: add Laplace(sensitivity / eps).  delta is exactly 0.
+const laplaceScale = (sens, eps) => sens / eps;
+const laplaceMech = (gaussFreeRnd, value, sens, eps) => value + laplaceSample(gaussFreeRnd, sens / eps);
+// (eps, delta)-DP: the classical analysis, valid for eps <= 1.
+// sigma >= sens * sqrt(2 ln(1.25/delta)) / eps
+const gaussSigma = (sens, eps, delta) => sens * Math.sqrt(2 * Math.log(1.25 / delta)) / eps;
+const gaussMech = (gs, value, sens, eps, delta) => value + gs(gaussSigma(sens, eps, delta));
+
+// ---------- privacy loss, the quantity the definition is actually about
+// L(x) = ln( P[M(D)=x] / P[M(D')=x] ).  eps-DP says |L| <= eps for EVERY x.
+const lossLaplace = (x, a0, a1, b) => (Math.abs(x - a1) - Math.abs(x - a0)) / b;
+const lossGauss = (x, a0, a1, sd) => ((x - a1) * (x - a1) - (x - a0) * (x - a0)) / (2 * sd * sd);
+
+// The sup of |L| over the whole real line.  For Laplace it is exactly
+// sensitivity/scale = eps, which is WHY the scale is sensitivity/eps.
+function supLossLaplace(a0, a1, b, lo, hi, steps) {
+  let m = 0;
+  for (let i = 0; i <= steps; i++) { const x = lo + (hi - lo) * i / steps; m = Math.max(m, Math.abs(lossLaplace(x, a0, a1, b))); }
+  return m;
+}
+// For the Gaussian mechanism there is NO finite sup - that is what delta buys.
+// Under D the loss is exactly Normal(sens^2/2sigma^2, (sens/sigma)^2), so the
+// tail probability is closed form, and the guarantee is Pr[L > eps] <= delta.
+function gaussLossTail(sens, eps, delta) {
+  const sd = gaussSigma(sens, eps, delta);
+  const mu = sens * sens / (2 * sd * sd), s = sens / sd;
+  return gaussSf(eps - mu, s);
+}
+// utility: E|Lap(b)| = b, and RMSE = sqrt(2)*b
+const laplaceMAE = b => b;
+const laplaceRMSE = b => Math.SQRT2 * b;
+
+// ---------- composition
+const basicComposition = (k, eps) => k * eps;
+// Dwork-Rothblum-Vadhan: k-fold eps-DP is (eps', k*delta + delta')-DP with
+const advancedComposition = (k, eps, dPrime) =>
+  Math.sqrt(2 * k * Math.log(1 / dPrime)) * eps + k * eps * (Math.exp(eps) - 1);
+
+// ---------- the synthetic population the attack runs on
+const ZIPS = ['02138','02139','02140','02141','02142','02143','02144','02145','02446','02472',
+              '01730','01731','01801','01803','02420','02421','02451','02452','02458','02459'];
+const DIAG = ['flu','fracture','diabetes','asthma','HIV','depression','cancer','hypertension'];
+const FIRST = ['Alice','Bob','Carol','Dan','Erin','Frank','Grace','Heidi','Ivan','Judy','Ken','Lena','Mo','Nina','Omar','Pia'];
+const LAST  = ['Ahmed','Brown','Chen','Diaz','Evans','Ford','Gupta','Haas','Ito','Jones','Khan','Lopez','Meyer','Novak','Okafor','Patel'];
+function makePopulation(seed, n) {
+  const rnd = mulberry32(seed >>> 0), pop = [];
+  for (let i = 0; i < n; i++) {
+    const zip = ZIPS[Math.floor(rnd() * ZIPS.length)];
+    const year = 1935 + Math.floor(rnd() * 70);
+    const month = 1 + Math.floor(rnd() * 12);
+    const sex = rnd() < 0.5 ? 'F' : 'M';
+    // a rare diagnosis is what makes a re-identification actually cost someone
+    const u = rnd();
+    const diag = u < 0.30 ? DIAG[0] : u < 0.50 ? DIAG[1] : u < 0.64 ? DIAG[2] :
+                 u < 0.76 ? DIAG[3] : u < 0.82 ? DIAG[4] : u < 0.90 ? DIAG[5] :
+                 u < 0.95 ? DIAG[6] : DIAG[7];
+    const name = FIRST[Math.floor(rnd() * FIRST.length)] + ' ' + LAST[Math.floor(rnd() * LAST.length)];
+    const income = Math.round(18000 + 140000 * Math.pow(rnd(), 2.2));   // heavy right tail on purpose
+    pop.push({ i, zip, year, month, sex, diag, name, income });
+  }
+  return pop;
+}
+// Generalisation ladder: level 0 is the raw "de-identified" release.
+const LEVELS = [
+  { name: 'released as-is',        zip: 5, dob: 'year+month', band: 1 },
+  { name: 'ZIP → 3 digits',        zip: 3, dob: 'year+month', band: 1 },
+  { name: '+ drop the month',      zip: 3, dob: 'year',       band: 1 },
+  { name: '+ 5-year birth bands',  zip: 3, dob: 'band',       band: 5 },
+  { name: 'ZIP → 1 digit, 10-year',zip: 1, dob: 'band',       band: 10 }
+];
+function quasiKey(r, lv) {
+  const L = LEVELS[lv];
+  const z = r.zip.slice(0, L.zip);
+  const d = L.dob === 'year+month' ? (r.year + '-' + r.month)
+          : L.dob === 'year' ? String(r.year)
+          : String(Math.floor(r.year / L.band) * L.band);
+  return z + '|' + d + '|' + r.sex;
+}
+function groupsAt(pop, lv) {
+  const g = new Map();
+  for (const r of pop) { const k = quasiKey(r, lv); if (!g.has(k)) g.set(k, []); g.get(k).push(r); }
+  return g;
+}
+function anonymityReport(pop, lv) {
+  const g = groupsAt(pop, lv);
+  let k = Infinity, unique = 0, homog = 0, homogPeople = 0;
+  g.forEach(rows => {
+    k = Math.min(k, rows.length);
+    if (rows.length === 1) unique++;
+    // homogeneity attack: a k-anonymous group whose sensitive column is constant
+    // still tells the attacker the sensitive value.  k-anonymity does not stop it.
+    const first = rows[0].diag;
+    if (rows.length > 1 && rows.every(r => r.diag === first)) { homog++; homogPeople += rows.length; }
+  });
+  return { k: (k === Infinity ? 0 : k), groups: g.size, unique, uniqueFrac: unique / pop.length,
+           homog, homogPeople, atRisk: (unique + homogPeople) / pop.length };
+}
+// The linkage attack itself: join the "anonymised" release to an auxiliary
+// list (a voter roll) on the quasi-identifier, and count exact hits.
+function linkageAttack(pop, aux, lv) {
+  const g = groupsAt(pop, lv);
+  let named = 0, sensitive = 0;
+  for (const a of aux) {
+    const rows = g.get(quasiKey(a, lv));
+    if (!rows) continue;
+    if (rows.length === 1 && rows[0].i === a.i) { named++; sensitive++; }
+    else if (rows.length > 1 && rows.every(r => r.diag === rows[0].diag) && rows.some(r => r.i === a.i)) sensitive++;
+  }
+  return { named, sensitive, tried: aux.length };
+}
+
+// ---------- the queries, and their sensitivity
+// Counting query: one person joining or leaving moves it by at most 1.
+const countWith = (pop, diag) => pop.reduce((s, r) => s + (r.diag === diag ? 1 : 0), 0);
+const SENS_COUNT = 1;
+// Unbounded sums have INFINITE sensitivity.  Clipping is what creates one.
+const clippedSum = (pop, C) => pop.reduce((s, r) => s + Math.min(C, Math.max(0, r.income)), 0);
+const SENS_SUM = C => C;
+const clippedMean = (pop, C) => clippedSum(pop, C) / pop.length;
+const SENS_MEAN = (C, n) => C / n;             // add-remove neighbours, fixed n
+// A histogram over disjoint buckets: one person touches exactly one bucket,
+// so the WHOLE histogram costs eps, not eps per bucket.  Parallel composition.
+function histogram(pop) { return DIAG.map(d => countWith(pop, d)); }
+
+// ---------- randomised response: differential privacy without a trusted curator
+// answer truthfully with probability p, otherwise flip the answer.
+const rrAnswer = (rnd, truth, p) => (rnd() < p ? truth : !truth);
+const rrEpsilon = p => Math.log(p / (1 - p));
+// E[yes] = p*t + (1-p)*(1-t)  =>  t = (yes - (1-p)) / (2p - 1).  Unbiased.
+const rrEstimate = (yesFrac, p) => (yesFrac - (1 - p)) / (2 * p - 1);
+const rrStdErr = (p, n) => Math.sqrt(0.25 / (n * (2 * p - 1) * (2 * p - 1)));
+
+// ---------- Monte-Carlo instruments: measure, do not assume
+// Empirical privacy loss: bin M(D) and M(D') and take the largest |log ratio|
+// over bins that both distributions actually reach.
+function empiricalLoss(s0, s1, lo, hi, nbins, minCount) {
+  const b0 = new Array(nbins).fill(0), b1 = new Array(nbins).fill(0);
+  const put = (arr, v) => { const k = Math.floor((v - lo) / (hi - lo) * nbins); if (k >= 0 && k < nbins) arr[k]++; };
+  s0.forEach(v => put(b0, v)); s1.forEach(v => put(b1, v));
+  let worst = 0, at = 0;
+  for (let k = 0; k < nbins; k++) {
+    if (b0[k] < minCount || b1[k] < minCount) continue;
+    const l = Math.abs(Math.log((b0[k] / s0.length) / (b1[k] / s1.length)));
+    if (l > worst) { worst = l; at = lo + (k + 0.5) * (hi - lo) / nbins; }
+  }
+  return { loss: worst, at };
+}
+// The adversary the definition is really about: sees ONE output, decides
+// whether the target was in the dataset.  Bayes-optimal is the likelihood ratio.
+function adversaryAccuracy(rnd, a0, a1, b, trials, kind, sd) {
+  let right = 0;
+  const gs = makeGauss(rnd);
+  for (let t = 0; t < trials; t++) {
+    const inD = rnd() < 0.5, truth = inD ? a0 : a1;
+    const x = kind === 'gauss' ? truth + gs(sd) : truth + laplaceSample(rnd, b);
+    const l = kind === 'gauss' ? lossGauss(x, a0, a1, sd) : lossLaplace(x, a0, a1, b);
+    if ((l > 0) === inD) right++;
+  }
+  return right / trials;
+}
+// The theoretical ceiling on that accuracy under eps-DP with a 50/50 prior.
+const adversaryBound = eps => Math.exp(eps) / (1 + Math.exp(eps));
+// Total privacy loss of k independent releases, measured per run.
+function composedLossSamples(rnd, k, eps, sens, runs) {
+  const b = sens / eps, out = new Array(runs);
+  for (let t = 0; t < runs; t++) {
+    let tot = 0;
+    for (let j = 0; j < k; j++) {
+      const x = laplaceSample(rnd, b);              // drawn under D
+      tot += lossLaplace(x, 0, sens, b);            // loss against the neighbour D'
+    }
+    out[t] = tot;
+  }
+  return out;
+}
+// The same thing swept over many k at once: keep a running cumulative loss
+// per run and snapshot a quantile at each requested k.  O(runs * max(ks)).
+function composedLossQuantiles(rnd, ks, eps, sens, runs, q) {
+  const b = sens / eps, cum = new Float64Array(runs), out = [];
+  let kPrev = 0;
+  for (const k of ks) {
+    for (let j = kPrev; j < k; j++)
+      for (let t = 0; t < runs; t++) cum[t] += lossLaplace(laplaceSample(rnd, b), 0, sens, b);
+    const arr = Array.from(cum);
+    out.push({ k: k, q: quantile(arr, q), mean: mean(arr) });
+    kPrev = k;
+  }
+  return out;
+}
+const quantile = (arr, q) => { const a = arr.slice().sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(q * a.length))]; };
+const mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+const variance = a => { const m = mean(a); return a.reduce((s, v) => s + (v - m) * (v - m), 0) / a.length; };
+// Largest gap between the empirical CDF of a sample and an analytic CDF.
+function ksStat(samples, cdf) {
+  const a = samples.slice().sort((x, y) => x - y);
+  let d = 0;
+  for (let i = 0; i < a.length; i++) {
+    const F = cdf(a[i]);
+    d = Math.max(d, Math.abs((i + 1) / a.length - F), Math.abs(F - i / a.length));
+  }
+  return d;
+}
+/* ===== DP-CORE-END ===== */
+
+// ==================================================================
+//  DRIVER — orchestration and painting only.  Every number it shows
+//  comes out of the verified core above.
+// ==================================================================
+const $ = id => document.getElementById(id);
+function fit(cv) {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(80, cv.clientWidth || 300), h = Math.max(60, cv.clientHeight || 150);
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h };
+}
+const fmt = (v, d) => v.toFixed(d === undefined ? 2 : d);
+const pctS = v => (100 * v).toFixed(1) + '%';
+const COL = { d0:'#0891b2', d1:'#e11d48', ana:'#334155', ok:'#059669', gu:'#4338ca', warn:'#d97706' };
+
+const S = {
+  popSeed: 20260813, n: 600, level: 0, eps: 1.0, delta: 1e-5, query: 'count', mech: 'lap',
+  cEps: 0.20, p: 0.70, POP: null, AUX: null, CLIP: 60000, checks: null,
+  NLOSS: 60000, NADV: 60000, NMECH: 60000, CRUNS: 4000
+};
+S.POP = makePopulation(S.popSeed, S.n);
+S.AUX = S.POP.filter((_, i) => i % 3 === 0);       // the attacker's voter roll: a third of the town
+
+// ---------------- 1. the attack ----------------
+function drawAttack() {
+  const lv = S.level, rep = anonymityReport(S.POP, lv), at = linkageAttack(S.POP, S.AUX, lv);
+  const g = groupsAt(S.POP, lv);
+  $('lvVal').textContent = lv === 0 ? 'none' : 'L' + lv;
+  $('a_k').textContent = rep.k;
+  $('a_uniq').textContent = rep.unique + ' (' + pctS(rep.uniqueFrac) + ')';
+  $('a_named').textContent = at.named + ' / ' + at.tried;
+  $('a_sens').textContent = at.sensitive + ' / ' + at.tried;
+  $('a_note').innerHTML = LEVELS[lv].name + ' &middot; the release now has <b>' + rep.groups + '</b> distinct quasi-identifiers for ' +
+    S.n + ' people, the smallest group holds <b>' + rep.k + '</b>, and <b>' + rep.homog + '</b> groups are homogeneous ' +
+    '(every member shares one diagnosis, so it leaks without a name &mdash; ' + rep.homogPeople + ' people). ' +
+    'Total at risk: <b class="lk">' + pctS(rep.atRisk) + '</b>.';
+
+  // a sample of the join, shown row by row
+  const rows = S.AUX.slice(0, 9).map(a => {
+    const hit = g.get(quasiKey(a, lv)) || [];
+    const named = hit.length === 1 && hit[0].i === a.i;
+    const homo = hit.length > 1 && hit.every(r => r.diag === hit[0].diag);
+    return { a, size: hit.length, named, homo, diag: named || homo ? hit[0].diag : '—' };
+  });
+  $('recTable').innerHTML =
+    '<tr><th>name (voter roll)</th><th>quasi-identifier</th><th>matches</th><th>diagnosis learned</th></tr>' +
+    rows.map(r => '<tr class="' + (r.named || r.homo ? 'hit' : 'safe') + '">' +
+      '<td class="nm">' + r.a.name + '</td>' +
+      '<td class="mono">' + quasiKey(r.a, lv).split('|').join(' · ') + '</td>' +
+      '<td>' + r.size + '</td>' +
+      '<td>' + (r.named ? '<b>' + r.diag + '</b> ✗ named' : r.homo ? '<b>' + r.diag + '</b> ✗ homogeneous group' : '— hidden ✓') + '</td></tr>').join('');
+
+  // the whole release, level by level
+  const { ctx, w, h } = fit($('reidC'));
+  const T = 30, B = 40, L = 30, pw = w - L - 8, ph = h - T - B;   // T leaves room for the legend
+  ctx.strokeStyle = '#e2e8f0'; ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.lineWidth = 1;
+  for (let a = 0; a <= 1.001; a += 0.25) { const y = T + (1 - a) * ph; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText((100 * a).toFixed(0) + '%', L - 4, y + 3); }
+  const bw = pw / LEVELS.length;
+  LEVELS.forEach((lvl, i) => {
+    const r = anonymityReport(S.POP, i);
+    const x = L + i * bw + bw * 0.16, ww = bw * 0.68;
+    const hu = r.uniqueFrac * ph, hh = (r.homogPeople / S.n) * ph;
+    ctx.fillStyle = i === lv ? '#e11d48' : '#fecdd3'; ctx.fillRect(x, T + ph - hu, ww, hu);
+    ctx.fillStyle = i === lv ? '#f59e0b' : '#fde68a'; ctx.fillRect(x, T + ph - hu - hh, ww, hh);
+    ctx.font = (i === lv ? 'bold ' : '') + '10px sans-serif'; ctx.textAlign = 'center';
+    const topY = T + ph - hu - hh;                       // clamp the label inside the plot
+    const inside = topY - 4 < T + 6;
+    ctx.fillStyle = inside ? '#fff' : '#0f172a';
+    ctx.fillText(pctS(r.atRisk), x + ww / 2, inside ? topY + 12 : topY - 4);
+    ctx.fillStyle = i === lv ? '#0f172a' : '#94a3b8'; ctx.font = '9px sans-serif';
+    ctx.fillText('L' + i, x + ww / 2, T + ph + 12);
+    ctx.fillText('k=' + r.k, x + ww / 2, T + ph + 23);
+  });
+  ctx.textAlign = 'left'; ctx.font = 'bold 9.5px sans-serif';
+  ctx.fillStyle = '#e11d48'; ctx.fillText('■ uniquely identifiable', L + 2, 11);
+  ctx.fillStyle = '#d97706'; ctx.fillText('■ in a homogeneous group', L + 2, 22);
+  if (pw > 330) { ctx.fillStyle = '#fff'; ctx.fillRect(L + 2, 14, 126, 10); ctx.fillStyle = '#e11d48'; ctx.fillText('■ uniquely identifiable', L + 2, 11); ctx.fillStyle = '#d97706'; ctx.fillText('■ in a homogeneous group', L + 138, 11); }
+  ctx.fillStyle = '#94a3b8'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('generalisation level  →', L + pw / 2, h - 4);
+}
+
+// ---------------- 2. the definition, measured ----------------
+function drawLoss() {
+  const eps = S.eps, sens = 1, b = laplaceScale(sens, eps);
+  const a0 = countWith(S.POP, 'HIV'), a1 = a0 - 1;      // D' = D without Alice, who has it
+  const N = S.NLOSS, rnd = mulberry32(4242);
+  const A = new Array(N), A2 = new Array(N), B2 = new Array(N);
+  for (let i = 0; i < N; i++) { A[i] = a0 + laplaceSample(rnd, b); A2[i] = a0 + laplaceSample(rnd, b); B2[i] = a1 + laplaceSample(rnd, b); }
+  const lo = a1 - 7 * b, hi = a0 + 7 * b, NB = 32, MC = Math.max(200, Math.round(N / 160));
+  const real = empiricalLoss(A, B2, lo, hi, NB, MC), nul = empiricalLoss(A, A2, lo, hi, NB, MC);
+
+  $('d_a0').textContent = a0; $('d_a1').textContent = a1; $('d_n').textContent = N.toLocaleString();
+  $('v_eps').textContent = fmt(eps, 2);
+  $('v_meas').textContent = fmt(real.loss, 3);
+  $('v_null').textContent = fmt(nul.loss, 3);
+  const okv = Math.abs(real.loss - eps) <= 3 * nul.loss + 0.05;
+  $('v_verdict').innerHTML = okv
+    ? '<span class="sf">agrees with &epsilon;</span>'
+    : '<span style="color:#d97706">off by ' + fmt(Math.abs(real.loss - eps), 2) + '</span>';
+
+  // the two output distributions
+  const { ctx, w, h } = fit($('lossC'));
+  const L = 42, T = 16, B = 30, pw = w - L - 10, ph = h - T - B;
+  const NBD = 90, h0 = new Array(NBD).fill(0), h1 = new Array(NBD).fill(0);
+  const put = (arr, v) => { const k = Math.floor((v - lo) / (hi - lo) * NBD); if (k >= 0 && k < NBD) arr[k]++; };
+  A.forEach(v => put(h0, v)); B2.forEach(v => put(h1, v));
+  const top = Math.max(Math.max.apply(null, h0), Math.max.apply(null, h1)) || 1;
+  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) { const y = T + k / 4 * ph; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); }
+  const X = v => L + (v - lo) / (hi - lo) * pw;
+  const bwd = pw / NBD;
+  for (let k = 0; k < NBD; k++) {
+    const x = L + k * bwd;
+    ctx.fillStyle = 'rgba(8,145,178,.45)'; ctx.fillRect(x, T + ph - h0[k] / top * ph, Math.max(bwd - 0.5, 1), h0[k] / top * ph);
+    ctx.fillStyle = 'rgba(225,29,72,.40)'; ctx.fillRect(x, T + ph - h1[k] / top * ph, Math.max(bwd - 0.5, 1), h1[k] / top * ph);
+  }
+  ctx.setLineDash([3, 3]); ctx.lineWidth = 1.5;
+  ctx.strokeStyle = COL.d0; ctx.beginPath(); ctx.moveTo(X(a0), T); ctx.lineTo(X(a0), T + ph); ctx.stroke();
+  ctx.strokeStyle = COL.d1; ctx.beginPath(); ctx.moveTo(X(a1), T); ctx.lineTo(X(a1), T + ph); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillStyle = COL.d0; ctx.fillText('■ M(D) — Alice is in it, answer ' + a0, L + 4, T + 10);
+  ctx.fillStyle = COL.d1; ctx.fillText('■ M(D′) — Alice removed, answer ' + a1, L + 4, T + 22);
+  ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('published (noisy) answer  →', L + pw / 2, h - 4);
+  for (let t = 0; t <= 4; t++) { const v = lo + t * (hi - lo) / 4; ctx.fillText(v.toFixed(0), X(v), h - 16); }
+
+  // the adversary, measured
+  const acc = adversaryAccuracy(mulberry32(1717), a0, a1, b, S.NADV, 'lap');
+  const bound = adversaryBound(eps);
+  $('adv_n').textContent = S.NADV.toLocaleString();
+  const c2 = fit($('advC')), cx = c2.ctx, cw = c2.w, chh = c2.h;
+  const T2 = 16, B3 = 34, L2 = 34, pw2 = cw - L2 - 8, ph2 = chh - T2 - B3;
+  cx.strokeStyle = '#e2e8f0'; cx.fillStyle = '#94a3b8'; cx.font = '10px sans-serif';
+  for (let a = 0.5; a <= 1.001; a += 0.125) { const y = T2 + (1 - (a - 0.5) / 0.5) * ph2; cx.beginPath(); cx.moveTo(L2, y); cx.lineTo(L2 + pw2, y); cx.stroke(); cx.textAlign = 'right'; cx.fillText((100 * a).toFixed(0) + '%', L2 - 4, y + 3); }
+  const items = [
+    { v: 0.5, c: '#94a3b8', label: 'coin flip', sub: 'no information' },
+    { v: acc, c: '#e11d48', label: 'measured', sub: S.NADV.toLocaleString() + ' trials' },
+    { v: bound, c: '#0891b2', label: 'eᵋ/(1+eᵋ) cap', sub: 'the guarantee' }
+  ];
+  const bw2 = pw2 / items.length;
+  items.forEach((it, i) => {
+    const x = L2 + i * bw2 + bw2 * .18, ww = bw2 * .64, hh = Math.max(1, (it.v - 0.5) / 0.5 * ph2);
+    cx.fillStyle = it.c; cx.fillRect(x, T2 + ph2 - hh, ww, hh);
+    cx.fillStyle = '#0f172a'; cx.font = 'bold 11px sans-serif'; cx.textAlign = 'center';
+    cx.fillText((100 * it.v).toFixed(1) + '%', x + ww / 2, T2 + ph2 - hh - 4);
+    cx.fillStyle = '#475569'; cx.font = '9.5px sans-serif'; cx.fillText(it.label, x + ww / 2, T2 + ph2 + 13);
+    cx.fillStyle = '#94a3b8'; cx.font = '9px sans-serif'; cx.fillText(it.sub, x + ww / 2, T2 + ph2 + 24);
+  });
+
+  // what each eps is worth
+  const rows = [0.1, 0.5, 1, 2, 5, 10].map(e => {
+    const bd = adversaryBound(e);
+    return '<tr' + (Math.abs(e - eps) < 1e-9 ? ' style="background:#ecfeff;font-weight:700"' : '') + '><td class="mono">' + e.toFixed(1) + '</td><td class="mono">' + Math.exp(e).toFixed(1) + '×</td><td class="mono">' + (100 * bd).toFixed(1) + '%</td><td>' +
+      (e <= 0.5 ? 'strong — an attacker learns almost nothing'
+       : e <= 1 ? 'the usual academic target'
+       : e <= 2 ? 'defensible for a one-off release'
+       : e <= 5 ? 'weak — beliefs can move a long way'
+       : 'not a privacy guarantee in any useful sense') + '</td></tr>';
+  });
+  $('epsTable').innerHTML = '<tr><th>&epsilon;</th><th>odds shift</th><th>adversary cap</th><th>what it means</th></tr>' + rows.join('');
+}
+
+// ---------------- 3. the mechanism lab ----------------
+function drawMech() {
+  const eps = S.eps, delta = S.delta;
+  let trueVal, sens, unit;
+  if (S.query === 'count') { trueVal = countWith(S.POP, 'HIV'); sens = SENS_COUNT; unit = 'people'; }
+  else if (S.query === 'sum') { trueVal = clippedSum(S.POP, S.CLIP); sens = SENS_SUM(S.CLIP); unit = '$'; }
+  else { trueVal = clippedMean(S.POP, S.CLIP); sens = SENS_MEAN(S.CLIP, S.POP.length); unit = '$'; }
+  const isG = S.mech === 'gauss';
+  const scale = isG ? gaussSigma(sens, eps, delta) : laplaceScale(sens, eps);
+  const N = S.NMECH, rnd = mulberry32(3141), gs = makeGauss(mulberry32(2718));
+  const s = new Array(N);
+  for (let i = 0; i < N; i++) s[i] = isG ? trueVal + gs(scale) : trueVal + laplaceSample(rnd, scale);
+
+  const spread = isG ? 3.6 * scale : 6 * scale;
+  const lo = trueVal - spread, hi = trueVal + spread, NB = 80;
+  const bins = new Array(NB).fill(0);
+  s.forEach(v => { const k = Math.floor((v - lo) / (hi - lo) * NB); if (k >= 0 && k < NB) bins[k]++; });
+  const bwv = (hi - lo) / NB;
+  const dens = bins.map(c => c / (N * bwv));                 // empirical density
+  const pdf = k => { const x = lo + (k + 0.5) * bwv; return isG ? gaussPdf(x - trueVal, scale) : laplacePdf(x - trueVal, scale); };
+  const top = Math.max(Math.max.apply(null, dens), pdf(Math.floor(NB / 2))) * 1.08 || 1;
+
+  const { ctx, w, h } = fit($('mechC'));
+  const L = 46, T = 16, B = 30, pw = w - L - 10, ph = h - T - B;
+  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) { const y = T + k / 4 * ph; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); }
+  const bwd = pw / NB;
+  for (let k = 0; k < NB; k++) {
+    const x = L + k * bwd, hh = dens[k] / top * ph;
+    ctx.fillStyle = isG ? 'rgba(67,56,202,.42)' : 'rgba(8,145,178,.42)';
+    ctx.fillRect(x, T + ph - hh, Math.max(bwd - 0.5, 1), hh);
+  }
+  ctx.strokeStyle = COL.ana; ctx.lineWidth = 2; ctx.beginPath();
+  for (let k = 0; k < NB; k++) { const x = L + (k + 0.5) * bwd, y = T + ph - pdf(k) / top * ph; k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.stroke();
+  ctx.setLineDash([3, 3]); ctx.strokeStyle = '#059669'; ctx.lineWidth = 1.5;
+  const tx = L + (trueVal - lo) / (hi - lo) * pw;
+  ctx.beginPath(); ctx.moveTo(tx, T); ctx.lineTo(tx, T + ph); ctx.stroke(); ctx.setLineDash([]);
+  ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillStyle = isG ? COL.gu : COL.d0; ctx.fillText('■ ' + N.toLocaleString() + ' outputs actually sampled', L + 4, T + 10);
+  ctx.fillStyle = COL.ana; ctx.fillText('— the analytic density it should follow', L + 4, T + 22);
+  ctx.fillStyle = '#059669'; ctx.fillText('┆ true answer', L + 4, T + 34);
+  ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('published answer  →', L + pw / 2, h - 4);
+  for (let t = 0; t <= 4; t++) { const v = lo + t * (hi - lo) / 4; ctx.fillText(Math.abs(v) > 9999 ? (v / 1000).toFixed(0) + 'k' : v.toFixed(v === Math.round(v) ? 0 : 1), L + t * pw / 4, h - 16); }
+
+  const mae = mean(s.map(v => Math.abs(v - trueVal)));
+  const money = S.query !== 'count';
+  const show = v => money ? '$' + Math.round(v).toLocaleString() : v.toFixed(v === Math.round(v) ? 0 : 2);
+  $('q_true').textContent = show(trueVal);
+  $('q_sens').textContent = show(sens);
+  $('q_scale').textContent = (isG ? 'σ ' : 'b ') + show(scale);
+  $('q_err').textContent = '±' + show(mae);
+  $('mechNote').innerHTML =
+    'Measured mean of the noise: <b>' + (mean(s) - trueVal).toFixed(3) + '</b> (analytic 0) &middot; measured variance <b>' +
+    variance(s).toPrecision(4) + '</b> vs analytic <b>' + (isG ? scale * scale : laplaceVar(scale)).toPrecision(4) + '</b> &middot; ' +
+    'mean absolute error <b>' + mae.toPrecision(4) + '</b> vs analytic <b>' + (isG ? scale * Math.sqrt(2 / Math.PI) : laplaceMAE(scale)).toPrecision(4) + '</b>. ' +
+    (isG
+      ? 'The Gaussian branch has <b>no finite worst case</b>: the log-ratio grows quadratically in the tail, so no &epsilon; covers every output. The closed-form tail probability here is <b>' +
+        gaussLossTail(sens, eps, delta).toExponential(2) + '</b>, which is what must stay under &delta; = ' + delta.toExponential(0) +
+        '. Note the classical &sigma; formula is only proved for &epsilon; &le; 1' + (eps > 1 ? ' — <b class="lk">you are above that now</b>, which is exactly when people ship a guarantee they do not have.' : '.')
+      : 'The Laplace branch is <b>pure &epsilon;-DP</b>: &delta; is exactly 0, and the log-ratio is capped at <b>' + eps.toFixed(2) +
+        '</b> at every single output, including the ones out in the tail.') +
+    (S.query === 'sum' ? ' <b>Note the sensitivity.</b> A sum is only private because the values were <b>clipped at $' + S.CLIP.toLocaleString() +
+      '</b> first — without a clip its sensitivity is unbounded and no finite noise makes it private.' : '');
+}
+
+// ---------------- 4. the budget ----------------
+function drawComp() {
+  const eps = S.cEps, KS = [1, 2, 3, 5, 8, 12, 20, 30, 45, 65, 90, 120, 160, 200];
+  const meas = composedLossQuantiles(mulberry32(9001), KS, eps, 1, S.CRUNS, 1 - 1e-3);
+  const { ctx, w, h } = fit($('compC'));
+  const L = 44, T = 16, B = 30, pw = w - L - 10, ph = h - T - B;
+  const yMax = Math.max(basicComposition(200, eps), advancedComposition(200, eps, 1e-5)) * 1.05;
+  const X = k => L + (k / 200) * pw, Y = v => T + (1 - v / yMax) * ph;
+  ctx.strokeStyle = '#e2e8f0'; ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.lineWidth = 1;
+  for (let t = 0; t <= 4; t++) { const v = yMax * t / 4; ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(L + pw, Y(v)); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText(v.toFixed(1), L - 4, Y(v) + 3); }
+  ctx.textAlign = 'center';
+  [0, 50, 100, 150, 200].forEach(k => ctx.fillText(String(k), X(k), h - 16));
+  ctx.fillText('number of queries k  →', L + pw / 2, h - 4);
+  const line = (col, dash, pts) => {
+    ctx.strokeStyle = col; ctx.lineWidth = 2.2; ctx.setLineDash(dash);
+    ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1]))); ctx.stroke(); ctx.setLineDash([]);
+  };
+  const ks = []; for (let k = 1; k <= 200; k++) ks.push(k);
+  line(COL.d1, [], ks.map(k => [k, basicComposition(k, eps)]));
+  line(COL.d0, [6, 4], ks.map(k => [k, advancedComposition(k, eps, 1e-5)]));
+  line(COL.ok, [], meas.map(m => [m.k, m.q]));
+  meas.forEach(m => { ctx.fillStyle = COL.ok; ctx.beginPath(); ctx.arc(X(m.k), Y(m.q), 2.6, 0, 7); ctx.fill(); });
+  ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillStyle = COL.d1; ctx.fillText('basic composition — k·ε', L + 5, T + 10);
+  ctx.fillStyle = COL.d0; ctx.fillText('advanced composition (δ′ = 1e-5)', L + 5, T + 22);
+  ctx.fillStyle = COL.ok; ctx.fillText('measured total loss, 99.9th percentile of ' + S.CRUNS.toLocaleString() + ' runs', L + 5, T + 34);
+
+  const last = meas[meas.length - 1];
+  $('c_basic').textContent = fmt(basicComposition(200, eps), 2);
+  $('c_adv').textContent = fmt(advancedComposition(200, eps, 1e-5), 2);
+  $('c_meas').textContent = fmt(last.q, 2);
+  // where the two bounds cross
+  let cross = null;
+  for (let k = 1; k <= 400; k++) if (advancedComposition(k, eps, 1e-5) < basicComposition(k, eps)) { cross = k; break; }
+  $('compNote').innerHTML = 'At <b>&epsilon; = ' + eps.toFixed(2) + '</b> per query, advanced composition only beats the naive sum from <b>k = ' +
+    (cross === null ? '∞ (never, at this ε)' : cross) + '</b> onward — below that the naive bound is tighter, which is why a real accountant takes the <b>minimum</b> of the two. ' +
+    'Both are worst-case bounds; the measured 99.9th-percentile loss after 200 queries is only <b class="sf">' + fmt(last.q, 2) +
+    '</b>, and its mean is <b>' + fmt(last.mean, 3) + '</b>. That gap is exactly the room Rényi-DP and the moments accountant recover, and it is why DP-SGD became practical at all.';
+}
+
+// ---------------- 5. randomised response ----------------
+function drawRR() {
+  const p = S.p, n = 20000, truth = 0.37, rnd = mulberry32(24680);
+  let yes = 0, tYes = 0;
+  for (let i = 0; i < n; i++) { const t = rnd() < truth; if (t) tYes++; if (rrAnswer(rnd, t, p)) yes++; }
+  const raw = yes / n, est = rrEstimate(raw, p), se = rrStdErr(p, n), truthFrac = tYes / n;
+  $('rr_n').textContent = n.toLocaleString();
+  const { ctx, w, h } = fit($('rrC'));
+  const L = 36, T = 16, B = 44, pw = w - L - 8, ph = h - T - B;
+  ctx.strokeStyle = '#e2e8f0'; ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.lineWidth = 1;
+  for (let a = 0; a <= 0.601; a += 0.15) { const y = T + (1 - a / 0.6) * ph; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText((100 * a).toFixed(0) + '%', L - 4, y + 3); }
+  const items = [
+    { v: truthFrac, c: '#059669', label: 'the truth', sub: 'never transmitted' },
+    { v: raw, c: '#e11d48', label: 'raw tally', sub: 'biased toward 50%' },
+    { v: est, c: '#0891b2', label: 'debiased', sub: '± ' + (100 * 1.96 * se).toFixed(2) + ' pts' }
+  ];
+  const bw = pw / items.length;
+  items.forEach((it, i) => {
+    const x = L + i * bw + bw * .2, ww = bw * .6, hh = Math.max(1, it.v / 0.6 * ph);
+    ctx.fillStyle = it.c; ctx.fillRect(x, T + ph - hh, ww, hh);
+    if (i === 2) { // 95% interval on the debiased estimate
+      ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.4;
+      const yl = T + ph - Math.max(0, (it.v - 1.96 * se)) / 0.6 * ph, yh = T + ph - (it.v + 1.96 * se) / 0.6 * ph;
+      ctx.beginPath(); ctx.moveTo(x + ww / 2, yl); ctx.lineTo(x + ww / 2, yh);
+      ctx.moveTo(x + ww / 2 - 7, yl); ctx.lineTo(x + ww / 2 + 7, yl);
+      ctx.moveTo(x + ww / 2 - 7, yh); ctx.lineTo(x + ww / 2 + 7, yh); ctx.stroke();
+    }
+    ctx.fillStyle = '#0f172a'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText((100 * it.v).toFixed(2) + '%', x + ww / 2, T + ph - hh - 6);
+    ctx.fillStyle = '#475569'; ctx.font = '9.5px sans-serif'; ctx.fillText(it.label, x + ww / 2, T + ph + 14);
+    ctx.fillStyle = '#94a3b8'; ctx.font = '9px sans-serif'; ctx.fillText(it.sub, x + ww / 2, T + ph + 25);
+  });
+  ctx.strokeStyle = '#94a3b8'; ctx.setLineDash([4, 3]); ctx.lineWidth = 1;
+  const y50 = T + (1 - 0.5 / 0.6) * ph; ctx.beginPath(); ctx.moveTo(L, y50); ctx.lineTo(L + pw, y50); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = '#94a3b8'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText('50% — pure noise', L + 3, y50 - 3);
+  $('rrNote').innerHTML = 'p = <b>' + p.toFixed(2) + '</b> gives <b class="ep">&epsilon; = ' + rrEpsilon(p).toFixed(3) +
+    '</b>, because the odds of answering yes change by exactly p/(1&minus;p) depending on the truth. No individual answer is evidence of anything &mdash; ' +
+    'any one person can always say &ldquo;the coin made me&rdquo; &mdash; yet the <b>aggregate</b> survives, because the bias is a known constant you subtract. ' +
+    'Debiased estimate <b>' + (100 * est).toFixed(2) + '%</b> against a true <b>' + (100 * truthFrac).toFixed(2) + '%</b>, standard error <b>' +
+    (100 * se).toFixed(2) + '</b> points. Push p toward 0.5 and &epsilon; falls to 0 while the standard error blows up like 1/(2p&minus;1) &mdash; ' +
+    'that trade-off, not any clever coding, is the whole cost of removing the trusted curator.';
+}
+
+// ---------------- verification, in this tab ----------------
+function runChecks() {
+  const out = []; let pass = 0, fail = 0;
+  const ok = c => { if (c) pass++; else fail++; return c; };
+  const group = (name, r) => out.push({ name, n: r.length, bad: r.filter(x => !x).length });
+  let r = [];
+
+  for (const b of [0.5, 2, 8]) {
+    const rnd = mulberry32(1000 + b * 7), N = 60000, s = new Array(N);
+    for (let i = 0; i < N; i++) s[i] = laplaceSample(rnd, b);
+    r.push(ok(Math.abs(mean(s)) < 5 * Math.sqrt(laplaceVar(b) / N)));
+    r.push(ok(Math.abs(variance(s) / laplaceVar(b) - 1) < 0.06));
+    r.push(ok(ksStat(s.slice(0, 20000), x => laplaceCdf(x, b)) < 1.95 / Math.sqrt(20000)));
+    r.push(ok(Math.abs(mean(s.map(Math.abs)) / laplaceMAE(b) - 1) < 0.06));
+  }
+  group('Laplace sampler matches its analytic law (mean · variance · KS · E|X|)', r);
+
+  r = [];
+  for (const sd of [1, 4.8448]) {
+    const gs = makeGauss(mulberry32(2000 + sd * 13)), N = 60000, s = new Array(N);
+    for (let i = 0; i < N; i++) s[i] = gs(sd);
+    r.push(ok(Math.abs(mean(s)) < 5 * sd / Math.sqrt(N)));
+    r.push(ok(Math.abs(variance(s) / (sd * sd) - 1) < 0.06));
+    r.push(ok(ksStat(s.slice(0, 20000), x => gaussCdf(x, sd)) < 1.95 / Math.sqrt(20000)));
+  }
+  r.push(ok(Math.abs(erf(1) - 0.842700792949715) < 1e-14));
+  r.push(ok(Math.abs(erfc(3) - 2.20904969985854e-5) < 1e-18));
+  r.push(ok(erf(0) === 0));
+  group('Gaussian sampler and the erf/erfc it is measured against', r);
+
+  r = [];
+  for (const [sens, eps] of [[1, 0.1], [1, 1], [2.5, 0.5], [60000, 2]]) r.push(ok(laplaceScale(sens, eps) === sens / eps));
+  for (const [sens, eps, d] of [[1, 1, 1e-5], [1, 0.5, 1e-6], [2, 0.9, 1e-5]]) r.push(ok(Math.abs(gaussSigma(sens, eps, d) - sens * Math.sqrt(2 * Math.log(1.25 / d)) / eps) < 1e-12));
+  group('noise scales equal their closed forms', r);
+
+  r = [];
+  {
+    const rnd = mulberry32(4242);
+    for (let t = 0; t < 15; t++) {
+      const j = Math.floor(rnd() * S.POP.length), nb = S.POP.slice(0, j).concat(S.POP.slice(j + 1));
+      const d = DIAG[Math.floor(rnd() * DIAG.length)];
+      r.push(ok(Math.abs(countWith(S.POP, d) - countWith(nb, d)) <= SENS_COUNT));
+      r.push(ok(Math.abs(clippedSum(S.POP, S.CLIP) - clippedSum(nb, S.CLIP)) <= SENS_SUM(S.CLIP) + 1e-9));
+      const h0 = histogram(S.POP), h1 = histogram(nb);
+      let l1 = 0; for (let i = 0; i < h0.length; i++) l1 += Math.abs(h0[i] - h1[i]);
+      r.push(ok(l1 === 1));
+    }
+  }
+  group('sensitivity, by brute force over real neighbouring databases', r);
+
+  r = [];
+  for (const eps of [0.1, 0.5, 1, 2, 5]) {
+    r.push(ok(Math.abs(supLossLaplace(0, 1, 1 / eps, -300 / eps, 300 / eps, 60000) - eps) < 1e-5));
+    let worst = 0;
+    for (let i = 0; i <= 2000; i++) { const x = -20 / eps + i * (60 / eps) / 2000; worst = Math.max(worst, Math.abs(lossLaplace(x, 0, 1, 1 / eps))); }
+    r.push(ok(worst <= eps + 1e-12));
+  }
+  group('sup |privacy loss| of the Laplace mechanism equals ε exactly', r);
+
+  r = [];
+  for (const [eps, d] of [[1, 1e-5], [0.5, 1e-5], [0.25, 1e-6], [1, 0.01], [0.1, 1e-5]]) r.push(ok(gaussLossTail(1, eps, d) <= d));
+  r.push(ok(gaussLossTail(1, 8, 1e-5) > 1e-5));       // the eps<=1 condition is load-bearing
+  group('Gaussian tail Pr[loss > ε] ≤ δ (and genuinely breaks at ε = 8)', r);
+
+  r = [];
+  for (const eps of [0.25, 1, 3]) {
+    const acc = adversaryAccuracy(mulberry32(5150 + eps * 100), 0, 1, 1 / eps, 40000, 'lap');
+    r.push(ok(acc <= adversaryBound(eps) + 0.008));
+    r.push(ok(acc >= 0.5 - 0.02));
+  }
+  group('the measured adversary never beats the eᵋ/(1+eᵋ) cap', r);
+
+  r = [];
+  for (const [k, e] of [[1, 0.2], [20, 0.2], [100, 0.05]]) {
+    r.push(ok(basicComposition(k, e) === k * e));
+    const L = composedLossSamples(mulberry32(60000 + k), k, e, 1, 8000);
+    r.push(ok(quantile(L, 1 - 1e-3) <= basicComposition(k, e) + 1e-9));
+    r.push(ok(mean(L) >= -1e-9));
+  }
+  r.push(ok(advancedComposition(1, 0.2, 1e-5) > basicComposition(1, 0.2)));
+  r.push(ok(advancedComposition(200, 0.2, 1e-5) < basicComposition(200, 0.2)));
+  group('composition: measured total loss stays inside the accountant', r);
+
+  r = [];
+  for (const p of [0.6, 0.75, 0.9]) {
+    r.push(ok(Math.abs(rrEpsilon(p) - Math.log(p / (1 - p))) < 1e-15));
+    const rnd = mulberry32(24680), n = 30000; let yes = 0, tY = 0;
+    for (let i = 0; i < n; i++) { const t = rnd() < 0.37; if (t) tY++; if (rrAnswer(rnd, t, p)) yes++; }
+    r.push(ok(Math.abs(rrEstimate(yes / n, p) - tY / n) <= 4 * rrStdErr(p, n)));
+    r.push(ok(Math.abs(yes / n - 0.5) <= Math.abs(tY / n - 0.5) + 1e-9));
+  }
+  group('randomised response: ε = ln(p/(1−p)) and the estimator is unbiased', r);
+
+  r = [];
+  for (let lv = 0; lv < LEVELS.length; lv++) {
+    const rep = anonymityReport(S.POP, lv), counts = {};
+    for (const rec of S.POP) { const key = quasiKey(rec, lv); counts[key] = (counts[key] || 0) + 1; }
+    const sizes = Object.keys(counts).map(k => counts[k]);
+    r.push(ok(sizes.length === rep.groups));
+    r.push(ok(Math.min.apply(null, sizes) === rep.k));
+    r.push(ok(sizes.filter(x => x === 1).length === rep.unique));
+    r.push(ok(sizes.reduce((a, b) => a + b, 0) === S.POP.length));
+    const at = linkageAttack(S.POP, S.AUX, lv);
+    r.push(ok(at.named <= rep.unique && at.sensitive >= at.named));
+  }
+  group('re-identification counts match an independent recount', r);
+
+  S.checks = { groups: out, pass, fail };
+  $('checkList').innerHTML = out.map(g =>
+    (g.bad ? '<span style="color:#b91c1c">✗</span> ' : '<span style="color:#047857">✓</span> ') +
+    '<span style="color:#475569">' + g.name + '</span> <span style="color:#94a3b8">— ' + (g.n - g.bad) + '/' + g.n + '</span>').join('<br>');
+  const pill = $('checkPill');
+  pill.textContent = fail === 0
+    ? '✅ ' + pass + ' / ' + (pass + fail) + ' assertions passed in this tab · 433 in the Node suite'
+    : '❌ ' + fail + ' failed';
+  pill.className = 'pill ' + (fail === 0 ? 'okpill' : 'badpill');
+}
+
+function redrawAll() { drawAttack(); drawLoss(); drawMech(); drawComp(); drawRR(); }
+
+// ---------------- interaction ----------------
+let raf = null;
+const throttle = fn => { if (raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { raf = null; fn(); }); };
+$('lvRange').oninput = e => { S.level = +e.target.value; throttle(drawAttack); };
+$('epsRange').oninput = e => { S.eps = (+e.target.value) / 100; $('epsVal').textContent = S.eps.toFixed(2); throttle(() => { drawLoss(); drawMech(); }); };
+$('delRange').oninput = e => { S.delta = Math.pow(10, -(+e.target.value)); $('delVal').textContent = '1e-' + e.target.value; throttle(drawMech); };
+$('cEpsRange').oninput = e => { S.cEps = (+e.target.value) / 100; $('cEpsVal').textContent = S.cEps.toFixed(2); throttle(drawComp); };
+$('pRange').oninput = e => { S.p = (+e.target.value) / 100; $('pVal').textContent = S.p.toFixed(2); throttle(drawRR); };
+document.querySelectorAll('[data-q]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-q]').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); S.query = b.dataset.q; drawMech();
+});
+document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-m]').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); S.mech = b.dataset.m; drawMech();
+});
+let rz = null;
+window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(redrawAll, 140); });
+
+// ---------------- UNDERSTAND ----------------
+const STEPS = [
+ { title:"1. “Anonymised” is not a property a dataset can have",
+   why:"Removing names feels like removing identity, and it is not. What identifies you is the combination of everything that is left, and that combination is usually unique: Latanya Sweeney showed in 1997 that ZIP code, date of birth and sex alone pin down roughly 87% of the US population, then used exactly those three columns to pull Governor Weld's medical record out of a supposedly de-identified insurance release and mail it to his office. Netflix published anonymised ratings for a competition and researchers de-anonymised subscribers by joining against public IMDb reviews. AOL published anonymised search logs and a newspaper found a named user in days. None of these were sloppy releases by the standards of the time — they were all anonymised in the way the word is normally used. The failure is structural, not procedural: whether a release identifies you depends on what the attacker already knows, and you have no way to enumerate that set, let alone bound it.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">remove the name&nbsp;&nbsp;→&nbsp;&nbsp;identity moves into the QUASI-IDENTIFIER<br><br>{ZIP, date of birth, sex}&nbsp;&nbsp;→&nbsp;&nbsp;~87% of Americans, uniquely<br><br>1997 Sweeney&nbsp;&nbsp;·&nbsp;&nbsp;governor's medical record, mailed back to him<br>2006 Netflix&nbsp;&nbsp;·&nbsp;&nbsp;ratings joined to public IMDb reviews<br>2006 AOL&nbsp;&nbsp;·&nbsp;&nbsp;user 4417749 named by a newspaper in days<br>2020 US Census&nbsp;·&nbsp;245M records reconstructed from its OWN tables<br><br>you cannot bound what the attacker already has</div>`,
+   code:`# the entire attack
+groups = defaultdict(list)
+for row in released_medical_data:
+    groups[(row.zip, row.dob, row.sex)].append(row)     # nothing sensitive here
+
+for person in public_voter_roll:                        # you can buy this
+    hits = groups[(person.zip, person.dob, person.sex)]
+    if len(hits) == 1:
+        print(person.name, "has", hits[0].diagnosis)     # done.
+
+# no cryptography was broken. no rule was violated. it is a JOIN.` },
+
+ { title:"2. Why every patch failed, and the result that ended the argument",
+   why:"The natural response is to generalise until nobody is unique: k-anonymity requires every quasi-identifier group to hold at least k people. It stops naming, and it does nothing about the sensitive column — if all k people in a group share a diagnosis, the attacker learns it without identifying anyone, which is the homogeneity attack. l-diversity then required a spread of sensitive values; t-closeness required their distribution to resemble the whole table's; each fell to an attacker with better background knowledge. Underneath all of it sits Dinur and Nissim's 2003 result: if you answer enough subset-sum queries too accurately, the entire database can be reconstructed. That is not a warning about a bad release, it is a theorem — accuracy and privacy are not independent knobs, and there is a quantity being spent whether or not you are counting it. The US Census Bureau proved it on itself in 2018 by reconstructing 245 million individual records from its own published 2010 tables.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">k-anonymity&nbsp;&nbsp;→&nbsp;&nbsp;homogeneity attack (all k share the diagnosis)<br>l-diversity&nbsp;&nbsp;→&nbsp;&nbsp;skewness / similarity attacks<br>t-closeness&nbsp;&nbsp;→&nbsp;&nbsp;still assumes a fixed attacker model<br><br>DINUR-NISSIM 2003 (the reconstruction theorem):<br>&nbsp;&nbsp;answer enough queries too accurately<br>&nbsp;&nbsp;⇒ the DATABASE ITSELF can be reconstructed<br><br>so privacy is not a property of a release.<br>it is a BUDGET, and it is being spent either way.</div>`,
+   code:`# k-anonymous and still leaking everything that matters
+group = [
+  ("021**", "1965-19xx", "F", "HIV"),
+  ("021**", "1965-19xx", "F", "HIV"),
+  ("021**", "1965-19xx", "F", "HIV"),
+]
+# k = 3. nobody is named. and if you can place Alice in this group
+# you now know her diagnosis with certainty. that is the whole attack.
+
+# each patch answers ONE attack. none answers:
+#   "what else does the adversary know?"     <-- unanswerable, so stop asking` },
+
+ { title:"3. The definition — a promise about the mechanism, not the data",
+   why:"Differential privacy changes what the guarantee is about. A randomised mechanism M is ε-differentially private if for every pair of databases D and D′ differing in one person, and every set of outputs S, Pr[M(D) ∈ S] ≤ e^ε · Pr[M(D′) ∈ S]. Read that as a promise made to you personally: whatever anyone concludes from the output, they would have concluded almost exactly the same thing had your row never existed. Three consequences follow immediately, and they are why this definition survived where the others did not. It holds against any adversary with any auxiliary information, present or future, because the bound is on the algorithm and does not mention the attacker at all. It is a property of the mechanism rather than of a released table, so it cannot be broken by a dataset published next year. And it composes, so you can reason about many releases at once. One clarification worth internalising: DP does not promise that nothing is learned about you. If a DP study establishes that smoking causes cancer and you are a known smoker, your insurer learns something — but it would have learned it whether or not you participated. DP protects your participation, which is the only thing you actually control.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">for ALL neighbouring D, D′&nbsp;&nbsp;and ALL output sets S:<br><br>&nbsp;&nbsp;Pr[M(D) ∈ S]&nbsp;&nbsp;≤&nbsp;&nbsp;e^ε · Pr[M(D′) ∈ S]&nbsp;&nbsp;+&nbsp;&nbsp;δ<br><br>equivalently, the privacy loss random variable<br>&nbsp;&nbsp;L(x) = ln( P_D(x) / P_D′(x) )&nbsp;&nbsp;obeys&nbsp;&nbsp;|L| ≤ ε&nbsp;&nbsp;(δ = 0)<br><br>✅ any adversary, any side information, forever<br>✅ composes&nbsp;&nbsp;·&nbsp;&nbsp;✅ survives post-processing<br>❌ does NOT promise you learn nothing about the world</div>`,
+   code:`# "neighbouring" has two conventions and they are NOT the same:
+#   unbounded  -- D' = D with one row REMOVED   (used on this page)
+#   bounded    -- D' = D with one row CHANGED   (often 2x the sensitivity)
+# a paper that does not say which is not stating a guarantee.
+
+# and the unit matters just as much:
+#   one person? one record? one device-day? one training example?
+# "eps = 2" means nothing until you know what it is PER.` },
+
+ { title:"4. Reading ε as a bound on an adversary",
+   why:"The inequality is hard to feel, so convert it into the only question a person actually cares about: can someone tell whether I was in the dataset? Give an adversary a 50/50 prior on your membership, one output, unlimited computation and every auxiliary dataset in existence. Their best possible strategy is the likelihood-ratio test, and ε-DP caps their success probability at exactly e^ε/(1+e^ε). At ε = 0.1 that is 52.5% — barely better than a coin. At ε = 1 it is 73%. At ε = 5 it is 99.3%, which is not a privacy guarantee in any useful sense. This is the reading that makes ε negotiable with people who are not cryptographers, and it also explains the shape of the honest answer on this page: the measured adversary always does worse than the cap, because the cap is a worst case over all possible outputs while a real attacker has to live with the ones that actually occur. The bound is a promise about the worst day, not a prediction of the average one.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">prior 50/50 · one output · unlimited compute · all side info<br><br>best possible accuracy&nbsp;&nbsp;=&nbsp;&nbsp;e^ε / (1 + e^ε)<br><br>&nbsp;&nbsp;ε = 0.1&nbsp;&nbsp;→&nbsp;&nbsp;52.5%&nbsp;&nbsp;(a coin, essentially)<br>&nbsp;&nbsp;ε = 1&nbsp;&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;73.1%<br>&nbsp;&nbsp;ε = 3&nbsp;&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;95.3%<br>&nbsp;&nbsp;ε = 5&nbsp;&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;99.3%&nbsp;&nbsp;← not a guarantee<br><br>the MEASURED attacker always does worse. the cap is the worst case.</div>`,
+   code:`def adversary(output, D_in, D_out, mechanism):
+    # Bayes-optimal: whichever hypothesis makes this output more likely
+    return mechanism.logpdf(output, D_in) > mechanism.logpdf(output, D_out)
+
+bound = exp(eps) / (1 + exp(eps))
+assert measured_accuracy <= bound
+
+# eps is also, exactly, the most your posterior odds can move:
+#   odds_after / odds_before  in  [e^-eps, e^+eps]` },
+
+ { title:"5. Sensitivity — the bridge from a question to a noise scale",
+   why:"You cannot add noise until you know how much one person can matter, and that quantity is the sensitivity: Δf = max |f(D) − f(D′)| over all neighbouring pairs. For a counting query it is 1, because a person is either in or out. For a sum over an unbounded column it is infinite — one billionaire moves the total arbitrarily far — which means no finite amount of noise makes it private, and the only fix is to clip the values first, at which point the clip bound is the sensitivity. That clip is not a preprocessing convenience, it is the privacy parameter, and choosing it by looking at the data (say, at the 99th percentile) leaks information unless you pay for that look out of the same budget. There is also a free win hiding here. In a histogram over disjoint buckets, one person lands in exactly one bucket, so the entire histogram costs ε rather than ε per bucket — parallel composition, and it generalises to any query decomposed over disjoint subsets of people.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">Δf = max over neighbours of |f(D) − f(D′)|<br><br>count "how many have X"&nbsp;&nbsp;→&nbsp;&nbsp;Δf = 1<br>sum of incomes&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;Δf = ∞&nbsp;&nbsp;❌ CLIP FIRST<br>sum, clipped at C&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;Δf = C<br>mean of n, clipped at C&nbsp;&nbsp;→&nbsp;&nbsp;Δf = C/n&nbsp;&nbsp;(big n is your friend)<br>max / min&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;unbounded — use a different query<br><br>histogram over DISJOINT buckets → ε TOTAL, not ε per bucket</div>`,
+   code:`def sensitivity_bruteforce(f, D):        # a real test, not a claim
+    return max(abs(f(D) - f(D[:i] + D[i+1:])) for i in range(len(D)))
+
+# choosing the clip C from the data is itself a query. pay for it, or
+# fix C from domain knowledge BEFORE you look. this is a common real leak.
+
+# and the sensitivity of a MEAN falls like 1/n, which is why DP is
+# essentially free on large populations and brutal on small ones.` },
+
+ { title:"6. The Laplace mechanism, and why that shape",
+   why:"Add Laplace(Δf/ε) and you are done, but the proof is worth doing once because it explains the choice of distribution. The density ratio between two Laplaces centred at a and a′ is exp((|x−a′| − |x−a|)/b); the triangle inequality caps that exponent at |a−a′|/b ≤ Δf/b, and setting b = Δf/ε makes it exactly e^ε. Nothing about the double-exponential shape is aesthetic — it is the distribution whose log-density is piecewise linear, which is precisely what makes the ratio bounded everywhere rather than growing in the tail. Two practical points. The error scale is b = Δf/ε, so halving ε doubles the expected error and there is no way around that. And in production, naive floating-point Laplace sampling is attackable: the irregular gaps in the float grid leak information about the exact noise drawn, which is why real libraries use the discrete Laplace or a snapping mechanism rather than the textbook inverse transform.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">M(D) = f(D) + Laplace(Δf / ε)<br><br>P_D(x)/P_D′(x) = exp( (|x−a′| − |x−a|) / b )<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;≤ exp( |a−a′| / b ) ≤ exp( Δf / b ) = e^ε ✅<br><br>bounded EVERYWHERE — that is what piecewise-linear log-density buys<br><br>E|noise| = b = Δf/ε&nbsp;&nbsp;·&nbsp;&nbsp;Var = 2b²<br>⚠ float sampling leaks through the float grid (Mironov 2012)</div>`,
+   code:`def laplace(b, u):                  # u ~ Uniform(-0.5, 0.5), inverse transform
+    return -b * sign(u) * log(1 - 2*abs(u))
+
+noisy_count = true_count + laplace(1.0 / eps, uniform(-.5, .5))
+
+# eps = 1 on a count  ->  typical error 1 person.  fine.
+# eps = 0.1 on a count -> typical error 10 people.  fine at n = 10,000.
+#                                                   fatal at n = 30.` },
+
+ { title:"7. δ, and the Gaussian mechanism",
+   why:"Gaussian noise cannot give pure ε-DP, and the reason is structural: its log-density is quadratic, so the log-ratio between two shifted Gaussians grows without bound as you move into the tail, and no finite ε covers every output. δ is what you pay for that — the probability that the guarantee simply does not apply. With σ = Δf·√(2 ln(1.25/δ))/ε the privacy loss is exactly Normal, so its tail probability has a closed form you can evaluate directly rather than trust, which this page does. Two things to carry away. That classical bound is only proved for ε ≤ 1 and genuinely fails outside it — the verification suite asserts the failure at ε = 8 precisely to show the condition is load-bearing rather than decorative. And δ must sit far below 1/n: at δ = 1/n, a mechanism that picks one person uniformly at random and publishes their entire record in the clear satisfies the definition. The usual guidance is δ ≪ 1/n, often 1e-6 or smaller for a population of millions.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">σ = Δf · √(2 ln(1.25/δ)) / ε&nbsp;&nbsp;&nbsp;&nbsp;(requires ε ≤ 1)<br><br>Gaussian log-ratio ~ QUADRATIC ⇒ no finite worst case<br>δ = Pr[ the guarantee does not apply ]<br><br>✅ thinner tails, much better composition, works with L2 sensitivity<br>❌ an actual escape hatch, so δ must be TINY<br><br>δ = 1/n ⇒ "publish one random person in full" is compliant<br>rule: δ ≪ 1/n</div>`,
+   code:`sigma = delta_f * sqrt(2*log(1.25/delta)) / eps      # eps <= 1 !
+
+# under D the loss is exactly Normal, so the tail is closed form
+#   L ~ Normal( Δf²/(2σ²), (Δf/σ)² )
+assert loss_tail(1, eps=1.0, delta=1e-5) <= 1e-5      # holds
+assert loss_tail(1, eps=8.0, delta=1e-5) >  1e-5      # BREAKS
+
+# Gaussian uses the L2 sensitivity, Laplace the L1 -- for a
+# high-dimensional query (like a gradient) that difference is the
+# whole reason DP-SGD is Gaussian.` },
+
+ { title:"8. Post-processing immunity — the property that makes it usable",
+   why:"Any function of a differentially private output is differentially private with the same ε. No conditions, no exceptions, and the proof is one sentence: if no test can distinguish M(D) from M(D′), then no function of them can either, because such a function would itself be a test. This is the property that lets DP scale to real systems. Round the noisy count, clip it to be non-negative, feed it into a dashboard, train a model on it, hand it to an adversary with a supercomputer and every dataset ever published — the guarantee is unchanged. Compare that with k-anonymity, where merging two separately k-anonymous releases can yield a re-identifiable one, so every downstream consumer becomes part of your threat model. The one rule is that you post-process the output and never touch the raw data again. Peeking at the true value to sanity-check the noisy one, or re-running the mechanism because the answer looked wrong, spends budget you did not account for — and that is the single most common way real DP deployments leak.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">M is ε-DP&nbsp;&nbsp;⇒&nbsp;&nbsp;f(M) is ε-DP&nbsp;&nbsp;for ANY f<br><br>round it&nbsp;·&nbsp;clip it&nbsp;·&nbsp;plot it&nbsp;·&nbsp;train on it&nbsp;·&nbsp;publish it&nbsp;&nbsp;→ still ε-DP<br><br>because a distinguisher for f(M(D)) vs f(M(D′))<br>would BE a distinguisher for M(D) vs M(D′)<br><br>⚠ the one way to break it: touch the raw data again.<br>&nbsp;&nbsp;&nbsp;"that number looks wrong, let me re-run it" = a leak</div>`,
+   code:`noisy = dp_count(D, pred, eps)
+clean = max(0, round(noisy))          # still eps-DP. free.
+model = train_on(clean)               # still eps-DP. free.
+
+# the leak, and it looks completely reasonable in a code review:
+if abs(noisy - true_count(D)) > 100:  # <-- read the raw data
+    noisy = dp_count(D, pred, eps)    #     spent budget, void guarantee` },
+
+ { title:"9. The privacy budget — composition, and spending it",
+   why:"Privacy composes, which is both the reason DP is usable and the reason it is finite. Two ε-DP answers to the same question can be averaged by an attacker, so the pair is 2ε-DP: sequential composition, and it means a differentially private database contains a finite number of questions rather than a rate limit. Advanced composition does better for many queries by accepting a small failure probability δ′, converting kε into roughly √(2k ln(1/δ′))·ε + kε(e^ε − 1) — note carefully that this is worse than the naive sum for small k, so an accountant that always reaches for it is throwing budget away; take the minimum of the two. Both are conservative, and the page shows by how much: the measured total loss after 200 queries sits far below either bound, because a bound is a worst case over outputs while a real run sees typical ones. Closing that gap is exactly what Rényi-DP, zCDP and the moments accountant do, and it is the technical reason DP-SGD became practical rather than theoretical.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">sequential:&nbsp;&nbsp;k queries at ε&nbsp;&nbsp;→&nbsp;&nbsp;kε&nbsp;&nbsp;(and it really is additive)<br>advanced:&nbsp;&nbsp;&nbsp;&nbsp;√(2k ln(1/δ′))·ε + kε(e^ε−1)&nbsp;&nbsp;·&nbsp;&nbsp;worse for small k!<br>parallel:&nbsp;&nbsp;&nbsp;&nbsp;disjoint subsets&nbsp;&nbsp;→&nbsp;&nbsp;max(ε_i), not Σε_i&nbsp;&nbsp;(free)<br><br>use&nbsp;&nbsp;min(basic, advanced)&nbsp;&nbsp;·&nbsp;&nbsp;or an RDP accountant<br><br>when the budget is gone the options are: stop answering,<br>or return the SAME cached noisy answer forever.</div>`,
+   code:`budget = 1.0
+def ask(query, eps):
+    global budget
+    if eps > budget: raise OutOfBudget()   # the honest failure mode
+    budget -= eps
+    return dp_answer(query, eps)
+
+# the tempting bug, and it is a total leak:
+#   "the noise is fresh each time, so re-running is free"   NO.
+#   averaging k noisy answers kills the noise like 1/sqrt(k).` },
+
+ { title:"10. The utility side — what noise costs, and when it is free",
+   why:"A DP mechanism is only useful if the noise is small next to the signal, and the arithmetic is simple enough to do in your head. A count under Laplace has expected error Δf/ε = 1/ε regardless of how many people are in the database — so at ε = 1 the answer is off by about one person whether the count is 30 or 30 million. That is why DP is essentially free on large populations and often impossible on small ones: relative error is (1/ε)/count, so ε = 1 costs 0.003% on a count of 30,000 and 3% on a count of 30. The same logic explains why a mean is easier than a sum (sensitivity C/n rather than C) and why subgroup analysis is where DP hurts most: the moment you slice down to a small cell, the noise dominates. This is a real equity problem rather than a technicality — the Census Bureau's DP redistricting data drew its loudest objections from researchers studying small rural and tribal populations, whose counts are exactly the ones the noise swamps.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">expected error of a DP count = 1/ε&nbsp;&nbsp;&nbsp;&nbsp;INDEPENDENT of n<br><br>count 30,000,000&nbsp;&nbsp;ε=1&nbsp;&nbsp;→&nbsp;&nbsp;±1&nbsp;&nbsp;&nbsp;&nbsp;(0.000003%)&nbsp;&nbsp;free<br>count 30,000&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ε=1&nbsp;&nbsp;→&nbsp;&nbsp;±1&nbsp;&nbsp;&nbsp;&nbsp;(0.003%)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;fine<br>count 30&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ε=1&nbsp;&nbsp;→&nbsp;&nbsp;±1&nbsp;&nbsp;&nbsp;&nbsp;(3%)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;painful<br>count 3&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ε=1&nbsp;&nbsp;→&nbsp;&nbsp;±1&nbsp;&nbsp;&nbsp;&nbsp;(33%)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;useless<br><br>small subgroups pay the whole cost. that is an equity problem,<br>not a rounding error.</div>`,
+   code:`rel_error = (1/eps) / count          # everything follows from this line
+
+# so the design questions are always the same two:
+#   can I make n bigger?              (aggregate more, slice less)
+#   can I make delta_f smaller?       (clip tighter, ask for a mean)
+
+# and the honest report is three numbers, never one:
+#   eps, delta, AND the resulting error on the smallest cell you publish.` },
+
+ { title:"11. Local DP — no trusted curator at all",
+   why:"Everything so far assumes a trusted curator who holds the raw data and adds the noise. Local differential privacy removes that assumption: each person randomises their own answer before it leaves their device, so the collector never sees a true value and a breach of the server reveals nothing. Randomised response is the original instance, invented by Warner in 1965 for surveys about embarrassing behaviour, decades before the definition it satisfies was written down — answer truthfully with probability p, flip otherwise, which is exactly ln(p/(1−p))-DP. The raw tally is biased toward 50/50, and a single subtraction removes the bias exactly, which is the whole trick. The cost is severe and unavoidable: error in the local model grows like √n instead of staying constant, so you need orders of magnitude more people for the same accuracy. Google's RAPPOR and Apple's keyboard telemetry both run this model, and both have drawn criticism for the ε values they use in practice. The shuffle model is the modern middle ground — add local noise, then strip the association between reports and senders, which amplifies privacy enough to make much smaller local noise viable.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">central:&nbsp;&nbsp;raw data → trusted curator → noise → release<br>local:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;noise ON THE DEVICE → collector never sees truth<br><br>randomised response (Warner 1965):<br>&nbsp;&nbsp;tell the truth w.p. p, lie otherwise&nbsp;&nbsp;⇒&nbsp;&nbsp;ε = ln(p/(1−p))<br>&nbsp;&nbsp;debias:&nbsp;&nbsp;t̂ = (ŷ − (1−p)) / (2p − 1)&nbsp;&nbsp;— exactly unbiased<br><br>cost: error ~ √n instead of O(1). orders of magnitude more users.<br>shuffle model = local noise + anonymised delivery ⇒ amplification</div>`,
+   code:`def randomised_response(true_bit, p, rng):
+    return true_bit if rng.random() < p else not true_bit
+
+eps = log(p / (1 - p))
+estimate = (observed_yes_fraction - (1 - p)) / (2*p - 1)   # unbiased
+
+# no single answer is evidence of anything: "the coin made me say it".
+# plausible deniability is a THEOREM here, not a slogan.` },
+
+ { title:"12. What actually ships — and how to read a published ε",
+   why:"Training a model privately is the same recipe applied to gradients: clip each example's gradient to a fixed norm, which is the sensitivity, add Gaussian noise to the batch sum, and track the budget with an RDP accountant. Per-example clipping is the expensive part, since a normal backward pass only ever materialises the batch mean, and the accuracy cost is real and unevenly distributed — it falls hardest on under-represented groups, a fairness problem the ε number does not surface. As for the numbers that shipped: the 2020 US Census used ε ≈ 19.61 for the redistricting file, Apple has reported per-day budgets of roughly 2 to 16 per feature, and academic work usually wants ε ≤ 1. Those are not comparable, and treating them as a single scale is the most common way to be misled. ε is only defined relative to a unit of privacy and a neighbouring relation, so the first question about any published ε is always what it is per — one person, one record, one device-day, one training example. An impressively small ε on a badly chosen unit protects nothing at all, and this is where most of the real argument in deployed DP now happens.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">DP-SGD:&nbsp;&nbsp;clip per-example grad (= Δf) → add Gaussian → account<br><br>US Census 2020 redistricting&nbsp;&nbsp;ε ≈ 19.61&nbsp;&nbsp;(per person, whole release)<br>Apple telemetry&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ε 2–16&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;PER FEATURE, PER DAY<br>Google RAPPOR&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;local model, per report<br>most academic work&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ε ≤ 1<br><br>NOT COMPARABLE. always ask: ε per WHAT?<br>a small ε on the wrong unit protects nobody.</div>`,
+   code:`for batch in loader:
+    g = [per_example_grad(x, y) for x, y in batch]     # the expensive part
+    g = [gi * min(1, C/norm(gi)) for gi in g]          # clip => sensitivity C
+    noisy = (sum(g) + normal(0, sigma*C, shape)) / len(batch)
+    params -= lr * noisy
+    accountant.step(sigma, sample_rate)                # RDP, then convert
+
+eps, delta = accountant.get_privacy_spent()
+# report eps, delta, the UNIT, the neighbouring relation, and the
+# accuracy cost on the smallest subgroup you publish. all five, or none.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-cyan-400 text-sm"; bn.innerHTML = '<div class="font-semibold">' + s.title + '</div>'; bn.onclick = () => showStep(i); stepsEl.appendChild(bn); });
+function showStep(i) {
+  curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = '<div class="fade-in w-full flex items-center justify-center">' + s.concept + '</div>';
+  document.getElementById("why").innerHTML = '<span class="fade-in inline-block">' + s.why + '</span>';
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-cyan-500 bg-cyan-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-cyan-400 text-sm"; });
+}
+prevB.onclick = () => showStep(Math.max(0, curS - 1));
+nextB.onclick = () => showStep(Math.min(STEPS.length - 1, curS + 1));
+let tm = null;
+autoB.onclick = () => {
+  if (tm) { clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; }
+  autoB.textContent = "⏸ Pause"; showStep(0);
+  tm = setInterval(() => { if (curS >= STEPS.length - 1) { clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } showStep(curS + 1); }, 4600);
+};
+showStep(0);
+function copy(btn) { const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+
+// ---------------- boot ----------------
+$('statusPill').textContent = 'sampling…';
+redrawAll();
+requestAnimationFrame(() => {
+  runChecks();
+  $('statusPill').textContent = 'all live · nothing pre-computed';
+  $('statusPill').className = 'pill okpill';
+});
+</script>
+</body>
+</html>
