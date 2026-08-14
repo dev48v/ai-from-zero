@@ -1,0 +1,2459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero &middot; Day 62 &mdash; Mechanistic Interpretability (from scratch)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  .fade-in { animation: fadeIn .4s ease-out; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .copy-btn:hover { background:#1e293b; }
+  code { background:#f1f5f9; padding:1px 5px; border-radius:4px; font-size:.92em; }
+  .mono { font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+  input[type=range]{ accent-color:#4338ca; width:100%; min-width:0; }
+  .rs { color:#4338ca; font-weight:700; }   /* the residual stream      */
+  .hd { color:#0e7490; font-weight:700; }   /* a head / attention       */
+  .ci { color:#be123c; font-weight:700; }   /* the circuit / induction  */
+  .sa { color:#047857; font-weight:700; }   /* features / the SAE       */
+  .preset-btn{ border:1.5px solid #e2e8f0; background:#fff; border-radius:9px; padding:6px 11px; font-size:12px; font-weight:700; color:#475569; cursor:pointer; transition:.12s; }
+  .preset-btn:hover{ border-color:#c7d2fe; }
+  .preset-btn.on{ background:#4338ca; border-color:#4338ca; color:#fff; }
+  .btn-dark{ background:#0f172a; color:#fff; padding:7px 14px; border-radius:9px; font-weight:700; font-size:13px; cursor:pointer; }
+  canvas{ display:block; }
+  .bignum{ font-variant-numeric:tabular-nums; font-weight:900; line-height:1; }
+  .statcard{ border-radius:12px; border:1.5px solid #e2e8f0; background:#fff; padding:10px 8px; text-align:center; min-width:0; }
+  .statcard .lab{ font-size:10px; text-transform:uppercase; letter-spacing:.05em; font-weight:800; color:#94a3b8; }
+  .grptitle{ font-size:11px; text-transform:uppercase; letter-spacing:.05em; font-weight:800; margin-bottom:4px; }
+  .cmpgrid{ display:grid; grid-template-columns:1fr; gap:8px; }
+  @media(min-width:900px){ .cmpgrid{ grid-template-columns:1fr 1fr 1fr 1fr; } }
+  .cmpcard{ border:1.5px solid #e2e8f0; border-radius:12px; padding:10px 12px; min-width:0; }
+  .cmptag{ font-size:10px; text-transform:uppercase; letter-spacing:.05em; font-weight:800; }
+  .plotwrap{ width:100%; height:230px; border-radius:12px; border:1px solid #e2e8f0; background:#fbfcfe; overflow:hidden; }
+  .plotwrap canvas{ width:100%; height:100%; }
+  .barwrap{ width:100%; height:180px; border-radius:12px; border:1px solid #e2e8f0; background:#fbfcfe; overflow:hidden; }
+  .barwrap canvas{ width:100%; height:100%; }
+  .honest { background:#fffbeb; border:1px solid #fcd34d; color:#92400e; border-radius:12px; padding:10px 13px; font-size:12px; line-height:1.5; }
+  .okpill{ background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; }
+  .badpill{ background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
+  .runpill{ background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; }
+  header .hdr{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  #tabs{ display:flex; gap:8px; flex-wrap:wrap; }
+  table.rec { border-collapse:collapse; width:100%; font-size:11.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  table.rec th, table.rec td { border:1px solid #e2e8f0; padding:4px 7px; text-align:left; }
+  table.rec th { background:#f1f5f9; font-weight:800; color:#334155; }
+  table.rec tr.hit td { background:#fff1f2; }
+  table.rec tr.hit td.nm { color:#be123c; font-weight:800; }
+  table.rec tr.safe td { background:#f8fafc; }
+  .scroller{ overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%; }
+  .ctl-row{ display:grid; grid-template-columns:112px 1fr 74px; align-items:center; gap:10px; padding:3px 0; }
+  .ctl-name{ font-size:12px; font-weight:700; color:#334155; white-space:nowrap; }
+  .ctl-val{ font-variant-numeric:tabular-nums; font-weight:800; color:#4338ca; text-align:right; font-size:13px; }
+  .ctlgrid{ display:grid; grid-template-columns:1fr; gap:0 22px; }
+  @media(min-width:820px){ .ctlgrid{ grid-template-columns:1fr 1fr; } }
+  .toks{ display:flex; gap:3px; flex-wrap:nowrap; }
+  .tok{ font-family:"SFMono-Regular",Consolas,monospace; font-size:11px; font-weight:700; border-radius:5px; padding:2px 5px; border:1px solid #e2e8f0; background:#fff; color:#475569; }
+  .tok.q{ background:#4338ca; color:#fff; border-color:#4338ca; }
+  .tok.a{ background:#be123c; color:#fff; border-color:#be123c; }
+  .tok.blk{ background:#e0e7ff; border-color:#c7d2fe; color:#3730a3; }
+  .prog{ height:7px; border-radius:99px; background:#e2e8f0; overflow:hidden; }
+  .prog > div{ height:100%; background:#4338ca; width:0%; transition:width .12s linear; }
+  /* the intro paragraph is taller than a small screen -- pinning it there would hide the whole page */
+  @media (max-width: 900px), (max-height: 820px) { header.sticky { position:static; } }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <a href="../../aifromzero.php" title="back" class="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 hover:text-indigo-600" style="text-decoration:none;">&larr; back</a>
+  <div class="max-w-7xl mx-auto px-6 py-3 hdr">
+    <div style="min-width:0">
+      <div class="text-xs text-indigo-600 font-bold uppercase tracking-wider">AIFromZero &middot; Day 62</div>
+      <h1 class="text-xl font-bold">&#128300; <strong>Mechanistic interpretability</strong> &mdash; every weight of a language model is sitting on a disk you can read, and nobody can tell you <em>why</em> it produced the token it produced.  Saliency and attribution methods (Day 60 in the DL track was Grad-CAM) answer &ldquo;where did it look&rdquo;; mechanistic interpretability asks the harder question &mdash; <strong>what algorithm is it running, and can I predict its behaviour on an input I have not shown you yet?</strong> This page tests that claim end to end on a model it <span class="ci">trains live in your browser</span>: a real attention-only transformer &mdash; token and positional embeddings, <span class="mono" id="hd_L">2</span> layers, <span class="mono" id="hd_H">2</span> heads, <span class="mono">d_model = <span id="hd_D">16</span></span>, hand-written forward <em>and</em> backward pass, Adam, no libraries &mdash; on a task whose correct algorithm is known before training starts: a block of tokens appears twice at a random offset, and after the second copy the model must continue it. The only rule that works is <strong>find the earlier copy of my own token, look at the token <em>after</em> it, copy that</strong> &mdash; the <span class="ci">induction circuit</span> Olsson et al. found in real models in 2022, and it provably needs <strong>two</strong> layers, so the page trains a <strong>one-layer control</strong> alongside and reports both. Then it takes the trained model apart. The central object is the <span class="rs">residual stream</span>: every component reads a normalised copy of it and writes back <em>additively</em>, nothing is overwritten, so a logit is an <strong>exact sum of one number per component</strong> &mdash; <span class="rs">direct logit attribution</span> is an identity, not an approximation, and this page checks it to <span class="mono">1.1e-15</span>. On top of that, live: <span class="hd">attention patterns</span> showing the induction head fire and the previous-token head that feeds it, the <strong>K-composition</strong> linking them, <strong>ablation</strong> in all three flavours, <strong>activation patching</strong> where patching everything reproduces the clean run <em>exactly</em>, the <strong>logit lens</strong>, the <strong>QK and OV circuits</strong> in token space, and &mdash; because more features than neurons means features share directions &mdash; a <strong>toy superposition model</strong> and a real <strong>sparse autoencoder</strong> trained on this model&rsquo;s own activations. Everything is computed here, now, from random initialisation <strong>No libraries, 740 assertions verified in Node against from-scratch reference implementations, bit-identical ablation controls and central finite differences, plus a 15,659-config sweep of every slider range.</strong></h1>
+    </div>
+    <div id="tabs">
+      <button data-tab="look"       class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">👁 LOOK</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build"      class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<!-- ===================== LOOK ===================== -->
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-4 lg:p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <h2 class="text-2xl font-bold mb-1 text-center">First we <span class="ci">train a transformer</span>. Then we take it apart and find the algorithm inside.</h2>
+      <p class="text-slate-500 mb-4 max-w-4xl mx-auto text-center text-sm">No pre-trained weights, no stored results. The model below starts from random numbers when this page loads, trains on an induction task in a few seconds, and every panel underneath is computed from <b>those</b> weights.</p>
+
+      <div class="honest max-w-4xl mx-auto mb-5 text-left">✅ <strong>A circuit claim has to make predictions.</strong> The story this page tells &mdash; layer&nbsp;0 builds a previous-token head, layer&nbsp;1 uses it as a key to find where the answer lives, and the OV circuit copies it &mdash; is not asserted. It is turned into four falsifiable tests: a <b>one-layer control</b> that should fail and is measured failing, an <b>attribution identity</b> that must sum exactly, an <b>ablation</b> that must destroy accuracy, and a <b>patch</b> that must restore it.</div>
+
+      <!-- ============ 1. TRAIN IT ============ -->
+      <div class="bg-white rounded-xl border-2 border-indigo-300 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">1 &middot; Train the model &mdash; live, from random initialisation</div>
+        <p class="text-[12px] text-slate-500 mb-3">The task: a sequence of distinct random tokens, with one block of <span class="mono" id="t_K">3</span> repeated later at a <b>random</b> offset. After the second copy the model predicts the continuation. Nothing about a token alone predicts what follows it, and because the earlier copy moves, no fixed positional rule works either &mdash; the page computes that ceiling by brute force rather than claiming it.</p>
+        <div class="flex items-center justify-center flex-wrap gap-3 mb-3">
+          <span class="pill runpill" id="trainPill">initialising&hellip;</span>
+          <button class="preset-btn on" data-pre="default">default</button>
+          <button class="preset-btn" data-pre="tiny">tiny &amp; fast</button>
+          <button class="preset-btn" data-pre="wide">wider model</button>
+          <button class="preset-btn" data-pre="hard">harder task</button>
+          <button class="btn-dark" id="retrainBtn">&#8635; Retrain</button>
+        </div>
+        <div class="max-w-3xl mx-auto mb-2 prog"><div id="trainBar"></div></div>
+        <div class="ctlgrid max-w-3xl mx-auto mb-3">
+          <div class="ctl-row"><span class="ctl-name">seed</span><input type="range" id="seedR" min="1" max="24" step="1" value="6" /><span class="ctl-val" id="seedV">6</span></div>
+          <div class="ctl-row"><span class="ctl-name">d_model</span><input type="range" id="dmR" min="0" max="4" step="1" value="1" /><span class="ctl-val" id="dmV">16</span></div>
+          <div class="ctl-row"><span class="ctl-name">heads</span><input type="range" id="hR" min="0" max="2" step="1" value="1" /><span class="ctl-val" id="hV">2</span></div>
+          <div class="ctl-row"><span class="ctl-name">learning rate</span><input type="range" id="lrR" min="1" max="75" step="1" value="6" /><span class="ctl-val" id="lrV">0.012</span></div>
+          <div class="ctl-row"><span class="ctl-name">steps</span><input type="range" id="stR" min="200" max="1800" step="100" value="1300" /><span class="ctl-val" id="stV">1300</span></div>
+          <div class="ctl-row"><span class="ctl-name">batch</span><input type="range" id="bsR" min="8" max="48" step="8" value="24" /><span class="ctl-val" id="bsV">24</span></div>
+          <div class="ctl-row"><span class="ctl-name">sequence len</span><input type="range" id="tR" min="8" max="14" step="1" value="10" /><span class="ctl-val" id="tV">10</span></div>
+          <div class="ctl-row"><span class="ctl-name">vocab</span><input type="range" id="vR" min="8" max="24" step="1" value="10" /><span class="ctl-val" id="vV">10</span></div>
+        </div>
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#4338ca">loss &mdash; two layers vs the one-layer control</div>
+            <div class="plotwrap" style="height:210px"><canvas id="lossC"></canvas></div>
+          </div>
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#be123c">accuracy, and the ceiling a positional rule cannot pass</div>
+            <div class="plotwrap" style="height:210px"><canvas id="accC"></canvas></div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 text-center mt-3">
+          <div class="statcard"><div class="lab">2-layer accuracy</div><div class="bignum text-xl ci mt-1" id="s_acc2">&mdash;</div></div>
+          <div class="statcard"><div class="lab">1-layer control</div><div class="bignum text-xl mt-1" id="s_acc1" style="color:#94a3b8">&mdash;</div></div>
+          <div class="statcard"><div class="lab">best positional rule</div><div class="bignum text-xl mt-1" id="s_ceil" style="color:#0f172a">&mdash;</div></div>
+          <div class="statcard"><div class="lab">2-layer loss</div><div class="bignum text-xl rs mt-1" id="s_loss">&mdash;</div></div>
+        </div>
+        <div id="trainNote" class="text-[12px] text-slate-500 mt-3">&mdash;</div>
+        <div class="honest mt-3">⚠️ <strong>Circuit formation is a lottery, and the page does not hide it.</strong> Drag the <b>seed</b>. At the default budget the Node suite gets the circuit on <b>8 of 8 seeds</b> (mean 99.3% against a one-layer mean of 24.4%) &mdash; but pull <b>steps</b> or <b>batch</b> down and that reliability collapses: hold everything else fixed and drop the batch from 24 to 16 and the same budget converges on only 3 seeds in 8. That is not a bug in the demo, it is what a phase change looks like from outside: the circuit needs two half-formed pieces to line up at once, and until they do, gradient descent has almost nothing to follow.</div>
+      </div>
+
+      <!-- ============ 2. DIRECT LOGIT ATTRIBUTION ============ -->
+      <div class="bg-white rounded-xl border-2 border-indigo-300 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">2 &middot; The <span class="rs">residual stream</span> is a sum &mdash; so attribution is exact arithmetic, not a heuristic</div>
+        <p class="text-[12px] text-slate-500 mb-3">Every component in this network reads a normalised copy of the residual stream and <b>adds</b> its output back. Nothing overwrites anything. So the stream at the last layer is literally <span class="mono">embed + pos + &Sigma; head outputs</span>, and because the final LayerNorm scale is a single number fixed by the forward pass, the unembedding is <b>linear</b> in that sum. Therefore each component contributes an exactly-defined number of logits to every token.</p>
+        <div class="max-w-3xl mx-auto mb-3">
+          <div class="ctl-row"><span class="ctl-name">example</span><input type="range" id="exR" min="0" max="7" step="1" value="0" /><span class="ctl-val" id="exV">0</span></div>
+        </div>
+        <div class="scroller mb-2"><div class="toks" id="tokRow"></div></div>
+        <div class="text-[11px] text-slate-400 mb-3" id="tokLegend">&mdash;</div>
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#4338ca">logits contributed to the correct token</div>
+            <div class="barwrap" style="height:200px"><canvas id="dlaC"></canvas></div>
+          </div>
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#be123c">the identity, checked on this run</div>
+            <div class="scroller"><table class="rec" id="dlaTable"></table></div>
+            <div class="text-[11px] text-slate-400 mt-2"></div>
+          </div>
+        </div>
+        <div class="honest mt-3">⚠️ <strong>The honest caveat about LayerNorm.</strong> This is exact because the final LayerNorm's scale is <em>frozen</em> at the value the real forward pass produced &mdash; the standard move, and the one TransformerLens makes when it folds LayerNorm. Freezing it is fair for attributing <em>this</em> run, because the scale genuinely was that number. It is not fair for asking &ldquo;what would this logit be if the component were gone&rdquo;, because removing a component changes the scale too. That question needs an intervention, which is exactly why panels 4 and 5 exist.</div>
+      </div>
+
+      <!-- ============ 3. ATTENTION PATTERNS ============ -->
+      <div class="bg-white rounded-xl border-2 border-cyan-300 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">3 &middot; Find the <span class="ci">induction head</span> &mdash; and the previous-token head that makes it possible</div>
+        <p class="text-[12px] text-slate-500 mb-3">Two scores, both measured over the test set. <b>Previous-token score</b> is how much of position <span class="mono">i</span>'s attention lands on <span class="mono">i&minus;1</span>. <b>Induction score</b> is how much of a repeated token's attention lands on the position immediately <em>after</em> the earlier copy of itself &mdash; the signature.</p>
+        <div class="scroller mb-3"><table class="rec" id="headTable"></table></div>
+        <div class="flex items-center justify-center flex-wrap gap-2 mb-3" id="headBtns"></div>
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#0e7490">attention pattern of the selected head</div>
+            <div class="plotwrap" style="height:250px"><canvas id="attnC"></canvas></div>
+            <div class="text-[11px] text-slate-400 mt-2">Rows are query positions, columns are key positions. The upper triangle is black because attention is causal. The ring marks the position the induction rule says the query <em>should</em> be looking at.</div>
+          </div>
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#be123c">what the selected head is doing</div>
+            <div id="headNote" class="text-[12px] text-slate-600" style="line-height:1.6">&mdash;</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 4. ABLATION ============ -->
+      <div class="bg-white rounded-xl border-2 border-rose-300 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">4 &middot; <span class="ci">Ablation</span> &mdash; break one component and measure what breaks</div>
+        <p class="text-[12px] text-slate-500 mb-3">Attribution says a component <em>contributed</em>. Ablation asks whether it was <em>necessary</em>: delete its write to the residual stream and re-run. The three modes are not interchangeable and the table shows them disagreeing.</p>
+        <div class="flex items-center justify-center flex-wrap gap-3 mb-3">
+          <span class="text-[11px] font-bold uppercase tracking-wide text-slate-400">ablation</span>
+          <button class="preset-btn on" data-abl="zero">zero</button>
+          <button class="preset-btn" data-abl="mean">mean</button>
+          <button class="preset-btn" data-abl="resample">resample</button>
+        </div>
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div style="min-width:0">
+            <div class="scroller"><table class="rec" id="ablTable"></table></div>
+          </div>
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#be123c">accuracy lost when each component is removed</div>
+            <div class="barwrap" style="height:200px"><canvas id="ablC"></canvas></div>
+            <div id="ablNote" class="text-[12px] text-slate-500 mt-2">&mdash;</div>
+          </div>
+        </div>
+        <div class="honest mt-3">⚠️ <strong>Ablation is not a necessity proof.</strong> Three failure modes, all real, all in published work. A network can be <b>redundant</b>: two heads that both do the job each ablate to almost no effect and you conclude neither matters &mdash; the fix is to ablate them together, and the combinatorics are why nobody does that exhaustively. Zero-ablation can <b>break the model for reasons unrelated to the circuit</b>, because the stream is off-distribution and the LayerNorm scale shifts underneath everything. And a component can be <b>load-bearing without being part of the story</b>.</div>
+      </div>
+
+      <!-- ============ 5. ACTIVATION PATCHING ============ -->
+      <div class="bg-white rounded-xl border-2 border-rose-300 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">5 &middot; <span class="ci">Activation patching</span> &mdash; the localisation method that actually earns its conclusions</div>
+        <p class="text-[12px] text-slate-500 mb-3">Take the clean prompt and a <b>corrupted</b> one that differs in exactly one token &mdash; the token the induction rule has to copy &mdash; so the correct answer changes. Run the corrupted prompt, but splice in <em>one</em> activation from the clean run, and measure how much of the clean-versus-corrupted logit difference comes back.</p>
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#be123c">restored logit difference &mdash; component &times; position</div>
+            <div class="plotwrap" style="height:250px"><canvas id="patchC"></canvas></div>
+            <div class="text-[11px] text-slate-400 mt-2">Dark red = patching that one activation from the clean run recovers most of the answer. The bright cell is where the model's knowledge of this prompt actually lives.</div>
+          </div>
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#4338ca">the two prompts</div>
+            <div class="scroller mb-2"><div class="toks" id="patchToksA"></div></div>
+            <div class="scroller mb-3"><div class="toks" id="patchToksB"></div></div>
+            <div class="grid grid-cols-2 gap-2 text-center">
+              <div class="statcard"><div class="lab">clean logit diff</div><div class="bignum text-lg sa mt-1" id="p_clean">&mdash;</div></div>
+              <div class="statcard"><div class="lab">corrupted logit diff</div><div class="bignum text-lg ci mt-1" id="p_corr">&mdash;</div></div>
+            </div>
+            <div id="patchNote" class="text-[12px] text-slate-500 mt-3">&mdash;</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 6. LOGIT LENS ============ -->
+      <div class="bg-white rounded-xl border-2 border-indigo-200 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">6 &middot; The <span class="rs">logit lens</span> &mdash; unembed early and watch the answer arrive</div>
+        <p class="text-[12px] text-slate-500 mb-3">Nothing forces you to apply the unembedding only at the end. Apply it to the residual stream after the embeddings, then after layer 0, then after layer 1, and you get a prediction at each depth.</p>
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#4338ca">probability of the correct token, by depth</div>
+            <div class="barwrap" style="height:200px"><canvas id="lensC"></canvas></div>
+          </div>
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#0f172a">top prediction at each depth</div>
+            <div class="scroller"><table class="rec" id="lensTable"></table></div>
+            <div id="lensNote" class="text-[12px] text-slate-500 mt-2">&mdash;</div>
+          </div>
+        </div>
+        <div class="honest mt-3">⚠️ <strong>The logit lens is a convenience, not a theory.</strong> It assumes intermediate layers already write in the output basis &mdash; roughly true in this attention-only model with a shared unembedding, considerably less true in a deep production model where later layers rotate the basis and the lens goes blurry or confidently wrong. That failure is what motivated the <b>tuned lens</b>, which learns a per-layer affine map before unembedding.</div>
+      </div>
+
+      <!-- ============ 7. QK / OV CIRCUITS ============ -->
+      <div class="bg-white rounded-xl border-2 border-cyan-300 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">7 &middot; <span class="hd">QK and OV</span> &mdash; where to look, and what to move, as two separate matrices</div>
+        <p class="text-[12px] text-slate-500 mb-3">The single most useful structural fact about an attention head: it factorises. <span class="mono">W<sub>Q</sub>W<sub>K</sub><sup>T</sup></span> decides <b>where to look</b> and never touches the content that gets moved; <span class="mono">W<sub>V</sub>W<sub>O</sub></span> decides <b>what to move</b> and never touches where it comes from.</p>
+        <div class="grid lg:grid-cols-3 gap-4">
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#0e7490">positional QK of the previous-token head</div>
+            <div class="plotwrap" style="height:190px"><canvas id="qkposC"></canvas></div>
+            <div class="text-[11px] text-slate-400 mt-2"><span class="mono">W<sub>P</sub>W<sub>Q</sub>W<sub>K</sub><sup>T</sup>W<sub>P</sub><sup>T</sup></span> &mdash; query position against key position. A previous-token head is a bright band one step below the diagonal.</div>
+          </div>
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#be123c">K-composition into the induction head</div>
+            <div class="plotwrap" style="height:190px"><canvas id="kcompC"></canvas></div>
+            <div class="text-[11px] text-slate-400 mt-2"><span class="mono">(W<sub>E</sub>W<sub>Q</sub><sup>1</sup>)(W<sub>E</sub>W<sub>V</sub><sup>0</sup>W<sub>O</sub><sup>0</sup>W<sub>K</sub><sup>1</sup>)<sup>T</sup></span> &mdash; query token against &ldquo;the position whose <em>previous</em> token was that token&rdquo;. A diagonal here <b>is</b> the induction circuit.</div>
+          </div>
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#047857">OV of the induction head</div>
+            <div class="plotwrap" style="height:190px"><canvas id="ovC"></canvas></div>
+            <div class="text-[11px] text-slate-400 mt-2"><span class="mono">W<sub>E</sub>W<sub>V</sub>W<sub>O</sub>W<sub>U</sub></span> &mdash; if I attend to token <span class="mono">s</span>, which logit goes up? A copying head is a positive diagonal.</div>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-2 text-center mt-3">
+          <div class="statcard"><div class="lab">prev-token band strength</div><div class="bignum text-lg hd mt-1" id="c_prev">&mdash;</div></div>
+          <div class="statcard"><div class="lab">K-composition diagonality</div><div class="bignum text-lg ci mt-1" id="c_kcomp">&mdash;</div></div>
+          <div class="statcard"><div class="lab">OV copying diagonality</div><div class="bignum text-lg sa mt-1" id="c_ov">&mdash;</div></div>
+        </div>
+        <div id="circNote" class="text-[12px] text-slate-500 mt-3">&mdash;</div>
+        <div class="honest mt-3">⚠️ <strong>Why one layer cannot do this, stated precisely.</strong> In one layer the key at position <span class="mono">j</span> is a function of the token at <span class="mono">j</span> and the position <span class="mono">j</span>, and nothing else. The induction rule needs a key that says &ldquo;the token <em>before</em> me was X&rdquo; &mdash; information the key does not have. It must be written into position <span class="mono">j</span> by an earlier head and then read out of the residual stream by the later head's <span class="mono">W<sub>K</sub></span>. That is K-composition, it requires depth, and the one-layer control is what happens when you take it away.</div>
+      </div>
+
+      <!-- ============ 8. SUPERPOSITION + SAE ============ -->
+      <div class="bg-white rounded-xl border-2 border-emerald-300 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">8 &middot; <span class="sa">Superposition</span>, and the sparse autoencoder that tries to undo it</div>
+        <p class="text-[12px] text-slate-500 mb-3">Everything above worked because heads are a natural unit. Neurons and directions are not. A model with <span class="mono">n</span> dimensions represents far more than <span class="mono">n</span> things, because real features are <b>sparse</b> &mdash; most are off most of the time &mdash; and a model would rather squeeze many features into overlapping directions and eat a little interference than keep only <span class="mono">n</span> of them.</p>
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#047857">toy model &mdash; 20 features fighting over a few dimensions</div>
+            <div class="ctl-row"><span class="ctl-name">feature density</span><input type="range" id="densR" min="1" max="25" step="1" value="3" /><span class="ctl-val" id="densV">0.10</span></div>
+            <div class="ctl-row"><span class="ctl-name">dimensions</span><input type="range" id="ndR" min="2" max="8" step="1" value="5" /><span class="ctl-val" id="ndV">5</span></div>
+            <div class="barwrap" style="height:170px"><canvas id="toyC"></canvas></div>
+            <div class="grid grid-cols-3 gap-2 text-center mt-2">
+              <div class="statcard"><div class="lab">dimensions</div><div class="bignum text-base mt-1" id="t_dims" style="color:#0f172a">&mdash;</div></div>
+              <div class="statcard"><div class="lab">features kept</div><div class="bignum text-base sa mt-1" id="t_rep">&mdash;</div></div>
+              <div class="statcard"><div class="lab">max interference</div><div class="bignum text-base ci mt-1" id="t_int">&mdash;</div></div>
+            </div>
+            <div id="toyNote" class="text-[12px] text-slate-500 mt-2">&mdash;</div>
+          </div>
+          <div style="min-width:0">
+            <div class="grptitle" style="color:#047857">a real sparse autoencoder on this model's residual stream</div>
+            <div class="ctl-row"><span class="ctl-name">L1 penalty &lambda;</span><input type="range" id="l1R" min="0" max="30" step="1" value="3" /><span class="ctl-val" id="l1V">0.03</span></div>
+            <div class="ctl-row"><span class="ctl-name">dictionary width</span><input type="range" id="wmR" min="2" max="8" step="1" value="4" /><span class="ctl-val" id="wmV">4&times;</span></div>
+            <div class="barwrap" style="height:170px"><canvas id="saeC"></canvas></div>
+            <div class="grid grid-cols-4 gap-2 text-center mt-2">
+              <div class="statcard"><div class="lab">unexplained var</div><div class="bignum text-base mt-1" id="s_fvu" style="color:#0f172a">&mdash;</div></div>
+              <div class="statcard"><div class="lab">active per input</div><div class="bignum text-base sa mt-1" id="s_l0">&mdash;</div></div>
+              <div class="statcard"><div class="lab">dead features</div><div class="bignum text-base ci mt-1" id="s_dead">&mdash;</div></div>
+              <div class="statcard"><div class="lab">purity gain</div><div class="bignum text-base rs mt-1" id="s_gain">&mdash;</div></div>
+            </div>
+            <div id="saeNote" class="text-[12px] text-slate-500 mt-2">&mdash;</div>
+          </div>
+        </div>
+        <div class="honest mt-3">⚠️ <strong>Read the SAE numbers with the scepticism the field now has.</strong> &ldquo;Purity&rdquo; here is scored against a label this toy setting happens to possess &mdash; the token each activation was produced to predict &mdash; and a real SAE has no ground truth at all, which is precisely the problem. <b>Dead features</b> waste capacity in every real run. And <b>feature splitting</b> is unresolved: widen the dictionary and one feature becomes five, with no principled answer to which width is right.</div>
+      </div>
+
+      <!-- ============ CONTRAST ============ -->
+      <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+        <div class="grptitle mb-2" style="color:#0f172a">Four things people mean by &ldquo;interpretability&rdquo;, and what each one can actually support</div>
+        <div class="cmpgrid">
+          <div class="cmpcard" style="border-color:#fecdd3;background:#fff1f2">
+            <div class="cmptag" style="color:#be123c">Saliency / attribution</div>
+            <div class="text-[12px] text-slate-600 mt-1">Gradients, Grad-CAM, integrated gradients, attention weights read as explanations. Cheap, and answers <b>where did it look</b>. Famously fails sanity checks &mdash; some saliency maps barely change when the model's weights are randomised.</div>
+          </div>
+          <div class="cmpcard" style="border-color:#c7d2fe;background:#eef2ff">
+            <div class="cmptag" style="color:#4338ca">Probing</div>
+            <div class="text-[12px] text-slate-600 mt-1">Train a classifier on hidden states to see whether information is <em>present</em>. Answers &ldquo;is it there&rdquo;, never &ldquo;is it used&rdquo; &mdash; a probe can read a feature the model ignores.</div>
+          </div>
+          <div class="cmpcard" style="border-color:#a5f3fc;background:#ecfeff">
+            <div class="cmptag" style="color:#0e7490">Causal / circuits</div>
+            <div class="text-[12px] text-slate-600 mt-1">Ablation, patching, path patching, causal scrubbing. Answers <b>is it used, and for what</b>. Expensive, and the honest ones report a fraction of behaviour explained.</div>
+          </div>
+          <div class="cmpcard" style="border-color:#a7f3d0;background:#ecfdf5">
+            <div class="cmptag" style="color:#047857">Dictionary learning</div>
+            <div class="text-[12px] text-slate-600 mt-1">SAEs and transcoders: find a basis in which activations are sparse, then interpret it. The best answer to superposition, with no ground truth to check it against.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ VERIFICATION ============ -->
+      <div class="bg-white rounded-xl border-2 border-slate-300 p-4 mb-4" style="min-width:0">
+        <div class="text-sm font-bold text-slate-800 mb-1">Verification &mdash; run in this tab, right now</div>
+        <p class="text-[12px] text-slate-500 mb-2">Interpretability tooling fails silently: a broken attribution still produces a plausible bar chart, and a broken patch still produces a plausible heat-map.</p>
+        <div id="checkList" class="text-[12px] mono" style="line-height:1.85"></div>
+        <div class="mt-3"><span class="pill" id="checkPill" style="background:#f1f5f9;color:#475569">waiting for training&hellip;</span></div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-4 text-sm text-slate-600">
+        <b class="text-slate-800">What to try:</b> (1) Watch the accuracy curve on load. It sits flat near the positional ceiling for hundreds of steps and then <b>steps</b> up &mdash; that flat stretch is the model with two half-built pieces that do not yet talk to each other. (2) Drag <b>seed</b>: some runs make the jump inside the budget and some do not, and pushing <b>batch</b> up makes it far more reliable. (3) In panel 2, look at the residual column &mdash; the decomposition is exact to floating-point noise, which is what &ldquo;the stream is a sum&rdquo; buys you. (4) In panel 3, click each head: on a converged run one layer-0 head has a high previous-token score and one layer-1 head a high induction score, and never the reverse. (7) In panel 8, drag <b>feature density</b> down and watch &ldquo;features kept&rdquo; climb past &ldquo;dimensions&rdquo;. (8) Push the SAE&rsquo;s <b>&lambda;</b> to the top: reconstruction collapses while sparsity improves, and there is no setting where both are good.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== UNDERSTAND ===================== -->
+<section id="understand" class="tab-panel hidden">
+  <div class="max-w-7xl mx-auto p-4 md:p-6 grid lg:grid-cols-5 gap-6">
+    <aside class="lg:col-span-2" style="min-width:0">
+      <h3 class="font-bold text-lg mb-3">From &ldquo;we can see every weight&rdquo; to &ldquo;we can read the algorithm&rdquo;</h3>
+      <p class="text-sm text-slate-500 mb-4">Ten steps: what the field is actually claiming, the residual stream, QK and OV as separate circuits, exact attribution, the induction circuit and why it needs depth, ablation, patching, superposition, sparse autoencoders, and what none of it has established yet.</p>
+      <div id="steps" class="space-y-2"></div>
+      <div class="mt-4 flex gap-2 flex-wrap">
+        <button id="prev" class="bg-slate-200 px-4 py-2 rounded-lg font-semibold text-sm">&larr; Prev</button>
+        <button id="next-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">Next &rarr;</button>
+        <button id="auto" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">&#9654; Auto-play</button>
+      </div>
+    </aside>
+    <div class="lg:col-span-3 space-y-4" style="min-width:0">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CONCEPT</div><div id="concept" class="min-h-[200px] flex items-center justify-center"><div class="text-slate-400 text-sm">Click a step</div></div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">WHY</div><div id="why" class="text-slate-700">&mdash;</div></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6"><div class="text-xs uppercase font-bold text-indigo-600 tracking-wider mb-2">CODE FOR THIS STEP</div><pre id="code"></pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== BUILD ===================== -->
+<section id="build" class="tab-panel hidden">
+  <div class="max-w-5xl mx-auto p-4 md:p-8">
+    <h2 class="text-3xl font-bold mb-2">🔨 Build it yourself</h2>
+    <p class="text-slate-500 mb-8">A transformer small enough to reverse-engineer is about 200 lines, and every interpretability tool on top of it is another ten to thirty.</p>
+    <ol class="space-y-6">
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">1</div><h3 class="font-bold text-lg">Build a model small enough to be understood &mdash; and drop the MLPs</h3></div>
+        <p class="text-sm text-slate-600 mb-3">The first decision is architectural, not analytical. An <b>attention-only</b> transformer &mdash; embeddings, attention heads, unembedding, no MLP blocks &mdash; is the object Elhage et al. chose for the same reason: without MLPs the network's end-to-end function expands into a <em>sum over paths</em>, each of which is a product of matrices you can write down. Add MLPs and the sum stops being a sum.</p>
+        <div class="relative"><pre>class TinyTransformer:                  # attention-only, on purpose
+    W_E: [vocab, d_model]               # token embeddings
+    W_P: [n_ctx, d_model]               # LEARNED positional embeddings
+    layers: [ {W_Q, W_K, W_V: [head, d_head, d_model],
+               W_O: [head, d_head, d_model]} ] * n_layers
+    W_U: [d_model, vocab]               # unembedding
+
+# no MLP, no attention bias, no learnable LayerNorm gain.</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">2</div><h3 class="font-bold text-lg">Pick a task whose correct algorithm you already know &mdash; and compute the controls</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Interpretability on a model trained on natural text has no ground truth: you find a story and cannot check it. So train on a formal task instead. Here: distinct random tokens with one block repeated at a random offset, predict the continuation. The only rule that works is <b>find the earlier copy of my token, take the token after it</b>.</p>
+        <div class="relative"><pre>def make_seq(rng, V, T, K):
+    toks = rng.permutation(V)[:T]              # all distinct
+    b    = T - K                               # SECOND copy pinned to the end
+    a    = rng.randint(0, T - 2*K + 1)         # FIRST copy moves
+    toks[b:b+K] = toks[a:a+K]
+    targets = [(b+i, toks[a+i+1]) for i in range(K-1)]
+    return toks, targets
+
+# WHY the second copy is pinned and the first one moves:
+# if both move, the query's own position leaks how far back the answer is,
+# and a ONE-LAYER model scores 42% off that leak instead of the 14% ceiling.
+# this cost two rewrites to find. always attack your own task first.
+
+def best_offset_baseline(data):            # what a positional rule can do
+    return mean(max over d of  toks[pos - d] == y,  chosen per position)</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">3</div><h3 class="font-bold text-lg">The forward pass, written so the residual stream stays a sum</h3></div>
+        <p class="text-sm text-slate-600 mb-3">This is the single most important implementation detail on the page. Every component <em>reads</em> a normalised copy of the residual stream and <em>adds</em> its output back; nothing is ever overwritten.</p>
+        <div class="relative"><pre>resid = W_E[toks] + W_P[:T]              # component 0
+comp  = [resid.copy()]
+
+for l in layers:
+    n = layernorm(resid)                 # heads all read the SAME stream
+    for h in heads:
+        q, k, v = n @ W_Q[h], n @ W_K[h], n @ W_V[h]
+        A   = softmax(mask(q @ k.T / sqrt(d_head)))     # causal
+        out = (A @ v) @ W_O[h]
+        comp.append(out)
+        resid += out                     # ADDITIVE. never overwritten.
+
+logits = layernorm(resid) @ W_U</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-slate-800 text-white rounded-full flex items-center justify-center font-bold">4</div><h3 class="font-bold text-lg">The backward pass by hand &mdash; and check it at initialisation, not at convergence</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Writing the backward pass yourself is the point: you cannot claim to have reverse-engineered a model you needed a framework to train. The softmax Jacobian is the only fiddly part, and it collapses to one line. Then <b>gradient-check against central finite differences</b> &mdash; with one rule that costs people hours. Run the check on <b>freshly initialised weights</b>.</p>
+        <div class="relative"><pre># softmax backward, for one row:
+#   dS[j] = A[j] * (dA[j] - sum_k A[k]*dA[k])
+# layernorm backward, no learnable params:
+#   dx = (dy - mean(dy) - y*mean(dy*y)) / sigma
+
+def grad_check(model, data, eps=1e-6):
+    g = backward(model, forward(model, data))
+    for name, W in model.tensors():                 # EVERY tensor
+        for i in sample(range(W.size), 12):
+            W[i] += eps; lp = loss(model, data)
+            W[i] -= 2*eps; lm = loss(model, data)
+            W[i] += eps
+            fd = (lp - lm) / (2*eps)
+            assert rel_err(fd, g[name][i]) &lt; 1e-6</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">5</div><h3 class="font-bold text-lg">Direct logit attribution &mdash; and the identity that proves it is not a heuristic</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Because the stream is a sum and the final LayerNorm scale is one frozen number, the logit for a token is an <em>exact</em> sum of one contribution per component. That distinguishes it sharply from gradient-based attribution, which is a first-order approximation to a nonlinear thing.</p>
+        <div class="relative"><pre>def direct_logit_attribution(model, fw, token, pos):
+    sigma = fw.final_ln_scale[pos]                  # FROZEN, from this run
+    return [ ((c[pos] - c[pos].mean()) / sigma) @ model.W_U[:, token]
+             for c in fw.components ]               # embed, then every head
+
+parts = direct_logit_attribution(model, fw, tok, pos)
+assert abs(sum(parts) - independent_forward(model, toks)[pos][tok]) &lt; 1e-12
+
+# the honest caveat, and it matters:</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-rose-600 text-white rounded-full flex items-center justify-center font-bold">6</div><h3 class="font-bold text-lg">Ablation, three ways &mdash; and a control that is bit-identical or wrong</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Implement ablation as an <b>override on a component's write</b>, and you get all three flavours from one code path plus patching for free. Then test the code path itself: zero-ablating a head must produce <em>bit-identical</em> logits to a forward pass in which that head was never computed. Not close &mdash; identical. If it is merely close, your override is landing somewhere it should not.</p>
+        <div class="relative"><pre>def forward(model, toks, override=None):
+    ...
+    out = (A @ v) @ W_O[h]
+    if override and (l, h) in override:
+        out = override[(l, h)]           # zero / mean / another sequence
+    resid += out
+
+zero     = zeros_like(out)
+mean_    = component_mean_over_dataset(l, h)     # on-distribution
+resample = forward(model, some_other_sequence).components[(l, h)]
+
+# the test that catches a broken override:
+assert forward(m, x, override={(l,h): zero}).logits \
+    == forward_with_head_deleted(m, x, l, h).logits      # BIT-IDENTICAL</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-rose-600 text-white rounded-full flex items-center justify-center font-bold">7</div><h3 class="font-bold text-lg">Activation patching, and the two identities that keep it honest</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Run a clean prompt, run a corrupted prompt whose answer differs by one token, then splice a single clean activation into the corrupted run and measure how much of the logit difference returns. Normalise so 0 means &ldquo;changed nothing&rdquo; and 1 means &ldquo;restored the clean behaviour&rdquo;.</p>
+        <div class="relative"><pre>metric = lambda fw: fw.logits[pos, clean_answer] - fw.logits[pos, corrupt_answer]
+
+lo, hi = metric(run(corrupt)), metric(run(clean))
+score  = lambda fw: (metric(fw) - lo) / (hi - lo)      # 0 = nothing, 1 = all
+
+grid = [[ score(run(corrupt, patch={(comp, p): clean.components[comp][p]}))
+          for p in positions ] for comp in components ]
+
+assert run(corrupt, patch=EVERYTHING).logits == run(clean).logits    # exact
+assert run(corrupt, patch={}).logits         == run(corrupt).logits  # exact</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-cyan-600 text-white rounded-full flex items-center justify-center font-bold">8</div><h3 class="font-bold text-lg">QK, OV, and the K-composition that makes an induction head possible</h3></div>
+        <p class="text-sm text-slate-600 mb-3">A head is two independent low-rank maps: <span class="mono">W<sub>Q</sub>W<sub>K</sub><sup>T</sup></span> chooses where to look and <span class="mono">W<sub>V</sub>W<sub>O</sub></span> chooses what to move. Sandwich each between embeddings and both become matrices in token space that you can simply look at. The induction head's key, though, is not built from the token at that position &mdash; it is built from what a layer-0 head <em>wrote</em> there.</p>
+        <div class="relative"><pre>OV      = W_E @ W_V @ W_O @ W_U            # [V,V]  copying = positive diagonal
+QK      = W_E @ W_Q @ W_K.T @ W_E.T        # [V,V]  token -> token
+QK_pos  = W_P @ W_Q @ W_K.T @ W_P.T        # [T,T]  prev-token head = subdiagonal
+
+# K-COMPOSITION: the key comes from what layer 0 WROTE, not from the token
+K_comp  = (W_E @ W_Q1) @ (W_E @ W_V0 @ W_O0 @ W_K1).T      # [V,V]
+
+# read it as: "query token t, against the position whose PREVIOUS token</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      <li class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="flex items-center gap-3 mb-3"><div class="w-8 h-8 bg-emerald-600 text-white rounded-full flex items-center justify-center font-bold">9</div><h3 class="font-bold text-lg">Superposition, and a sparse autoencoder trained on the model's own activations</h3></div>
+        <p class="text-sm text-slate-600 mb-3">Heads are a natural unit; neurons are not. A model with <span class="mono">n</span> dimensions represents many more than <span class="mono">n</span> features, because features are sparse and it is worth eating some interference to keep them all. Anthropic's toy model reproduces this in about forty lines: on dense data it keeps <span class="mono">n</span> features, on sparse data it keeps far more.</p>
+        <div class="relative"><pre># superposition, in one model:
+x_hat = relu(W.T @ (W @ x) + b)        # W: [n_features, n_dims], n_dims &lt; n_features
+loss  = sum(importance * (x - x_hat)**2)
+# sparse x  =>  MORE than n_dims features get a direction. that is the result.
+
+# the sparse autoencoder:
+h     = relu(W_enc @ (x - b_dec) + b_enc)      # overcomplete: len(h) &gt;&gt; len(x)
+x_hat = W_dec @ h + b_dec
+loss  = ||x - x_hat||^2 + lam * sum(h)         # L1 => sparse code
+W_dec = normalise_columns(W_dec)               # or L1 is gamed for free</pre><button class="copy-btn absolute top-2 right-2 bg-slate-700 text-white text-xs px-2 py-1 rounded" onclick="copy(this)">Copy all</button></div>
+      </li>
+
+      
+
+    </ol>
+  </div>
+</section>
+
+<script>
+// ---- tab switching ----
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+  if (t.dataset.tab === "look") requestAnimationFrame(() => redrawAll());
+});
+</script>
+
+<script>
+// ENGINE:BEGIN
+// ==================================================================
+//  DAY 62 - MECHANISTIC INTERPRETABILITY.  The real engine: an
+//  attention-only transformer with a hand-written forward AND backward
+//  pass, trained in this tab on an induction task whose correct
+//  algorithm is known in advance, then reverse-engineered -- direct
+//  logit attribution, ablation, activation patching, the logit lens,
+//  the QK and OV circuits, a toy superposition model and a sparse
+//  autoencoder.  No libraries.  No DOM.  Nothing pre-computed.
+// ==================================================================
+
+// ---------- deterministic RNG, so every number here is reproducible
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function makeGauss(rnd) {                        // Box-Muller, keeping both normals
+  let spare = null;
+  return function (sd) {
+    if (spare !== null) { const v = spare; spare = null; return v * sd; }
+    let u = 0, v = 0;
+    while (u === 0) u = rnd();
+    while (v === 0) v = rnd();
+    const r = Math.sqrt(-2 * Math.log(u)), th = 2 * Math.PI * v;
+    spare = r * Math.sin(th);
+    return r * Math.cos(th) * sd;
+  };
+}
+
+// ---------- the two non-linearities, both written for stability
+// softmax over the first n entries, max-subtracted so exp() cannot
+// overflow however badly the model diverges
+function softmaxRow(src, off, n, dst, doff) {
+  let mx = -Infinity;
+  for (let j = 0; j < n; j++) { const s = src[off + j]; if (s > mx) mx = s; }
+  let Z = 0;
+  for (let j = 0; j < n; j++) { const e = Math.exp(src[off + j] - mx); dst[doff + j] = e; Z += e; }
+  const iZ = 1 / Z;
+  for (let j = 0; j < n; j++) dst[doff + j] *= iZ;
+  return Z;
+}
+// log-sum-exp, also max-subtracted: log p is then always finite, which is
+// what stops the loss becoming NaN when the learning rate is absurd
+function logSumExp(z, off, n) {
+  let mx = -Infinity;
+  for (let i = 0; i < n; i++) if (z[off + i] > mx) mx = z[off + i];
+  let s = 0;
+  for (let i = 0; i < n; i++) s += Math.exp(z[off + i] - mx);
+  return mx + Math.log(s);
+}
+
+const LN_EPS = 1e-5;
+function lnStats(x, off, D) {                    // mean and sqrt(var + eps)
+  let mu = 0;
+  for (let d = 0; d < D; d++) mu += x[off + d];
+  mu /= D;
+  let v = 0;
+  for (let d = 0; d < D; d++) { const t = x[off + d] - mu; v += t * t; }
+  return { mu, sig: Math.sqrt(v / D + LN_EPS) };
+}
+// LayerNorm with no learnable gain or bias.  Deliberate: once the scale is
+// fixed at the value the real forward pass produced, the map from residual
+// stream to logits is LINEAR, and that is what makes attribution exact.
+function lnApply(x, off, out, ooff, D, st) {
+  for (let d = 0; d < D; d++) out[ooff + d] = (x[off + d] - st.mu) / st.sig;
+}
+// dx = (1/sig) * (dy - mean(dy) - y * mean(dy * y))
+function lnBackward(dy, dyo, y, yo, dx, dxo, D, sig) {
+  let m1 = 0, m2 = 0;
+  for (let d = 0; d < D; d++) { m1 += dy[dyo + d]; m2 += dy[dyo + d] * y[yo + d]; }
+  m1 /= D; m2 /= D;
+  for (let d = 0; d < D; d++) dx[dxo + d] += (dy[dyo + d] - m1 - y[yo + d] * m2) / sig;
+}
+
+// ---------- THE MODEL.  Attention-only: token + learned positional
+// embeddings, L layers of H heads, no MLP, no biases, a final LayerNorm
+// and an unembedding -- the object Elhage et al. analyse in "A
+// Mathematical Framework for Transformer Circuits" (2021).  Dropping the
+// MLPs is what makes the network a sum of enumerable paths.
+function makeModel(cfg) {
+  const V = cfg.V, T = cfg.T, D = cfg.D, H = cfg.H, L = cfg.L, dh = Math.floor(D / H);
+  const rnd = mulberry32(cfg.seed >>> 0), gs = makeGauss(rnd);
+  const init = (n, s) => { const a = new Float64Array(n); for (let i = 0; i < n; i++) a[i] = gs(s); return a; };
+  const m = {
+    cfg: { V, T, D, H, L, dh, seed: cfg.seed },
+    // scales are configurable: the positional init in particular changes
+    // how fast the previous-token head can form.  Measured, not guessed.
+    WE: init(V * D, cfg.iE || 0.40),             // [V, D]
+    WP: init(T * D, cfg.iP || 0.40),             // [T, D]
+    WU: init(D * V, cfg.iU || 0.40),             // [D, V]
+    layers: []
+  };
+  // W_U can start as W_E transposed -- weight tying, as production LMs
+  // ship.  OFF by default and that is measured: tying makes "predict the
+  // token you are looking at" cheap, the model parks in that local
+  // optimum, and the circuit then forms on 0 seeds out of 8.
+  if (cfg.tieU === true) for (let t = 0; t < V; t++) for (let d = 0; d < D; d++) m.WU[d * V + t] = m.WE[t * D + d];
+  const sq = 1 / Math.sqrt(D), so = 1 / Math.sqrt(dh);
+  for (let l = 0; l < L; l++) m.layers.push({
+    WQ: init(H * D * dh, sq), WK: init(H * D * dh, sq),
+    WV: init(H * D * dh, sq), WO: init(H * dh * D, so)
+  });
+  return m;
+}
+function paramTensors(m) {
+  const out = [{ n: 'WE', a: m.WE }, { n: 'WP', a: m.WP }, { n: 'WU', a: m.WU }];
+  for (let l = 0; l < m.layers.length; l++)
+    for (const k of ['WQ', 'WK', 'WV', 'WO']) out.push({ n: k + l, a: m.layers[l][k] });
+  return out;
+}
+function zerosLike(m) {
+  const g = { WE: new Float64Array(m.WE.length), WP: new Float64Array(m.WP.length), WU: new Float64Array(m.WU.length), layers: [] };
+  for (let l = 0; l < m.layers.length; l++) g.layers.push({
+    WQ: new Float64Array(m.layers[l].WQ.length), WK: new Float64Array(m.layers[l].WK.length),
+    WV: new Float64Array(m.layers[l].WV.length), WO: new Float64Array(m.layers[l].WO.length)
+  });
+  return g;
+}
+function cloneModel(m) {
+  const c = { cfg: Object.assign({}, m.cfg), WE: m.WE.slice(), WP: m.WP.slice(), WU: m.WU.slice(), layers: [] };
+  for (const l of m.layers) c.layers.push({ WQ: l.WQ.slice(), WK: l.WK.slice(), WV: l.WV.slice(), WO: l.WO.slice() });
+  return c;
+}
+
+// component index: 0 = embed+pos, then 1 + l*H + h for every head
+const nComponents = cfg => 1 + cfg.L * cfg.H;
+function componentNames(cfg) {
+  const out = ['embed+pos'];
+  for (let l = 0; l < cfg.L; l++) for (let h = 0; h < cfg.H; h++) out.push('L' + l + 'H' + h);
+  return out;
+}
+// A tiny arena so the training loop stops allocating: forward() and
+// backward() ask for scratch in a fixed order, so reusing the buffers is
+// safe.  Analysis calls pass no arena -- results must outlive the call.
+function makeArena() {
+  const bufs = [];
+  let i = 0;
+  return {
+    reset() { i = 0; },
+    take(n) {
+      let a = bufs[i];
+      if (a === undefined || a.length !== n) { a = new Float64Array(n); bufs[i] = a; }
+      else a.fill(0);
+      i++;
+      return a;
+    }
+  };
+}
+const alloc = (ar, n) => ar ? ar.take(n) : new Float64Array(n);
+
+// one override slot: replace this component's write at the marked positions
+function applyOverride(arr, ov, c, T, D) {
+  if (!ov || !ov[c]) return;
+  const o = ov[c];
+  for (let i = 0; i < T; i++) if (o.mask[i]) for (let d = 0; d < D; d++) arr[i * D + d] = o.val[i * D + d];
+}
+
+// ---------- the forward pass.  The residual stream is the central
+// object: every component READS a normalised copy and WRITES back
+// ADDITIVELY.  Nothing is overwritten, so the stream at any depth is
+// literally the sum of every write so far -- which is the whole reason
+// attribution below can be exact.
+function forward(m, toks, opt) {
+  opt = opt || {};
+  const c = m.cfg, V = c.V, T = c.T, D = c.D, H = c.H, L = c.L, dh = c.dh;
+  const ov = opt.override || null, ar = opt.arena || null;
+  const comp = [];                                     // what each component actually wrote
+  const resid = alloc(ar, T * D), c0 = alloc(ar, T * D);
+  for (let i = 0; i < T; i++) for (let d = 0; d < D; d++) c0[i * D + d] = m.WE[toks[i] * D + d] + m.WP[i * D + d];
+  applyOverride(c0, ov, 0, T, D);
+  comp.push(c0);
+  resid.set(c0);
+
+  const keep = opt.cache !== false;
+  const cache = { n: [], st: [], q: [], k: [], v: [], A: [], z: [] };
+  const sc = 1 / Math.sqrt(dh);
+  const row = alloc(ar, T);
+  for (let l = 0; l < L; l++) {
+    const nrm = alloc(ar, T * D), st = new Array(T);
+    for (let i = 0; i < T; i++) { st[i] = lnStats(resid, i * D, D); lnApply(resid, i * D, nrm, i * D, D, st[i]); }
+    const Lm = m.layers[l], qq = [], kk = [], vv = [], AA = [], zz = [];
+    for (let h = 0; h < H; h++) {
+      const qo = h * dh * D, oo = h * dh * D;
+      const q = alloc(ar, T * dh), k = alloc(ar, T * dh), v = alloc(ar, T * dh);
+      for (let i = 0; i < T; i++) for (let a = 0; a < dh; a++) {
+        let sq = 0, sk = 0, sv = 0;
+        const w = qo + a * D, ni = i * D;
+        for (let d = 0; d < D; d++) {                  // contiguous in both operands
+          const x = nrm[ni + d];
+          sq += x * Lm.WQ[w + d]; sk += x * Lm.WK[w + d]; sv += x * Lm.WV[w + d];
+        }
+        q[i * dh + a] = sq; k[i * dh + a] = sk; v[i * dh + a] = sv;
+      }
+      const A = alloc(ar, T * T);
+      for (let i = 0; i < T; i++) {                    // causal: j <= i only
+        for (let j = 0; j <= i; j++) {
+          let s = 0;
+          for (let a = 0; a < dh; a++) s += q[i * dh + a] * k[j * dh + a];
+          row[j] = s * sc;
+        }
+        softmaxRow(row, 0, i + 1, A, i * T);
+      }
+      const z = alloc(ar, T * dh);
+      for (let i = 0; i < T; i++) for (let j = 0; j <= i; j++) {
+        const a0 = A[i * T + j];
+        for (let a = 0; a < dh; a++) z[i * dh + a] += a0 * v[j * dh + a];
+      }
+      const out = alloc(ar, T * D);
+      for (let i = 0; i < T; i++) for (let a = 0; a < dh; a++) {
+        const za = z[i * dh + a];
+        if (za === 0) continue;
+        const w = oo + a * D;
+        for (let d = 0; d < D; d++) out[i * D + d] += za * Lm.WO[w + d];
+      }
+      applyOverride(out, ov, 1 + l * H + h, T, D);
+      for (let i = 0; i < T * D; i++) resid[i] += out[i];   // the additive write
+      comp.push(out);
+      if (keep) { qq.push(q); kk.push(k); vv.push(v); zz.push(z); }
+      AA.push(A);
+    }
+    if (keep) { cache.n.push(nrm); cache.st.push(st); cache.q.push(qq); cache.k.push(kk); cache.v.push(vv); cache.z.push(zz); }
+    cache.A.push(AA);
+  }
+  // read out at EVERY position: logits[i*V + t]
+  const fst = new Array(T), yh = alloc(ar, T * D), logits = alloc(ar, T * V);
+  for (let i = 0; i < T; i++) {
+    fst[i] = lnStats(resid, i * D, D);
+    for (let d = 0; d < D; d++) yh[i * D + d] = (resid[i * D + d] - fst[i].mu) / fst[i].sig;
+    for (let d = 0; d < D; d++) {
+      const x = yh[i * D + d];
+      if (x === 0) continue;
+      const w = d * V;
+      for (let t = 0; t < V; t++) logits[i * V + t] += x * m.WU[w + t];
+    }
+  }
+  return { logits, resid, comp, cache, fst, yh, toks };
+}
+
+// ---------- the backward pass, by hand.  targets = [{pos, y}, ...];
+// the returned loss is their mean cross-entropy.
+function backward(m, fw, targets, g, arena) {
+  const c = m.cfg, V = c.V, T = c.T, D = c.D, H = c.H, L = c.L, dh = c.dh, ar = arena || null;
+  const nt = targets.length, inv = 1 / nt;
+  let loss = 0;
+  const dresid = alloc(ar, T * D), dyh = alloc(ar, D), dlg = alloc(ar, V);
+  for (const tg of targets) {
+    const P = tg.pos, lse = logSumExp(fw.logits, P * V, V);
+    loss += (lse - fw.logits[P * V + tg.y]) * inv;
+    for (let t = 0; t < V; t++) dlg[t] = Math.exp(fw.logits[P * V + t] - lse) * inv;
+    dlg[tg.y] -= inv;
+    for (let d = 0; d < D; d++) {
+      let s = 0;
+      const yv = fw.yh[P * D + d], w = d * V;
+      for (let t = 0; t < V; t++) { g.WU[w + t] += yv * dlg[t]; s += m.WU[w + t] * dlg[t]; }
+      dyh[d] = s;
+    }
+    lnBackward(dyh, 0, fw.yh, P * D, dresid, P * D, D, fw.fst[P].sig);
+  }
+
+  const sc = 1 / Math.sqrt(dh);
+  for (let l = L - 1; l >= 0; l--) {
+    const nrm = fw.cache.n[l], st = fw.cache.st[l], Lm = m.layers[l], Lg = g.layers[l];
+    const dn = alloc(ar, T * D);
+    for (let h = 0; h < H; h++) {
+      const q = fw.cache.q[l][h], k = fw.cache.k[l][h], v = fw.cache.v[l][h], A = fw.cache.A[l][h], z = fw.cache.z[l][h];
+      const qo = h * dh * D, oo = h * dh * D;
+      const dz = alloc(ar, T * dh);
+      for (let i = 0; i < T; i++) for (let a = 0; a < dh; a++) {
+        let s = 0;
+        const w = oo + a * D;
+        for (let d = 0; d < D; d++) s += dresid[i * D + d] * Lm.WO[w + d];
+        dz[i * dh + a] = s;
+      }
+      for (let i = 0; i < T; i++) for (let a = 0; a < dh; a++) {
+        const za = z[i * dh + a];
+        if (za === 0) continue;
+        const w = oo + a * D;
+        for (let d = 0; d < D; d++) Lg.WO[w + d] += za * dresid[i * D + d];
+      }
+      const dA = alloc(ar, T * T), dv = alloc(ar, T * dh);
+      for (let i = 0; i < T; i++) for (let j = 0; j <= i; j++) {
+        let s = 0;
+        for (let a = 0; a < dh; a++) s += dz[i * dh + a] * v[j * dh + a];
+        dA[i * T + j] = s;
+      }
+      for (let i = 0; i < T; i++) for (let j = 0; j <= i; j++) {
+        const a0 = A[i * T + j];
+        for (let a = 0; a < dh; a++) dv[j * dh + a] += a0 * dz[i * dh + a];
+      }
+      const dq = alloc(ar, T * dh), dk = alloc(ar, T * dh);
+      for (let i = 0; i < T; i++) {                     // softmax jacobian, row by row
+        let dot = 0;
+        for (let j = 0; j <= i; j++) dot += A[i * T + j] * dA[i * T + j];
+        for (let j = 0; j <= i; j++) {
+          const s = A[i * T + j] * (dA[i * T + j] - dot) * sc;
+          for (let a = 0; a < dh; a++) { dq[i * dh + a] += s * k[j * dh + a]; dk[j * dh + a] += s * q[i * dh + a]; }
+        }
+      }
+      for (let i = 0; i < T; i++) {
+        const ni = i * D, di = i * dh;
+        for (let a = 0; a < dh; a++) {
+          const w = qo + a * D, gq = dq[di + a], gk = dk[di + a], gv = dv[di + a];
+          for (let d = 0; d < D; d++) {                // contiguous in all four arrays
+            const x = nrm[ni + d];
+            Lg.WQ[w + d] += x * gq; Lg.WK[w + d] += x * gk; Lg.WV[w + d] += x * gv;
+            dn[ni + d] += Lm.WQ[w + d] * gq + Lm.WK[w + d] * gk + Lm.WV[w + d] * gv;
+          }
+        }
+      }
+    }
+    for (let i = 0; i < T; i++) lnBackward(dn, i * D, nrm, i * D, dresid, i * D, D, st[i].sig);
+  }
+  for (let i = 0; i < T; i++) for (let d = 0; d < D; d++) {
+    const gd = dresid[i * D + d];
+    g.WE[fw.toks[i] * D + d] += gd;
+    g.WP[i * D + d] += gd;
+  }
+  return loss;
+}
+
+// ---------- THE TASK.  Distinct random tokens, one block of K repeated
+// later at a random offset:   . . a b c . . . a b c
+// Nothing about a alone predicts b and the offset moves, so the only
+// rule that works is "find the earlier copy of my own token, take the
+// token AFTER it" -- the induction circuit, and it needs TWO layers.
+function makeSeq(rnd, V, T, K) {
+  const pool = new Int32Array(V);
+  for (let i = 0; i < V; i++) pool[i] = i;
+  for (let i = V - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
+  const toks = new Int32Array(T);
+  for (let i = 0; i < T; i++) toks[i] = pool[i % V];              // distinct wherever it matters
+  // The SECOND copy is pinned to the end and the FIRST one moves.  That
+  // asymmetry took two rewrites to get right: if both ends move, the
+  // query's own position leaks how far back the answer is, and a
+  // one-layer model scores 42% off that leak instead of its ceiling.
+  // Pinned, the distance back is uniform and no positional rule beats
+  // 1/nStarts -- which bestOffsetBaseline computes by brute force.
+  const b = T - K, nStarts = T - 2 * K + 1;
+  const a = Math.floor(rnd() * nStarts);
+  for (let i = 0; i < K; i++) toks[b + i] = toks[a + i];
+  const targets = [];
+  for (let i = 0; i < K - 1; i++) targets.push({ pos: b + i, y: toks[a + i + 1], src: a + i + 1 });
+  return { toks, targets, a, b, nStarts, K, focus: b + K - 2, y: toks[a + K - 1], ansPos: a + K - 1 };
+}
+function makeDataset(seed, n, V, T, K) {
+  const rnd = mulberry32(seed >>> 0), out = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = makeSeq(rnd, V, T, K);
+  return out;
+}
+// three baselines, all computed rather than asserted
+const uniformBaseline = V => 1 / V;                              // guess any token at all
+function seenSoFarBaseline(data, T) {                            // guess among tokens already seen
+  let s = 0, n = 0;
+  for (const ex of data) for (const tg of ex.targets) {
+    const seen = new Set();
+    for (let i = 0; i <= tg.pos; i++) seen.add(ex.toks[i]);
+    s += 1 / seen.size; n++;
+  }
+  return n ? s / n : 0;
+}
+// The one that matters: the best a PURELY POSITIONAL rule can do -- copy
+// whatever sits d tokens back, d chosen PER QUERY POSITION by brute
+// force.  That is the strategy space of a one-layer model here, so it is
+// the bar the second layer must clear.
+function bestOffsetBaseline(data, T) {
+  const byPos = new Map();
+  for (const ex of data) for (const tg of ex.targets) {
+    if (!byPos.has(tg.pos)) byPos.set(tg.pos, []);
+    byPos.get(tg.pos).push({ ex, tg });
+  }
+  let hit = 0, n = 0;
+  const picks = [];
+  for (const [pos, items] of byPos) {
+    let best = 0, bestD = 1;
+    for (let d = 1; d <= pos; d++) {
+      let c = 0;
+      for (const it of items) if (it.ex.toks[pos - d] === it.tg.y) c++;
+      if (c > best) { best = c; bestD = d; }
+    }
+    hit += best; n += items.length;
+    picks.push({ pos, offset: bestD, acc: items.length ? best / items.length : 0 });
+  }
+  return { acc: n ? hit / n : 0, picks };
+}
+
+// ---------- Adam with global gradient-norm clipping
+function makeAdam(m) { return { m1: zerosLike(m), m2: zerosLike(m), t: 0 }; }
+function eachTensor(g, fn) {
+  fn(g.WE); fn(g.WP); fn(g.WU);
+  for (const l of g.layers) { fn(l.WQ); fn(l.WK); fn(l.WV); fn(l.WO); }
+}
+function gradNorm(g) {
+  let s = 0;
+  eachTensor(g, a => { for (let i = 0; i < a.length; i++) s += a[i] * a[i]; });
+  return Math.sqrt(s);
+}
+// Not decoration: the learning-rate slider reaches 0.15, far past where
+// an unclipped run explodes.  With the clip the run degrades into
+// garbage but every number stays finite.
+const GRAD_CLIP = 1.0;
+function adamStep(m, g, st, lr) {
+  st.t++;
+  const b1 = 0.9, b2 = 0.999, eps = 1e-8;
+  const gn = gradNorm(g);
+  const scale = (Number.isFinite(gn) && gn > GRAD_CLIP) ? GRAD_CLIP / gn : 1;
+  const c1 = 1 - Math.pow(b1, st.t), c2 = 1 - Math.pow(b2, st.t);
+  const step = (p, gr, u, w) => {
+    for (let i = 0; i < p.length; i++) {
+      let gi = gr[i] * scale;
+      if (!Number.isFinite(gi)) gi = 0;                          // last-ditch guard
+      u[i] = b1 * u[i] + (1 - b1) * gi;
+      w[i] = b2 * w[i] + (1 - b2) * gi * gi;
+      p[i] -= lr * (u[i] / c1) / (Math.sqrt(w[i] / c2) + eps);
+    }
+  };
+  step(m.WE, g.WE, st.m1.WE, st.m2.WE);
+  step(m.WP, g.WP, st.m1.WP, st.m2.WP);
+  step(m.WU, g.WU, st.m1.WU, st.m2.WU);
+  for (let l = 0; l < m.layers.length; l++) for (const k of ['WQ', 'WK', 'WV', 'WO'])
+    step(m.layers[l][k], g.layers[l][k], st.m1.layers[l][k], st.m2.layers[l][k]);
+  return gn;
+}
+function evaluate(model, data, limit) {
+  const V = model.cfg.V, n = limit ? Math.min(limit, data.length) : data.length;
+  let loss = 0, correct = 0, tot = 0;
+  for (let e = 0; e < n; e++) {
+    const ex = data[e], fw = forward(model, ex.toks, { cache: false });
+    for (const tg of ex.targets) {
+      loss += logSumExp(fw.logits, tg.pos * V, V) - fw.logits[tg.pos * V + tg.y];
+      let arg = 0;
+      for (let t = 1; t < V; t++) if (fw.logits[tg.pos * V + t] > fw.logits[tg.pos * V + arg]) arg = t;
+      if (arg === tg.y) correct++;
+      tot++;
+    }
+  }
+  return { loss: loss / tot, acc: correct / tot, n: tot };
+}
+// ---------- a trainer you can advance a few steps at a time, so the
+// page keeps the main thread free while the model genuinely trains
+function makeTrainer(cfg) {
+  const model = makeModel(cfg);
+  const train = makeDataset(cfg.seed * 7919 + 11, cfg.nTrain || 512, cfg.V, cfg.T, cfg.K);
+  const test = makeDataset(cfg.seed * 104729 + 3, cfg.nTest || 160, cfg.V, cfg.T, cfg.K);
+  const opt = makeAdam(model);
+  const rnd = mulberry32(cfg.seed * 31337 + 5);
+  const arF = makeArena(), arB = makeArena();
+  const every = Math.max(1, Math.round(cfg.steps / 24));
+  // warmup then cosine decay: circuits form in a phase change, and a flat
+  // rate either overshoots it or never reaches it
+  const warm = Math.max(1, Math.round(cfg.steps * 0.06));
+  const lrAt = s => s < warm ? cfg.lr * (s + 1) / warm
+    : cfg.lr * (0.08 + 0.92 * 0.5 * (1 + Math.cos(Math.PI * (s - warm) / Math.max(1, cfg.steps - warm))));
+  return {
+    model, train, test, opt, cfg, step: 0, hist: [], lrAt,
+    advance(nSteps) {
+      const B = cfg.batch || 16;
+      for (let s = 0; s < nSteps && this.step < cfg.steps; s++) {
+        const g = zerosLike(model);
+        let loss = 0;
+        for (let b = 0; b < B; b++) {
+          const ex = train[Math.floor(rnd() * train.length)];
+          arF.reset(); arB.reset();
+          loss += backward(model, forward(model, ex.toks, { arena: arF }), ex.targets, g, arB) / B;
+        }
+        eachTensor(g, a => { for (let i = 0; i < a.length; i++) a[i] /= B; });
+        adamStep(model, g, opt, lrAt(this.step));
+        this.step++;
+        if (this.step === 1 || this.step % every === 0 || this.step === cfg.steps)
+          this.hist.push({ step: this.step, loss, ev: evaluate(model, test, 40) });
+      }
+      return this.step >= cfg.steps;
+    }
+  };
+}
+
+// ---------- 1. DIRECT LOGIT ATTRIBUTION.  logit[t] = W_U[:,t].LN(resid)
+// and resid is the SUM of every component write, so with the final
+// LayerNorm scale frozen at the value the forward pass produced, the
+// logit is an EXACT SUM of one number per component -- an identity,
+// checked against a separately written forward pass.
+function directLogitAttribution(m, fw, tok, pos) {
+  const D = m.cfg.D, V = m.cfg.V, sig = fw.fst[pos].sig;
+  return fw.comp.map(cc => {
+    let mu = 0;
+    for (let d = 0; d < D; d++) mu += cc[pos * D + d];
+    mu /= D;
+    let acc = 0;
+    for (let d = 0; d < D; d++) acc += ((cc[pos * D + d] - mu) / sig) * m.WU[d * V + tok];
+    return acc;
+  });
+}
+// the same decomposition of a logit DIFFERENCE -- what circuit papers
+// report, because it cancels everything token-agnostic
+function dlaDiff(m, fw, tokA, tokB, pos) {
+  const a = directLogitAttribution(m, fw, tokA, pos), b = directLogitAttribution(m, fw, tokB, pos);
+  return a.map((x, i) => x - b[i]);
+}
+
+// ---------- 2. THE TWO SIGNATURE SCORES.  prev-token: how much of
+// position i's attention lands on i-1.  induction: how much of a
+// repeated token's attention lands on the position immediately AFTER
+// the earlier copy of itself.
+function prevTokenScore(A, T) {
+  let s = 0;
+  for (let i = 1; i < T; i++) s += A[i * T + (i - 1)];
+  return s / (T - 1);
+}
+function inductionScore(A, T, ex) {
+  let s = 0;
+  for (const tg of ex.targets) s += A[tg.pos * T + tg.src];
+  return s / ex.targets.length;
+}
+function headScores(m, data, k) {
+  const c = m.cfg, out = [];
+  for (let l = 0; l < c.L; l++) for (let h = 0; h < c.H; h++) out.push({ l, h, prev: 0, ind: 0, comp: 1 + l * c.H + h, name: 'L' + l + 'H' + h });
+  const n = Math.min(k, data.length);
+  for (let e = 0; e < n; e++) {
+    const fw = forward(m, data[e].toks, { cache: false });
+    let idx = 0;
+    for (let l = 0; l < c.L; l++) for (let h = 0; h < c.H; h++) {
+      out[idx].prev += prevTokenScore(fw.cache.A[l][h], c.T) / n;
+      out[idx].ind += inductionScore(fw.cache.A[l][h], c.T, data[e]) / n;
+      idx++;
+    }
+  }
+  return out;
+}
+
+// ---------- 3. ABLATION.  Three flavours, and they do not agree, which
+// is the point.  Zero-ablation shoves the model off-distribution; mean-
+// and resample-ablation keep it on-distribution.
+function headMeanOutputs(m, data, k) {
+  const c = m.cfg, n = Math.min(k, data.length), nc = nComponents(c), acc = [];
+  for (let i = 0; i < nc; i++) acc.push(new Float64Array(c.T * c.D));
+  for (let e = 0; e < n; e++) {
+    const fw = forward(m, data[e].toks, { cache: false });
+    for (let i = 0; i < nc; i++) for (let j = 0; j < c.T * c.D; j++) acc[i][j] += fw.comp[i][j] / n;
+  }
+  return acc;
+}
+function fullMask(T) { const u = new Uint8Array(T); u.fill(1); return u; }
+function ablationOverride(cfg, compIdx, mode, means, donor) {
+  const ov = new Array(nComponents(cfg)).fill(null);
+  let val;
+  if (mode === 'zero') val = new Float64Array(cfg.T * cfg.D);
+  else if (mode === 'mean') val = means[compIdx];
+  else val = donor.comp[compIdx];                      // resample: another real sequence
+  ov[compIdx] = { mask: fullMask(cfg.T), val };
+  return ov;
+}
+// the metric: how far the right answer sits above the best wrong answer
+function logitGap(logits, off, y, V) {
+  let best = -Infinity;
+  for (let t = 0; t < V; t++) if (t !== y && logits[off + t] > best) best = logits[off + t];
+  return logits[off + y] - best;
+}
+function ablationTable(m, data, mode, means, donors, k) {
+  const c = m.cfg, nc = nComponents(c), names = componentNames(c), n = Math.min(k, data.length);
+  const base = { loss: 0, gap: 0, acc: 0 }, rows = [];
+  for (let i = 0; i < nc; i++) rows.push({ name: names[i], comp: i, loss: 0, gap: 0, acc: 0 });
+  let tot = 0;
+  const score = (fw, ex, into, w) => {
+    for (const tg of ex.targets) {
+      into.loss += (logSumExp(fw.logits, tg.pos * c.V, c.V) - fw.logits[tg.pos * c.V + tg.y]) * w;
+      into.gap += logitGap(fw.logits, tg.pos * c.V, tg.y, c.V) * w;
+      let arg = 0;
+      for (let t = 1; t < c.V; t++) if (fw.logits[tg.pos * c.V + t] > fw.logits[tg.pos * c.V + arg]) arg = t;
+      if (arg === tg.y) into.acc += w;
+    }
+  };
+  for (let e = 0; e < n; e++) tot += data[e].targets.length;
+  const w = 1 / tot;
+  for (let e = 0; e < n; e++) {
+    const ex = data[e];
+    score(forward(m, ex.toks, { cache: false }), ex, base, w);
+    for (let i = 0; i < nc; i++) {
+      const ov = ablationOverride(c, i, mode, means, donors[e % donors.length]);
+      score(forward(m, ex.toks, { override: ov, cache: false }), ex, rows[i], w);
+    }
+  }
+  for (const r of rows) { r.dLoss = r.loss - base.loss; r.dGap = r.gap - base.gap; r.dAcc = r.acc - base.acc; }
+  return { base, rows };
+}
+
+// ---------- 4. ACTIVATION PATCHING.  Splice ONE clean activation into a
+// corrupted run and see how much of the logit difference comes back.
+// Patch everything -> exactly clean.  Patch nothing -> exactly
+// corrupted.  Both are identities the verifier checks.
+function corruptSeq(ex, V, rnd) {
+  const toks = ex.toks.slice();
+  const used = new Set(Array.from(toks));
+  let alt = -1;
+  for (let t = 0; t < V; t++) if (!used.has(t)) { alt = t; break; }
+  if (alt < 0) alt = (ex.y + 1) % V;
+  const srcPos = ex.ansPos;                            // the token the induction head must copy
+  toks[srcPos] = alt;
+  return { toks, y: alt, yClean: ex.y, focus: ex.focus, srcPos, targets: ex.targets };
+}
+function patchOverride(cfg, cleanFw, pairs) {
+  const ov = new Array(nComponents(cfg)).fill(null);
+  for (const pr of pairs) {
+    const ci = pr[0], pos = pr[1];
+    if (!ov[ci]) ov[ci] = { mask: new Uint8Array(cfg.T), val: cleanFw.comp[ci] };
+    ov[ci].mask[pos] = 1;
+  }
+  return ov;
+}
+function allPatchPairs(cfg) {
+  const out = [];
+  for (let ci = 0; ci < nComponents(cfg); ci++) for (let p = 0; p < cfg.T; p++) out.push([ci, p]);
+  return out;
+}
+// 0 = the patch changed nothing, 1 = it fully restored clean behaviour
+function patchGrid(m, ex, corr) {
+  const c = m.cfg, nc = nComponents(c), P = ex.focus;
+  const cleanFw = forward(m, ex.toks, { cache: false });
+  const corrFw = forward(m, corr.toks, { cache: false });
+  const md = fw => fw.logits[P * c.V + ex.y] - fw.logits[P * c.V + corr.y];
+  const lo = md(corrFw), hi = md(cleanFw), den = hi - lo;
+  const grid = [];
+  for (let ci = 0; ci < nc; ci++) {
+    const r = new Float64Array(c.T);
+    for (let p = 0; p < c.T; p++) {
+      const f = forward(m, corr.toks, { override: patchOverride(c, cleanFw, [[ci, p]]), cache: false });
+      r[p] = Math.abs(den) < 1e-12 ? 0 : (md(f) - lo) / den;
+    }
+    grid.push(r);
+  }
+  return { grid, clean: hi, corrupted: lo, names: componentNames(c), focus: P };
+}
+
+// ---------- 5. THE LOGIT LENS.  Unembed the residual stream at every
+// depth and watch the prediction assemble itself.  Nothing here is
+// trained -- it is the same W_U, applied earlier than intended.
+function logitLens(m, fw, pos) {
+  const c = m.cfg, D = c.D, V = c.V, H = c.H, L = c.L;
+  const acc = new Float64Array(D), stages = [];
+  const emit = label => {
+    const st = lnStats(acc, 0, D), lg = new Float64Array(V);
+    for (let t = 0; t < V; t++) {
+      let s = 0;
+      for (let d = 0; d < D; d++) s += ((acc[d] - st.mu) / st.sig) * m.WU[d * V + t];
+      lg[t] = s;
+    }
+    const lse = logSumExp(lg, 0, V), pr = new Float64Array(V);
+    for (let t = 0; t < V; t++) pr[t] = Math.exp(lg[t] - lse);
+    stages.push({ label, logits: lg, probs: pr });
+  };
+  for (let d = 0; d < D; d++) acc[d] = fw.comp[0][pos * D + d];
+  emit('embed+pos');
+  for (let l = 0; l < L; l++) {
+    for (let h = 0; h < H; h++) for (let d = 0; d < D; d++) acc[d] += fw.comp[1 + l * H + h][pos * D + d];
+    emit('after L' + l);
+  }
+  return stages;
+}
+
+// ---------- 6. QK AND OV CIRCUITS.  A head factorises into "where to
+// look" (W_Q W_K^T) and "what to move" (W_V W_O).  Sandwich each between
+// the embeddings and both become readable in token space, which turns a
+// pile of weights into a claim you can check.
+function mm(A, B, M, K, N) {                           // plain [M,K] x [K,N]
+  const C = new Float64Array(M * N);
+  for (let i = 0; i < M; i++) for (let k = 0; k < K; k++) {
+    const a = A[i * K + k];
+    if (a === 0) continue;
+    for (let j = 0; j < N; j++) C[i * N + j] += a * B[k * N + j];
+  }
+  return C;
+}
+function transpose(A, M, N) {
+  const B = new Float64Array(N * M);
+  for (let i = 0; i < M; i++) for (let j = 0; j < N; j++) B[j * M + i] = A[i * N + j];
+  return B;
+}
+// W_Q / W_K / W_V are stored [head][d_head][d_model] because that is the
+// layout whose inner loop is contiguous; the circuit algebra wants
+// [d_model][d_head], so slicing a head also transposes it.
+function headMat(L, key, h, D, dh) {
+  const src = L[key], out = new Float64Array(D * dh), off = h * dh * D;
+  for (let a = 0; a < dh; a++) for (let d = 0; d < D; d++) out[d * dh + a] = src[off + a * D + d];
+  return out;
+}
+function headWO(L, h, dh, D) {
+  const out = new Float64Array(dh * D), off = h * dh * D;
+  for (let i = 0; i < dh * D; i++) out[i] = L.WO[off + i];
+  return out;
+}
+// OV in token space: W_E W_V W_O W_U.  A COPYING head has a positive
+// diagonal -- attending to token t raises the logit of token t.
+function ovCircuit(m, l, h) {
+  const c = m.cfg, D = c.D, V = c.V, dh = c.dh;
+  const WV = headMat(m.layers[l], 'WV', h, D, dh), WO = headWO(m.layers[l], h, dh, D);
+  return mm(mm(mm(m.WE, WV, V, D, dh), WO, V, dh, D), m.WU, V, D, V);
+}
+// full QK circuit in token space: W_E W_Q W_K^T W_E^T  [V,V]
+function qkCircuit(m, l, h) {
+  const c = m.cfg, D = c.D, V = c.V, dh = c.dh;
+  const WQ = headMat(m.layers[l], 'WQ', h, D, dh), WK = headMat(m.layers[l], 'WK', h, D, dh);
+  return mm(mm(m.WE, WQ, V, D, dh), transpose(mm(m.WE, WK, V, D, dh), V, dh), V, dh, V);
+}
+// positional QK: W_P W_Q W_K^T W_P^T.  A previous-token head is a bright
+// sub-diagonal here and essentially nothing else.
+function qkPos(m, l, h) {
+  const c = m.cfg, D = c.D, T = c.T, dh = c.dh;
+  const WQ = headMat(m.layers[l], 'WQ', h, D, dh), WK = headMat(m.layers[l], 'WK', h, D, dh);
+  return mm(mm(m.WP, WQ, T, D, dh), transpose(mm(m.WP, WK, T, D, dh), T, dh), T, dh, T);
+}
+// K-COMPOSITION: the induction head's KEY comes not from the token at
+// that position but from what a layer-0 head WROTE there.  Query token t
+// against "the position whose PREVIOUS token was t".  A diagonal here IS
+// the induction circuit, and it cannot exist in a one-layer model.
+function kComposition(m, l0, h0, l1, h1) {
+  const c = m.cfg, D = c.D, V = c.V, dh = c.dh;
+  const WV0 = headMat(m.layers[l0], 'WV', h0, D, dh), WO0 = headWO(m.layers[l0], h0, dh, D);
+  const WQ1 = headMat(m.layers[l1], 'WQ', h1, D, dh), WK1 = headMat(m.layers[l1], 'WK', h1, D, dh);
+  const q = mm(m.WE, WQ1, V, D, dh);                            // [V, dh]
+  const moved = mm(mm(m.WE, WV0, V, D, dh), WO0, V, dh, D);     // [V, D] what L0 writes
+  return mm(q, transpose(mm(moved, WK1, V, D, dh), V, dh), V, dh, V);
+}
+// how diagonal is an [n,n] matrix: the fraction of rows whose argmax is i
+function diagonality(M, n) {
+  let hit = 0;
+  for (let i = 0; i < n; i++) {
+    let arg = 0;
+    for (let j = 1; j < n; j++) if (M[i * n + j] > M[i * n + arg]) arg = j;
+    if (arg === i) hit++;
+  }
+  return hit / n;
+}
+
+// ---------- 7. SUPERPOSITION.  Anthropic toy model: mF features, nD < mF
+// dimensions, sparse inputs, x_hat = ReLU(W^T W x + b).  Dense data: it
+// keeps nD features.  Sparse data: it packs MORE than nD into nD
+// directions and eats the interference -- why one neuron rarely means
+// one thing.
+function toyTrain(mF, nD, density, steps, lr, seed, batch) {
+  const rnd = mulberry32(seed >>> 0), gs = makeGauss(rnd);
+  const W = new Float64Array(mF * nD);
+  for (let i = 0; i < mF * nD; i++) W[i] = gs(0.3);
+  const b = new Float64Array(mF), imp = new Float64Array(mF);
+  for (let i = 0; i < mF; i++) imp[i] = Math.pow(0.93, i);       // decaying importance
+  const st = { m1W: new Float64Array(mF * nD), m2W: new Float64Array(mF * nD), m1b: new Float64Array(mF), m2b: new Float64Array(mF), t: 0 };
+  const B = batch || 48, hist = [];
+  const x = new Float64Array(mF), hV = new Float64Array(nD), pre = new Float64Array(mF), xh = new Float64Array(mF), dpre = new Float64Array(mF), dh2 = new Float64Array(nD);
+  for (let s = 0; s < steps; s++) {
+    const gW = new Float64Array(mF * nD), gb = new Float64Array(mF);
+    let loss = 0;
+    for (let e = 0; e < B; e++) {
+      for (let i = 0; i < mF; i++) x[i] = rnd() < density ? rnd() : 0;
+      hV.fill(0);
+      for (let i = 0; i < mF; i++) { const xi = x[i]; if (xi === 0) continue; for (let d = 0; d < nD; d++) hV[d] += xi * W[i * nD + d]; }
+      for (let i = 0; i < mF; i++) {
+        let s2 = b[i];
+        for (let d = 0; d < nD; d++) s2 += hV[d] * W[i * nD + d];
+        pre[i] = s2; xh[i] = s2 > 0 ? s2 : 0;
+      }
+      for (let i = 0; i < mF; i++) {
+        const e2 = xh[i] - x[i];
+        loss += imp[i] * e2 * e2 / B;
+        dpre[i] = pre[i] > 0 ? 2 * imp[i] * e2 / B : 0;
+      }
+      dh2.fill(0);
+      for (let i = 0; i < mF; i++) {
+        const dp = dpre[i]; gb[i] += dp;
+        if (dp !== 0) for (let d = 0; d < nD; d++) { gW[i * nD + d] += dp * hV[d]; dh2[d] += dp * W[i * nD + d]; }
+      }
+      for (let i = 0; i < mF; i++) { const xi = x[i]; if (xi === 0) continue; for (let d = 0; d < nD; d++) gW[i * nD + d] += dh2[d] * xi; }
+    }
+    st.t++;
+    const b1 = 0.9, b2 = 0.999, eps = 1e-8, c1 = 1 - Math.pow(b1, st.t), c2 = 1 - Math.pow(b2, st.t);
+    const upd = (p, g, u, w) => {
+      for (let i = 0; i < p.length; i++) {
+        let gi = g[i]; if (!Number.isFinite(gi)) gi = 0;
+        u[i] = b1 * u[i] + (1 - b1) * gi; w[i] = b2 * w[i] + (1 - b2) * gi * gi;
+        p[i] -= lr * (u[i] / c1) / (Math.sqrt(w[i] / c2) + eps);
+      }
+    };
+    upd(W, gW, st.m1W, st.m2W); upd(b, gb, st.m1b, st.m2b);
+    if (s % Math.max(1, Math.round(steps / 16)) === 0 || s === steps - 1) hist.push({ step: s + 1, loss });
+  }
+  return { W, b, mF, nD, hist, density };
+}
+function toyStats(t, thresh) {
+  const W = t.W, mF = t.mF, nD = t.nD, th = thresh === undefined ? 0.35 : thresh;
+  const norms = new Float64Array(mF);
+  for (let i = 0; i < mF; i++) { let s = 0; for (let d = 0; d < nD; d++) s += W[i * nD + d] * W[i * nD + d]; norms[i] = Math.sqrt(s); }
+  let rep = 0, maxOff = 0, sumOff = 0, cnt = 0;
+  for (let i = 0; i < mF; i++) if (norms[i] > th) rep++;
+  for (let i = 0; i < mF; i++) for (let j = 0; j < mF; j++) {
+    if (i === j || norms[i] < th || norms[j] < th) continue;
+    let s = 0;
+    for (let d = 0; d < nD; d++) s += W[i * nD + d] * W[j * nD + d];
+    s = Math.abs(s) / (norms[i] * norms[j]);
+    if (s > maxOff) maxOff = s;
+    sumOff += s; cnt++;
+  }
+  return { norms, represented: rep, dims: nD, features: mF, maxInterference: maxOff, meanInterference: cnt ? sumOff / cnt : 0 };
+}
+
+// ---------- 8. SPARSE AUTOENCODER.  The current best answer to
+// superposition: an OVERCOMPLETE dictionary with an L1 penalty, so each
+// example lights up a handful of directions.  Trained here, for real, on
+// the transformer's own residual stream, hand-written backward pass.
+function makeSAE(D, M, seed) {
+  const rnd = mulberry32(seed >>> 0), gs = makeGauss(rnd);
+  const s = { D, M, Wd: new Float64Array(M * D), We: new Float64Array(M * D), be: new Float64Array(M), bd: new Float64Array(D) };
+  for (let f = 0; f < M; f++) {
+    let n = 0;
+    for (let d = 0; d < D; d++) { const v = gs(1); s.Wd[f * D + d] = v; n += v * v; }
+    n = Math.sqrt(n) || 1;
+    for (let d = 0; d < D; d++) { s.Wd[f * D + d] /= n; s.We[f * D + d] = s.Wd[f * D + d]; }
+  }
+  return s;
+}
+function saeNormalise(s) {                              // unit-norm dictionary atoms
+  for (let f = 0; f < s.M; f++) {
+    let n = 0;
+    for (let d = 0; d < s.D; d++) n += s.Wd[f * s.D + d] * s.Wd[f * s.D + d];
+    const inv = 1 / Math.max(Math.sqrt(n), 1e-8);
+    for (let d = 0; d < s.D; d++) s.Wd[f * s.D + d] *= inv;
+  }
+}
+function saeForward(s, x, off) {
+  const D = s.D, M = s.M;
+  const xc = new Float64Array(D);
+  for (let d = 0; d < D; d++) xc[d] = x[off + d] - s.bd[d];
+  const pre = new Float64Array(M), h = new Float64Array(M);
+  for (let f = 0; f < M; f++) {
+    let a = s.be[f];
+    for (let d = 0; d < D; d++) a += s.We[f * D + d] * xc[d];
+    pre[f] = a; h[f] = a > 0 ? a : 0;
+  }
+  const xh = new Float64Array(D);
+  for (let d = 0; d < D; d++) xh[d] = s.bd[d];
+  for (let f = 0; f < M; f++) { const hf = h[f]; if (hf === 0) continue; for (let d = 0; d < D; d++) xh[d] += hf * s.Wd[f * D + d]; }
+  return { xc, pre, h, xh };
+}
+function saeLossGrad(s, x, off, l1, g) {
+  const D = s.D, M = s.M, f0 = saeForward(s, x, off);
+  let mse = 0, l1v = 0;
+  const dxh = new Float64Array(D);
+  for (let d = 0; d < D; d++) { const e = f0.xh[d] - x[off + d]; mse += e * e; dxh[d] = 2 * e; }
+  for (let f = 0; f < M; f++) l1v += f0.h[f];
+  if (!g) return { loss: mse + l1 * l1v, mse, l1v, h: f0.h, xh: f0.xh };
+  const dxc = new Float64Array(D);
+  for (let f = 0; f < M; f++) {
+    const hf = f0.h[f];
+    let dh = l1;
+    for (let d = 0; d < D; d++) { if (hf !== 0) g.Wd[f * D + d] += dxh[d] * hf; dh += dxh[d] * s.Wd[f * D + d]; }
+    const dpre = f0.pre[f] > 0 ? dh : 0;
+    if (dpre !== 0) {
+      g.be[f] += dpre;
+      for (let d = 0; d < D; d++) { g.We[f * D + d] += dpre * f0.xc[d]; dxc[d] += dpre * s.We[f * D + d]; }
+    }
+  }
+  for (let d = 0; d < D; d++) g.bd[d] += dxh[d] - dxc[d];
+  return { loss: mse + l1 * l1v, mse, l1v, h: f0.h, xh: f0.xh };
+}
+function saeZeroGrad(s) {
+  return { Wd: new Float64Array(s.M * s.D), We: new Float64Array(s.M * s.D), be: new Float64Array(s.M), bd: new Float64Array(s.D) };
+}
+function saeTrain(s, X, n, D, steps, lr, l1, seed, batch) {
+  const rnd = mulberry32(seed >>> 0), B = Math.min(batch || 48, n);
+  const st = { t: 0, m: saeZeroGrad(s), v: saeZeroGrad(s) }, hist = [];
+  const KEYS = ['Wd', 'We', 'be', 'bd'];
+  for (let it = 0; it < steps; it++) {
+    const g = saeZeroGrad(s);
+    let loss = 0;
+    for (let b = 0; b < B; b++) loss += saeLossGrad(s, X, Math.floor(rnd() * n) * D, l1, g).loss / B;
+    for (const k of KEYS) { const a = g[k]; for (let i = 0; i < a.length; i++) a[i] /= B; }
+    st.t++;
+    const b1 = 0.9, b2 = 0.999, eps = 1e-8, c1 = 1 - Math.pow(b1, st.t), c2 = 1 - Math.pow(b2, st.t);
+    for (const k of KEYS) {
+      const p = s[k], gr = g[k], u = st.m[k], w = st.v[k];
+      for (let i = 0; i < p.length; i++) {
+        let gi = gr[i]; if (!Number.isFinite(gi)) gi = 0;
+        u[i] = b1 * u[i] + (1 - b1) * gi; w[i] = b2 * w[i] + (1 - b2) * gi * gi;
+        p[i] -= lr * (u[i] / c1) / (Math.sqrt(w[i] / c2) + eps);
+      }
+    }
+    saeNormalise(s);
+    if (it % Math.max(1, Math.round(steps / 16)) === 0 || it === steps - 1) hist.push({ step: it + 1, loss });
+  }
+  return hist;
+}
+function saeStats(s, X, n, D) {
+  let sse = 0, sst = 0, l0 = 0;
+  const mean = new Float64Array(D);
+  for (let i = 0; i < n; i++) for (let d = 0; d < D; d++) mean[d] += X[i * D + d] / n;
+  const alive = new Uint8Array(s.M);
+  for (let i = 0; i < n; i++) {
+    const f0 = saeForward(s, X, i * D);
+    for (let d = 0; d < D; d++) {
+      const e = f0.xh[d] - X[i * D + d]; sse += e * e;
+      const t = X[i * D + d] - mean[d]; sst += t * t;
+    }
+    for (let f = 0; f < s.M; f++) if (f0.h[f] > 1e-8) { l0++; alive[f] = 1; }
+  }
+  let live = 0;
+  for (let f = 0; f < s.M; f++) if (alive[f]) live++;
+  return { fvu: sst > 0 ? sse / sst : 0, mse: sse / (n * D), l0: l0 / n, live, dead: s.M - live, width: s.M };
+}
+// Are the learned directions more single-meaning than the raw neurons?
+// Ground truth: the token each activation was produced to predict.  Take
+// each direction's top-activating examples and measure how concentrated
+// their labels are.  1.0 = one label and nothing else.
+function purity(acts, n, W, labels, nLab, topFrac) {
+  const K = Math.max(4, Math.round(n * (topFrac || 0.06))), out = [];
+  const order = new Array(n);
+  for (let f = 0; f < W; f++) {
+    for (let i = 0; i < n; i++) order[i] = i;
+    order.sort((a, b) => acts[b * W + f] - acts[a * W + f]);
+    if (acts[order[0] * W + f] <= 1e-9) continue;       // a dead direction has no top set
+    const cnt = new Float64Array(nLab);
+    for (let i = 0; i < K; i++) cnt[labels[order[i]]]++;
+    let mx = 0;
+    for (let c = 0; c < nLab; c++) if (cnt[c] > mx) mx = cnt[c];
+    out.push(mx / K);
+  }
+  if (!out.length) return { mean: 0, n: 0 };
+  let s = 0;
+  for (const v of out) s += v;
+  return { mean: s / out.length, n: out.length };
+}
+// Residual-stream activations at the focus position, plus their labels.
+// abs() on the raw stream so a neuron is judged on magnitude exactly as
+// the SAE features are -- otherwise the comparison would be rigged.
+function collectActs(m, data, k) {
+  const c = m.cfg, D = c.D, n = Math.min(k, data.length);
+  const X = new Float64Array(n * D), Xa = new Float64Array(n * D), lab = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    const ex = data[i], fw = forward(m, ex.toks, { cache: false }), P = ex.focus, st = lnStats(fw.resid, P * D, D);
+    for (let d = 0; d < D; d++) {
+      const v = (fw.resid[P * D + d] - st.mu) / st.sig;
+      X[i * D + d] = v; Xa[i * D + d] = Math.abs(v);
+    }
+    lab[i] = ex.y;
+  }
+  return { X, Xa, lab, n, D };
+}
+function saeCodes(s, X, n, D) {
+  const H = new Float64Array(n * s.M);
+  for (let i = 0; i < n; i++) {
+    const f0 = saeForward(s, X, i * D);
+    for (let f = 0; f < s.M; f++) H[i * s.M + f] = f0.h[f];
+  }
+  return H;
+}
+// ENGINE:END
+
+// ==================================================================
+//  DRIVER -- orchestration and painting only.  Every number it shows
+//  comes out of the verified core above.
+// ==================================================================
+const $ = id => document.getElementById(id);
+function fit(cv) {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(80, cv.clientWidth || 300), h = Math.max(60, cv.clientHeight || 150);
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h };
+}
+const fmt = (v, d) => (Number.isFinite(v) ? v.toFixed(d === undefined ? 2 : d) : '—');
+const pctS = v => Number.isFinite(v) ? (100 * v).toFixed(1) + '%' : '—';
+const COL = { two: '#4338ca', one: '#94a3b8', ceil: '#0f172a', ind: '#be123c', ok: '#047857', hd: '#0e7490', sae: '#047857' };
+const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWX';
+const tokName = t => LETTERS[t % LETTERS.length];
+
+const DMS = [12, 16, 20, 24, 32], HS = [1, 2, 4];
+const S = {
+  gen: 0, cfg: null, tr2: null, tr1: null, model: null, test: null, ceiling: 0,
+  heads: [], sel: 0, ablMode: 'zero', exIdx: 0, means: null, donors: null,
+  acts: null, sae: null, toy: null, checks: null, done2: false, done1: false,
+  prevHead: null, indHead: null, chunk: 8
+};
+
+// ---------- read the controls
+function readCfg() {
+  const D = DMS[+$('dmR').value];
+  let H = HS[+$('hR').value];
+  while (H > 1 && D % H !== 0) H = H >> 1;                 // keep d_head an integer
+  const T = +$('tR').value;
+  const V = Math.max(T, +$('vR').value);                   // need T distinct tokens
+  return {
+    V, T, K: 3, D, H, L: 2, seed: +$('seedR').value, lr: (+$('lrR').value) / 500,
+    steps: +$('stR').value, batch: +$('bsR').value, nTrain: 1024, nTest: 96, iP: 0.10
+  };
+}
+function syncLabels(cfg) {
+  $('seedV').textContent = cfg.seed; $('dmV').textContent = cfg.D; $('hV').textContent = cfg.H;
+  $('lrV').textContent = cfg.lr.toFixed(3); $('stV').textContent = cfg.steps; $('bsV').textContent = cfg.batch;
+  $('tV').textContent = cfg.T; $('vV').textContent = cfg.V;
+  $('hd_L').textContent = 2; $('hd_H').textContent = cfg.H; $('hd_D').textContent = cfg.D; $('t_K').textContent = cfg.K;
+}
+
+// ---------- an INDEPENDENT logit recomputation, for the in-tab checks.
+// Deliberately not sharing a line with forward(): if both were wrong in
+// the same way the check would pass and mean nothing.
+function refLogits(m, toks) {
+  const c = m.cfg, V = c.V, T = c.T, D = c.D, H = c.H, L = c.L, dh = c.dh;
+  const resid = [];
+  for (let i = 0; i < T; i++) { const r = []; for (let d = 0; d < D; d++) r.push(m.WE[toks[i] * D + d] + m.WP[i * D + d]); resid.push(r); }
+  const ln = x => {
+    let mu = 0; for (const v of x) mu += v; mu /= x.length;
+    let s = 0; for (const v of x) s += (v - mu) * (v - mu);
+    const sig = Math.sqrt(s / x.length + 1e-5);
+    return x.map(v => (v - mu) / sig);
+  };
+  for (let l = 0; l < L; l++) {
+    const nrm = resid.map(ln), sc = 1 / Math.sqrt(dh);
+    for (let h = 0; h < H; h++) {
+      const off = h * dh * D, q = [], k = [], v = [];
+      for (let i = 0; i < T; i++) {
+        const qi = [], ki = [], vi = [];
+        for (let a = 0; a < dh; a++) {
+          let sq = 0, sk = 0, sv = 0;
+          for (let d = 0; d < D; d++) { const x = nrm[i][d], w = off + a * D + d; sq += x * m.layers[l].WQ[w]; sk += x * m.layers[l].WK[w]; sv += x * m.layers[l].WV[w]; }
+          qi.push(sq); ki.push(sk); vi.push(sv);
+        }
+        q.push(qi); k.push(ki); v.push(vi);
+      }
+      const out = [];
+      for (let i = 0; i < T; i++) {
+        const raw = [];
+        for (let j = 0; j <= i; j++) { let s = 0; for (let a = 0; a < dh; a++) s += q[i][a] * k[j][a]; raw.push(s * sc); }
+        let mx = -Infinity; for (const r of raw) if (r > mx) mx = r;
+        let Z = 0; const e = raw.map(r => { const t = Math.exp(r - mx); Z += t; return t; });
+        const iZ = 1 / Z, A = e.map(t => t * iZ);
+        const z = new Array(dh).fill(0);
+        for (let j = 0; j <= i; j++) for (let a = 0; a < dh; a++) z[a] += A[j] * v[j][a];
+        const oi = new Array(D).fill(0);
+        for (let a = 0; a < dh; a++) { const za = z[a]; if (za === 0) continue; for (let d = 0; d < D; d++) oi[d] += za * m.layers[l].WO[off + a * D + d]; }
+        out.push(oi);
+      }
+      for (let i = 0; i < T; i++) for (let d = 0; d < D; d++) resid[i][d] += out[i][d];
+    }
+  }
+  return resid.map(r => {
+    const y = ln(r), li = new Array(V).fill(0);
+    for (let d = 0; d < D; d++) { const x = y[d]; if (x === 0) continue; for (let t = 0; t < V; t++) li[t] += x * m.WU[d * V + t]; }
+    return li;
+  });
+}
+
+// ==================== TRAINING PIPELINE ====================
+function startTraining() {
+  const gen = ++S.gen;
+  const cfg = readCfg();
+  syncLabels(cfg);
+  S.cfg = cfg; S.done2 = false; S.done1 = false; S.checks = null;
+  S.tr2 = makeTrainer(cfg);
+  S.tr1 = makeTrainer(Object.assign({}, cfg, { L: 1 }));
+  S.test = S.tr2.test;
+  S.ceiling = bestOffsetBaseline(makeDataset(cfg.seed * 61 + 7, 400, cfg.V, cfg.T, cfg.K), cfg.T).acc;
+  S.exIdx = Math.min(+$('exR').value, S.test.length - 1);
+  $('checkPill').textContent = 'waiting for training…';
+  $('checkPill').className = 'pill';
+  $('checkPill').style.cssText = 'background:#f1f5f9;color:#475569';
+  $('checkList').innerHTML = '';
+  drawCurves();
+  step2();
+
+  function pump(tr, label, onDone) {
+    if (gen !== S.gen) return;
+    const t0 = performance.now();
+    const fin = tr.advance(S.chunk);
+    const dt = performance.now() - t0;
+    if (dt < 26 && S.chunk < 64) S.chunk++;
+    else if (dt > 55 && S.chunk > 2) S.chunk--;
+    const total = cfg.steps * 2, done = (label === 2 ? tr.step : cfg.steps + tr.step);
+    $('trainBar').style.width = (100 * done / total).toFixed(1) + '%';
+    $('trainPill').textContent = 'training ' + (label === 2 ? '2-layer' : '1-layer control') + ' — step ' + tr.step + ' / ' + cfg.steps;
+    drawCurves();
+    if (fin) onDone(); else setTimeout(() => pump(tr, label, onDone), 0);
+  }
+  function step2() { pump(S.tr2, 2, () => { if (gen !== S.gen) return; S.done2 = true; S.model = S.tr2.model; buildAnalysis(); redrawAll(); setTimeout(step1, 0); }); }
+  function step1() {
+    pump(S.tr1, 1, () => {
+      if (gen !== S.gen) return;
+      S.done1 = true;
+      $('trainBar').style.width = '100%';
+      $('trainPill').textContent = 'all live · nothing pre-computed';
+      $('trainPill').className = 'pill okpill';
+      drawCurves(); drawStats();
+      setTimeout(() => { if (gen === S.gen) runChecks(); }, 0);
+    });
+  }
+}
+
+function buildAnalysis() {
+  const m = S.model, cfg = S.cfg;
+  S.heads = headScores(m, S.test, 48);
+  S.means = headMeanOutputs(m, S.test, 32);
+  S.donors = S.test.slice(0, 8).map(ex => forward(m, ex.toks, { cache: false }));
+  let bi = 0, bp = 0;
+  for (let i = 0; i < S.heads.length; i++) {
+    if (S.heads[i].ind > S.heads[bi].ind) bi = i;
+    if (S.heads[i].l === 0 && S.heads[i].prev > S.heads[bp].prev) bp = i;
+  }
+  S.indHead = S.heads[bi]; S.prevHead = S.heads[bp]; S.sel = bi;
+  // activations for the SAE, and the SAE itself
+  S.acts = collectActs(m, makeDataset(cfg.seed * 13 + 91, 320, cfg.V, cfg.T, cfg.K), 320);
+  trainSAE();
+  trainToy();
+}
+function trainSAE() {
+  if (!S.acts) return;
+  const lam = (+$('l1R').value) / 100, wm = +$('wmR').value;
+  $('l1V').textContent = lam.toFixed(2); $('wmV').textContent = wm + '×';
+  const D = S.acts.D, M = wm * D;
+  const sae = makeSAE(D, M, 11);
+  saeTrain(sae, S.acts.X, S.acts.n, D, 320, 0.01, lam, 7, 48);
+  const st = saeStats(sae, S.acts.X, S.acts.n, D);
+  const codes = saeCodes(sae, S.acts.X, S.acts.n, D);
+  const pS = purity(codes, S.acts.n, M, S.acts.lab, S.cfg.V, 0.06);
+  const pN = purity(S.acts.Xa, S.acts.n, D, S.acts.lab, S.cfg.V, 0.06);
+  S.sae = { sae, st, pS, pN, lam, wm, M };
+}
+function trainToy() {
+  const dens = (+$('densR').value) / 25, nd = +$('ndR').value;
+  $('densV').textContent = dens.toFixed(2); $('ndV').textContent = nd;
+  const t = toyTrain(20, nd, dens, 420, 0.02, 3, 48);
+  S.toy = { t, st: toyStats(t) };
+}
+
+// ==================== DRAWING ====================
+function axes(ctx, L, T, pw, ph, yTicks, fmtY) {
+  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+  for (const yt of yTicks) {
+    const y = T + (1 - yt.f) * ph;
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+    ctx.fillStyle = '#94a3b8'; ctx.fillText(fmtY(yt.v), L - 4, y + 3);
+  }
+}
+function drawCurves() { drawLoss(); drawAcc(); drawStats(); }
+
+function drawLoss() {
+  const { ctx, w, h } = fit($('lossC'));
+  const T = 14, B = 26, L = 40, pw = w - L - 10, ph = h - T - B;
+  const h2 = S.tr2 ? S.tr2.hist : [], h1 = S.tr1 ? S.tr1.hist : [];
+  let mx = 0.1;
+  for (const s of [h2, h1]) for (const p of s) if (Number.isFinite(p.ev.loss)) mx = Math.max(mx, p.ev.loss);
+  mx *= 1.06;
+  axes(ctx, L, T, pw, ph, [0, .25, .5, .75, 1].map(f => ({ f, v: f * mx })), v => v.toFixed(1));
+  const steps = S.cfg ? S.cfg.steps : 1;
+  const line = (hist, col, dash) => {
+    if (!hist.length) return;
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.setLineDash(dash || []);
+    ctx.beginPath();
+    hist.forEach((p, i) => {
+      const x = L + pw * Math.min(1, p.step / steps), y = T + ph * (1 - Math.min(1, p.ev.loss / mx));
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.stroke(); ctx.setLineDash([]);
+  };
+  line(h1, COL.one, [4, 3]); line(h2, COL.two);
+  ctx.font = 'bold 9.5px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillStyle = COL.two; ctx.fillText('■ 2 layers', L + 2, T - 3);
+  ctx.fillStyle = COL.one; ctx.fillText('■ 1 layer (control)', L + 70, T - 3);
+  ctx.fillStyle = '#94a3b8'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('training step  →', L + pw / 2, h - 5);
+  ctx.save(); ctx.translate(9, T + ph / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.fillText('test loss', 0, 0); ctx.restore();
+}
+
+function drawAcc() {
+  const { ctx, w, h } = fit($('accC'));
+  const T = 14, B = 26, L = 40, pw = w - L - 10, ph = h - T - B;
+  axes(ctx, L, T, pw, ph, [0, .25, .5, .75, 1].map(f => ({ f, v: f })), v => (100 * v).toFixed(0) + '%');
+  const steps = S.cfg ? S.cfg.steps : 1;
+  // the ceiling a purely positional rule cannot pass
+  const yc = T + ph * (1 - Math.min(1, S.ceiling));
+  ctx.strokeStyle = COL.ceil; ctx.setLineDash([3, 3]); ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(L, yc); ctx.lineTo(L + pw, yc); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = COL.ceil; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText('best positional rule ' + pctS(S.ceiling), L + pw - 3, yc - 3);
+  const line = (hist, col, dash) => {
+    if (!hist || !hist.length) return;
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.setLineDash(dash || []);
+    ctx.beginPath();
+    hist.forEach((p, i) => {
+      const x = L + pw * Math.min(1, p.step / steps), y = T + ph * (1 - Math.min(1, p.ev.acc));
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.stroke(); ctx.setLineDash([]);
+  };
+  line(S.tr1 ? S.tr1.hist : [], COL.one, [4, 3]);
+  line(S.tr2 ? S.tr2.hist : [], COL.ind);
+  ctx.font = 'bold 9.5px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillStyle = COL.ind; ctx.fillText('■ 2 layers', L + 2, T - 3);
+  ctx.fillStyle = COL.one; ctx.fillText('■ 1 layer (control)', L + 70, T - 3);
+  ctx.fillStyle = '#94a3b8'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('training step  →', L + pw / 2, h - 5);
+  ctx.save(); ctx.translate(9, T + ph / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.fillText('test accuracy', 0, 0); ctx.restore();
+}
+
+function drawStats() {
+  const e2 = S.tr2 && S.tr2.hist.length ? S.tr2.hist[S.tr2.hist.length - 1].ev : null;
+  const e1 = S.tr1 && S.tr1.hist.length ? S.tr1.hist[S.tr1.hist.length - 1].ev : null;
+  $('s_acc2').textContent = e2 ? pctS(e2.acc) : '—';
+  $('s_acc1').textContent = e1 ? pctS(e1.acc) + (S.done1 ? '' : ' …') : '—';
+  $('s_ceil').textContent = pctS(S.ceiling);
+  $('s_loss').textContent = e2 ? fmt(e2.loss, 3) : '—';
+  if (!e2) return;
+  const solved = e2.acc > 0.8, uni = uniformBaseline(S.cfg.V);
+  const first = S.tr2.hist[0].ev.acc;
+  $('trainNote').innerHTML = 'The 2-layer model reached <b class="ci">' + pctS(e2.acc) + '</b> from <b>' + pctS(first) +
+    '</b> at its first evaluation. Uniform guessing scores <b>' + pctS(uni) + '</b>; the best positional rule, chosen per query position by brute force over the test set, scores <b>' + pctS(S.ceiling) +
+    '</b>. ' + (S.done1 && e1 ? 'The one-layer control finished at <b>' + pctS(e1.acc) + '</b>' +
+      (e1.acc < S.ceiling * 1.6 ? ' — right where the positional ceiling says it has to stop, because the key it would need does not exist in a single layer.' : ', above the positional ceiling but far below the two-layer model.') : 'The one-layer control is still training.') +
+    ' ' + (solved ? 'The circuit formed on this seed: look for the step in the accuracy curve.' :
+      '<b>The circuit did not form inside the step budget on this seed</b> — raise <b>steps</b> or <b>batch</b>, or move the seed.');
+}
+
+// ---------- 2. direct logit attribution
+function curEx() { return S.test ? S.test[Math.min(S.exIdx, S.test.length - 1)] : null; }
+function drawTokens(el, toks, ex, hi) {
+  const parts = [];
+  for (let i = 0; i < toks.length; i++) {
+    let cls = 'tok';
+    if (ex && i >= ex.a && i < ex.a + ex.K) cls += ' blk';
+    if (ex && i >= ex.b && i < ex.b + ex.K) cls += ' blk';
+    if (hi && i === hi.q) cls = 'tok q';
+    if (hi && i === hi.a) cls = 'tok a';
+    parts.push('<span class="' + cls + '">' + tokName(toks[i]) + '</span>');
+  }
+  el.innerHTML = parts.join('');
+}
+function drawDLA() {
+  const ex = curEx();
+  if (!ex || !S.model) return;
+  const m = S.model, cfg = S.cfg, tg = ex.targets[ex.targets.length - 1];
+  drawTokens($('tokRow'), ex.toks, ex, { q: tg.pos, a: tg.src });
+  $('tokLegend').innerHTML = 'Shaded = the repeated block. <span class="rs">Indigo</span> = the query position, holding token <b>' +
+    tokName(ex.toks[tg.pos]) + '</b>. <span class="ci">Red</span> = where the answer lives: one position after the earlier copy of that token, holding <b>' + tokName(tg.y) + '</b>.';
+  const fw = forward(m, ex.toks, {});
+  const parts = directLogitAttribution(m, fw, tg.y, tg.pos);
+  const names = componentNames(cfg);
+  const ref = refLogits(m, ex.toks)[tg.pos][tg.y];
+  let sum = 0;
+  for (const p of parts) sum += p;
+
+  const { ctx, w, h } = fit($('dlaC'));
+  const T = 12, B = 30, L = 34, pw = w - L - 8, ph = h - T - B;
+  let mx = 1e-9;
+  for (const p of parts) mx = Math.max(mx, Math.abs(p));
+  mx *= 1.15;
+  const zero = T + ph * 0.5;
+  ctx.strokeStyle = '#cbd5e1'; ctx.beginPath(); ctx.moveTo(L, zero); ctx.lineTo(L + pw, zero); ctx.stroke();
+  ctx.font = '10px sans-serif'; ctx.textAlign = 'right'; ctx.fillStyle = '#94a3b8';
+  ctx.fillText('0', L - 4, zero + 3);
+  ctx.fillText('+' + mx.toFixed(1), L - 4, T + 8);
+  ctx.fillText('−' + mx.toFixed(1), L - 4, T + ph - 2);
+  const bw = pw / parts.length;
+  parts.forEach((p, i) => {
+    const x = L + i * bw + bw * 0.18, ww = bw * 0.64;
+    const hh = (Math.abs(p) / mx) * (ph / 2);
+    const isInd = S.indHead && i === S.indHead.comp;
+    ctx.fillStyle = p >= 0 ? (isInd ? COL.ind : COL.two) : '#f59e0b';
+    ctx.fillRect(x, p >= 0 ? zero - hh : zero, ww, hh);
+    ctx.save(); ctx.translate(x + ww / 2, T + ph + 20); ctx.rotate(-Math.PI / 9);
+    ctx.textAlign = 'center'; ctx.font = (isInd ? 'bold ' : '') + '9px sans-serif'; ctx.fillStyle = isInd ? COL.ind : '#64748b';
+    ctx.fillText(names[i], 0, 0); ctx.restore();
+  });
+  ctx.textAlign = 'center'; ctx.font = 'bold 9.5px sans-serif'; ctx.fillStyle = '#334155';
+  ctx.fillText('logits contributed to “' + tokName(tg.y) + '”', L + pw / 2, T - 2);
+
+  const rows = parts.map((p, i) => '<tr class="' + (S.indHead && i === S.indHead.comp ? 'hit' : 'safe') + '"><td class="nm">' + names[i] + '</td><td>' + p.toFixed(6) + '</td></tr>').join('');
+  $('dlaTable').innerHTML = '<tr><th>component</th><th>logits contributed</th></tr>' + rows +
+    '<tr><td><b>SUM</b></td><td><b>' + sum.toFixed(9) + '</b></td></tr>' +
+    '<tr><td><b>model logit</b> (recomputed independently)</td><td><b>' + ref.toFixed(9) + '</b></td></tr>' +
+    '<tr><td><b>residual</b></td><td><b style="color:#047857">' + Math.abs(sum - ref).toExponential(2) + '</b></td></tr>';
+}
+
+// ---------- 3. attention
+function drawHeads() {
+  if (!S.heads.length) return;
+  const rows = S.heads.map((x, i) => {
+    const isInd = S.indHead && x.comp === S.indHead.comp && x.ind > 0.4;
+    const isPrev = S.prevHead && x.comp === S.prevHead.comp && x.prev > 0.3;
+    return '<tr class="' + (isInd ? 'hit' : 'safe') + '"><td class="nm">' + x.name + '</td><td>' + x.l + '</td><td>' +
+      x.prev.toFixed(3) + '</td><td>' + x.ind.toFixed(3) + '</td><td>' +
+      (isInd ? '<b>induction head</b>' : isPrev ? '<b>previous-token head</b>' : '—') + '</td></tr>';
+  }).join('');
+  $('headTable').innerHTML = '<tr><th>head</th><th>layer</th><th>prev-token score</th><th>induction score</th><th>verdict</th></tr>' + rows;
+  $('headBtns').innerHTML = '<span class="text-[11px] font-bold uppercase tracking-wide text-slate-400">show</span>' +
+    S.heads.map((x, i) => '<button class="preset-btn ' + (i === S.sel ? 'on' : '') + '" data-head="' + i + '">' + x.name + '</button>').join('');
+  document.querySelectorAll('[data-head]').forEach(b => b.onclick = () => { S.sel = +b.dataset.head; drawHeads(); drawAttn(); });
+}
+function heat(cv, R, C, get, opt) {
+  opt = opt || {};
+  const { ctx, w, h } = fit(cv);
+  const T = opt.top || 16, B = opt.bot || 18, L = opt.left || 26, pad = 8;
+  const pw = w - L - pad, ph = h - T - B;
+  const cw = pw / C, chh = ph / R;
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+    const v = get(r, c);
+    ctx.fillStyle = colorOf(v, opt.signed, opt.masked && opt.masked(r, c));
+    ctx.fillRect(L + c * cw, T + r * chh, Math.ceil(cw), Math.ceil(chh));
+  }
+  ctx.font = '8.5px sans-serif'; ctx.fillStyle = '#94a3b8'; ctx.textAlign = 'center';
+  if (opt.colLab) for (let c = 0; c < C; c++) if (cw > 10 || c % 2 === 0) ctx.fillText(opt.colLab(c), L + (c + 0.5) * cw, T + ph + 11);
+  ctx.textAlign = 'right';
+  if (opt.rowLab) for (let r = 0; r < R; r++) if (chh > 9 || r % 2 === 0) ctx.fillText(opt.rowLab(r), L - 3, T + (r + 0.62) * chh);
+  if (opt.title) { ctx.textAlign = 'center'; ctx.fillStyle = '#334155'; ctx.font = 'bold 9.5px sans-serif'; ctx.fillText(opt.title, L + pw / 2, 10); }
+  if (opt.mark) { const [r, c] = opt.mark; ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2; ctx.strokeRect(L + c * cw, T + r * chh, cw, chh); }
+  return { L, T, cw, ch: chh, pw, ph };
+}
+function colorOf(v, signed, masked) {
+  if (masked) return '#1e293b';
+  if (!Number.isFinite(v)) return '#f1f5f9';
+  if (signed) {
+    const t = Math.max(-1, Math.min(1, v));
+    return t >= 0 ? 'rgb(' + Math.round(255 - 200 * t) + ',' + Math.round(255 - 130 * t) + ',255)'
+      : 'rgb(255,' + Math.round(255 + 145 * t) + ',' + Math.round(255 + 175 * t) + ')';
+  }
+  const t = Math.max(0, Math.min(1, v));
+  return 'rgb(' + Math.round(255 - 188 * t) + ',' + Math.round(255 - 235 * t) + ',' + Math.round(255 - 51 * t) + ')';
+}
+function drawAttn() {
+  const ex = curEx();
+  if (!ex || !S.model || !S.heads.length) return;
+  const hd = S.heads[Math.min(S.sel, S.heads.length - 1)], cfg = S.cfg;
+  const fw = forward(S.model, ex.toks, {});
+  const A = fw.cache.A[hd.l][hd.h], T = cfg.T;
+  const tg = ex.targets[ex.targets.length - 1];
+  heat($('attnC'), T, T, (r, c) => A[r * T + c], {
+    left: 30, bot: 22, top: 16,
+    masked: (r, c) => c > r,
+    colLab: c => tokName(ex.toks[c]),
+    rowLab: r => tokName(ex.toks[r]),
+    title: hd.name + ' — rows = query, columns = key',
+    mark: [tg.pos, tg.src]
+  });
+  const self = A[tg.pos * T + tg.pos], toSrc = A[tg.pos * T + tg.src], toPrev = tg.pos > 0 ? A[tg.pos * T + tg.pos - 1] : 0;
+  const isInd = hd.ind > 0.4, isPrev = hd.l === 0 && hd.prev > 0.3;
+  $('headNote').innerHTML = '<b>' + hd.name + '</b> sits in layer ' + hd.l + '. Averaged over ' + Math.min(48, S.test.length) +
+    ' test sequences it puts <b class="hd">' + pctS(hd.prev) + '</b> of its attention on the previous token and <b class="ci">' + pctS(hd.ind) +
+    '</b> on the induction target. On the sequence shown, the query at position ' + tg.pos + ' sends <b>' + pctS(toSrc) +
+    '</b> to the marked answer position, <b>' + pctS(toPrev) + '</b> to its immediate predecessor and <b>' + pctS(self) + '</b> to itself. ' +
+    (isInd ? '<br><br>This is the <b class="ci">induction head</b>. It cannot be in layer 0: its key has to encode “the token before me was X”, and in layer 0 the key only knows the token actually sitting there. Panel 7 shows the K-composition path that supplies it.' :
+      isPrev ? '<br><br>This is the <b class="hd">previous-token head</b>. Alone it predicts nothing — its whole job is to stamp each position with the identity of the token before it, so a later head can use that as a search key.' :
+        '<br><br>This head shows neither signature strongly. A trained network contains components that are not part of the story you are telling, and the urge to name every head is where a lot of interpretability goes wrong.');
+}
+
+// ---------- 4. ablation
+function drawAbl() {
+  if (!S.model || !S.means) return;
+  const cfg = S.cfg, tb = ablationTable(S.model, S.test, S.ablMode, S.means, S.donors, 24);
+  const names = componentNames(cfg);
+  const rows = tb.rows.map((r, i) => '<tr class="' + (S.indHead && i === S.indHead.comp ? 'hit' : 'safe') + '"><td class="nm">' + names[i] +
+    '</td><td>' + r.dLoss.toFixed(3) + '</td><td>' + (100 * r.dAcc).toFixed(1) + '</td><td>' + r.dGap.toFixed(3) + '</td></tr>').join('');
+  $('ablTable').innerHTML = '<tr><th>removed</th><th>Δ loss</th><th>Δ accuracy (pts)</th><th>Δ logit gap</th></tr>' + rows +
+    '<tr><td><b>intact</b></td><td><b>' + tb.base.loss.toFixed(3) + '</b></td><td><b>' + (100 * tb.base.acc).toFixed(1) + '</b></td><td><b>' + tb.base.gap.toFixed(3) + '</b></td></tr>';
+
+  const { ctx, w, h } = fit($('ablC'));
+  const T = 12, B = 32, L = 34, pw = w - L - 8, ph = h - T - B;
+  let mx = 0.02;
+  for (const r of tb.rows) mx = Math.max(mx, Math.abs(r.dAcc));
+  mx *= 1.12;
+  ctx.strokeStyle = '#e2e8f0';
+  for (const f of [0, .5, 1]) { const y = T + f * ph; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); }
+  ctx.font = '10px sans-serif'; ctx.textAlign = 'right'; ctx.fillStyle = '#94a3b8';
+  ctx.fillText('0', L - 4, T + 8);
+  ctx.fillText('−' + (100 * mx).toFixed(0) + 'pts', L - 4, T + ph);
+  const bw = pw / tb.rows.length;
+  tb.rows.forEach((r, i) => {
+    const x = L + i * bw + bw * 0.18, ww = bw * 0.64, hh = Math.min(1, Math.abs(r.dAcc) / mx) * ph;
+    const isInd = S.indHead && i === S.indHead.comp;
+    ctx.fillStyle = r.dAcc <= 0 ? (isInd ? COL.ind : '#fda4af') : '#a7f3d0';
+    ctx.fillRect(x, T, ww, hh);
+    ctx.save(); ctx.translate(x + ww / 2, T + ph + 20); ctx.rotate(-Math.PI / 9);
+    ctx.textAlign = 'center'; ctx.font = (isInd ? 'bold ' : '') + '9px sans-serif'; ctx.fillStyle = isInd ? COL.ind : '#64748b';
+    ctx.fillText(names[i], 0, 0); ctx.restore();
+  });
+  let worst = 0;
+  for (let i = 1; i < tb.rows.length; i++) if (tb.rows[i].dAcc < tb.rows[worst].dAcc) worst = i;
+  const named = S.indHead ? S.indHead.name : '—';
+  $('ablNote').innerHTML = 'Under <b>' + S.ablMode + '</b>-ablation the component whose removal costs the most accuracy is <b class="ci">' + names[worst] +
+    '</b> (' + (100 * tb.rows[worst].dAcc).toFixed(1) + ' points, loss ' + (tb.rows[worst].dLoss >= 0 ? '+' : '') + tb.rows[worst].dLoss.toFixed(3) + '). ' +
+    (names[worst] === named ? 'The same head the attention scores named — two independent methods agreeing, which is the only evidence worth much here.' :
+      '<em>Not</em> the head the attention scores named (' + named + '), and that disagreement is exactly when to distrust the tidy story rather than the measurement.') +
+    ' Switch modes: if the ordering changes, your conclusion was partly an artefact of the control.';
+}
+
+// ---------- 5. patching
+function drawPatch() {
+  const ex = curEx();
+  if (!ex || !S.model) return;
+  const cfg = S.cfg, corr = corruptSeq(ex, cfg.V, mulberry32(1000 + S.exIdx));
+  const pg = patchGrid(S.model, ex, corr);
+  const names = pg.names;
+  drawTokens($('patchToksA'), ex.toks, ex, { q: ex.focus, a: ex.ansPos });
+  drawTokens($('patchToksB'), corr.toks, ex, { q: ex.focus, a: corr.srcPos });
+  $('p_clean').textContent = fmt(pg.clean, 2);
+  $('p_corr').textContent = fmt(pg.corrupted, 2);
+  let br = 0, bc = 0, bv = -Infinity;
+  for (let r = 0; r < pg.grid.length; r++) for (let c = 0; c < cfg.T; c++) if (pg.grid[r][c] > bv) { bv = pg.grid[r][c]; br = r; bc = c; }
+  heat($('patchC'), pg.grid.length, cfg.T, (r, c) => pg.grid[r][c], {
+    left: 62, bot: 22, top: 16,
+    colLab: c => String(c), rowLab: r => names[r],
+    title: 'fraction of the clean answer restored', mark: [br, bc]
+  });
+  $('patchNote').innerHTML = 'The two prompts differ in <b>one token</b>: the one the induction rule has to copy. That flips the correct answer from <b>' +
+    tokName(ex.y) + '</b> to <b>' + tokName(corr.y) + '</b>, and the logit difference goes from <b class="sa">' + fmt(pg.clean, 2) + '</b> to <b class="ci">' + fmt(pg.corrupted, 2) +
+    '</b>. Splicing in just <b>' + names[br] + ' at position ' + bc + '</b> from the clean run recovers <b>' + pctS(bv) +
+    '</b> of that gap on its own. ' + (bv > 0.5 ? 'One activation carrying most of the answer is what localisation looks like when it works.' :
+      'No single activation carries most of the answer here, which usually means the information is spread across several — worth believing rather than explaining away.') +
+    '<br><br>Note the position: on a converged model the bright cell is the induction head at the <em>query</em> position, not at the position that was corrupted. The corrupted token changes what gets <em>read</em>; the head is where that read lands.';
+}
+
+// ---------- 6. logit lens
+function drawLens() {
+  const ex = curEx();
+  if (!ex || !S.model) return;
+  const cfg = S.cfg, tg = ex.targets[ex.targets.length - 1];
+  const fw = forward(S.model, ex.toks, { cache: false });
+  const stages = logitLens(S.model, fw, tg.pos);
+  const { ctx, w, h } = fit($('lensC'));
+  const T = 14, B = 30, L = 36, pw = w - L - 8, ph = h - T - B;
+  ctx.strokeStyle = '#e2e8f0'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+  for (const f of [0, .25, .5, .75, 1]) {
+    const y = T + (1 - f) * ph;
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+    ctx.fillStyle = '#94a3b8'; ctx.fillText((100 * f).toFixed(0) + '%', L - 4, y + 3);
+  }
+  const bw = pw / stages.length;
+  stages.forEach((s, i) => {
+    const p = s.probs[tg.y], x = L + i * bw + bw * 0.2, ww = bw * 0.6, hh = p * ph;
+    ctx.fillStyle = i === stages.length - 1 ? COL.ind : COL.two;
+    ctx.fillRect(x, T + ph - hh, ww, hh);
+    ctx.textAlign = 'center'; ctx.font = 'bold 9.5px sans-serif'; ctx.fillStyle = '#0f172a';
+    ctx.fillText(pctS(p), x + ww / 2, T + ph - hh - 4);
+    ctx.font = '9px sans-serif'; ctx.fillStyle = '#64748b';
+    ctx.fillText(s.label, x + ww / 2, T + ph + 13);
+  });
+  const rows = stages.map(s => {
+    let arg = 0;
+    for (let t = 1; t < cfg.V; t++) if (s.probs[t] > s.probs[arg]) arg = t;
+    let rank = 1;
+    for (let t = 0; t < cfg.V; t++) if (s.probs[t] > s.probs[tg.y]) rank++;
+    return '<tr class="' + (arg === tg.y ? 'hit' : 'safe') + '"><td class="nm">' + s.label + '</td><td>' + tokName(arg) + '</td><td>' +
+      pctS(s.probs[arg]) + '</td><td>' + pctS(s.probs[tg.y]) + '</td><td>' + rank + ' / ' + cfg.V + '</td></tr>';
+  }).join('');
+  $('lensTable').innerHTML = '<tr><th>depth</th><th>top token</th><th>its p</th><th>p(correct)</th><th>rank of correct</th></tr>' + rows;
+  const p0 = stages[0].probs[tg.y], pl = stages[stages.length - 1].probs[tg.y], pm = stages[1].probs[tg.y];
+  $('lensNote').innerHTML = 'The correct token sits at <b>' + pctS(p0) + '</b> straight out of the embeddings, <b>' + pctS(pm) +
+    '</b> after layer 0, and <b class="ci">' + pctS(pl) + '</b> after layer 1. ' +
+    (pl - pm > 0.3 ? 'Almost the entire prediction appears in one layer, which is what you would expect if a single head executes the whole rule.' :
+      'The prediction is not concentrated in one layer here — read that as evidence against the tidy single-head story.') +
+    ' The last row is an exact identity: unembedding the full stream <em>is</em> the output.';
+}
+
+// ---------- 7. circuits
+function drawCircuits() {
+  if (!S.model || !S.prevHead || !S.indHead) return;
+  const m = S.model, cfg = S.cfg, V = cfg.V, T = cfg.T;
+  const ph = S.prevHead, ih = S.indHead;
+  const qp = qkPos(m, ph.l, ph.h);
+  let mxq = 1e-9;
+  for (let i = 0; i < qp.length; i++) mxq = Math.max(mxq, Math.abs(qp[i]));
+  heat($('qkposC'), T, T, (r, c) => qp[r * T + c] / mxq, { signed: true, left: 22, bot: 20, top: 14, colLab: c => String(c), rowLab: r => String(r), title: ph.name + ' · W_P W_Q W_K^T W_P^T' });
+
+  const useK = cfg.L > 1;
+  const kc = useK ? kComposition(m, ph.l, ph.h, ih.l, ih.h) : new Float64Array(V * V);
+  let mxk = 1e-9;
+  for (let i = 0; i < kc.length; i++) mxk = Math.max(mxk, Math.abs(kc[i]));
+  heat($('kcompC'), V, V, (r, c) => kc[r * V + c] / mxk, { signed: true, left: 22, bot: 20, top: 14, colLab: c => tokName(c), rowLab: r => tokName(r), title: ph.name + ' → ' + ih.name + ' K-composition' });
+
+  const ov = ovCircuit(m, ih.l, ih.h);
+  let mxo = 1e-9;
+  for (let i = 0; i < ov.length; i++) mxo = Math.max(mxo, Math.abs(ov[i]));
+  heat($('ovC'), V, V, (r, c) => ov[r * V + c] / mxo, { signed: true, left: 22, bot: 20, top: 14, colLab: c => tokName(c), rowLab: r => tokName(r), title: ih.name + ' · W_E W_V W_O W_U' });
+
+  // the sub-diagonal test: for how many query positions is the highest
+  // POSITIONAL score the immediately preceding position?  Same shape of
+  // question as diagonality, one step off the diagonal.
+  let band = 0;
+  for (let i = 1; i < T; i++) {
+    let arg = 0;
+    for (let j = 1; j <= i; j++) if (qp[i * T + j] > qp[i * T + arg]) arg = j;
+    if (arg === i - 1) band++;
+  }
+  const bandFrac = band / (T - 1);
+  const dk = diagonality(kc, V), dov = diagonality(ov, V);
+  $('c_prev').textContent = pctS(bandFrac);
+  $('c_kcomp').textContent = pctS(dk);
+  $('c_ov').textContent = pctS(dov);
+  $('circNote').innerHTML = 'Left to right, these three matrices are the circuit written out in weights. For <b class="hd">' + pctS(bandFrac) +
+    '</b> of query positions, <b>' + ph.name + '</b>&rsquo;s highest <em>positional</em> score is the immediately preceding one — the previous-token head, built out of <span class="mono">W<sub>P</sub></span> alone. The middle matrix routes a <b>query token</b> to <b>the position whose previous token was that token</b>, picking the right column <b class="ci">' + pctS(dk) +
+    '</b> of the time against about ' + pctS(1 / V) + ' for a random matrix. The right-hand one is the copying test: attend to <span class="mono">s</span> and the logit of <span class="mono">s</span> wins <b class="sa">' + pctS(dov) +
+    '</b> of the time. ' + (dk > 0.5 && dov > 0.5 ? 'Both diagonals are present, which is the strongest evidence on this page because it uses no data at all.' :
+      'One diagonal is weak here — usually a half-formed circuit, or work split across heads.');
+}
+
+// ---------- 8. superposition + SAE
+function drawToy() {
+  if (!S.toy) return;
+  const { t, st } = S.toy;
+  const { ctx, w, h } = fit($('toyC'));
+  const T = 14, B = 26, L = 30, pw = w - L - 8, ph = h - T - B;
+  let mx = 1e-9;
+  for (const n of st.norms) mx = Math.max(mx, n);
+  mx *= 1.15;
+  ctx.strokeStyle = '#e2e8f0';
+  for (const f of [0, .5, 1]) { const y = T + (1 - f) * ph; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); }
+  const bw = pw / st.norms.length;
+  for (let i = 0; i < st.norms.length; i++) {
+    const x = L + i * bw + bw * 0.14, ww = bw * 0.72, hh = (st.norms[i] / mx) * ph;
+    ctx.fillStyle = st.norms[i] > 0.35 ? (i < st.dims ? COL.sae : '#34d399') : '#e2e8f0';
+    ctx.fillRect(x, T + ph - hh, ww, hh);
+  }
+  const yd = T + ph - (0.35 / mx) * ph;
+  ctx.strokeStyle = COL.ind; ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(L, yd); ctx.lineTo(L + pw, yd); ctx.stroke(); ctx.setLineDash([]);
+  ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = '#64748b';
+  ctx.fillText('‖W_i‖ per feature, most important on the left · dashed = “represented” threshold', L + 2, T - 3);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#94a3b8';
+  ctx.fillText('feature index (importance decreasing)  →', L + pw / 2, h - 5);
+  $('t_dims').textContent = st.dims;
+  $('t_rep').textContent = st.represented;
+  $('t_int').textContent = fmt(st.maxInterference, 2);
+  const over = st.represented > st.dims;
+  $('toyNote').innerHTML = 'At density <b>' + ((+$('densR').value) / 25).toFixed(2) + '</b>, ' + st.features + ' features get <b class="sa">' + st.represented +
+    '</b> directions out of <b>' + st.dims + '</b> dimensions. ' + (over ? '<b class="ci">More features than dimensions</b> — superposition, and the price is the interference number: those directions are no longer orthogonal, worst-case overlap ' + fmt(st.maxInterference, 2) + '.' :
+      'At this density the model keeps about as many features as dimensions and discards the rest — the dense regime, where the answer is essentially PCA.') +
+    ' Drag the density down and watch the crossing.';
+}
+function drawSAE() {
+  if (!S.sae) return;
+  const { st, pS, pN, M } = S.sae;
+  const { ctx, w, h } = fit($('saeC'));
+  const T = 14, B = 30, L = 34, pw = w - L - 8, ph = h - T - B;
+  const bars = [
+    { lab: 'raw neurons', v: pN.mean, n: pN.n, col: '#94a3b8' },
+    { lab: 'SAE features', v: pS.mean, n: pS.n, col: COL.sae }
+  ];
+  ctx.strokeStyle = '#e2e8f0'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+  for (const f of [0, .25, .5, .75, 1]) {
+    const y = T + (1 - f) * ph;
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+    ctx.fillStyle = '#94a3b8'; ctx.fillText((100 * f).toFixed(0) + '%', L - 4, y + 3);
+  }
+  const bw = pw / bars.length;
+  bars.forEach((b, i) => {
+    const x = L + i * bw + bw * 0.26, ww = bw * 0.48, hh = Math.max(0, Math.min(1, b.v)) * ph;
+    ctx.fillStyle = b.col; ctx.fillRect(x, T + ph - hh, ww, hh);
+    ctx.textAlign = 'center'; ctx.font = 'bold 11px sans-serif'; ctx.fillStyle = '#0f172a';
+    ctx.fillText(pctS(b.v), x + ww / 2, T + ph - hh - 5);
+    ctx.font = '9.5px sans-serif'; ctx.fillStyle = '#64748b';
+    ctx.fillText(b.lab + ' (' + b.n + ')', x + ww / 2, T + ph + 13);
+  });
+  ctx.textAlign = 'left'; ctx.font = '9px sans-serif'; ctx.fillStyle = '#64748b';
+  ctx.fillText('label purity of the top-activating inputs — higher = one meaning', L + 2, T - 3);
+  $('s_fvu').textContent = pctS(st.fvu);
+  $('s_l0').textContent = fmt(st.l0, 1) + ' / ' + M;
+  $('s_dead').textContent = st.dead + ' / ' + M;
+  const gain = pN.mean > 0 ? (pS.mean - pN.mean) : 0;
+  $('s_gain').textContent = (gain >= 0 ? '+' : '') + (100 * gain).toFixed(1) + 'pts';
+  $('saeNote').innerHTML = 'Trained live on ' + S.acts.n + ' residual-stream vectors from this model, ' + M + ' dictionary atoms, L1 = <b>' +
+    S.sae.lam.toFixed(2) + '</b>. It leaves <b>' + pctS(st.fvu) + '</b> of the variance unexplained and uses <b class="sa">' + fmt(st.l0, 1) +
+    '</b> features per input, with <b class="ci">' + st.dead + '</b> never firing at all. Judged by how concentrated their top-activating inputs are on one answer token, the learned features score <b>' + pctS(pS.mean) +
+    '</b> against <b>' + pctS(pN.mean) + '</b> for the raw stream dimensions — ' +
+    (gain > 0.03 ? 'a real but modest win, and modest is the honest word.' : gain > -0.03 ? 'essentially a tie here, which is worth reporting rather than tuning away.' : 'a loss here: the dictionary did not buy monosemanticity.') +
+    ' Push <b>&lambda;</b> up and unexplained variance rises while the active count falls; no setting makes both good.';
+}
+
+function redrawAll() {
+  drawCurves();
+  if (!S.done2) return;
+  drawDLA(); drawHeads(); drawAttn(); drawAbl(); drawPatch(); drawLens(); drawCircuits(); drawToy(); drawSAE();
+}
+
+// ==================== IN-TAB VERIFICATION ====================
+function runChecks() {
+  const out = [];
+  let pass = 0, fail = 0;
+  const ok = c => { if (c) pass++; else fail++; return c; };
+  const grp = (name, r) => out.push({ name, n: r.length, bad: r.filter(x => !x).length });
+  const m = S.model, cfg = S.cfg, T = cfg.T, D = cfg.D, V = cfg.V;
+  let r = [];
+
+  // 1. softmax + layernorm, against their definitions
+  const rnd = mulberry32(20260814);
+  for (let t = 0; t < 12; t++) {
+    const n = 2 + Math.floor(rnd() * 8), src = new Float64Array(n), dst = new Float64Array(n), src2 = new Float64Array(n), dst2 = new Float64Array(n);
+    const sh = (rnd() * 2 - 1) * 90;
+    for (let i = 0; i < n; i++) { src[i] = (rnd() * 2 - 1) * 30; src2[i] = src[i] + sh; }
+    softmaxRow(src, 0, n, dst, 0); softmaxRow(src2, 0, n, dst2, 0);
+    let s = 0, mx = 0;
+    for (let i = 0; i < n; i++) { s += dst[i]; mx = Math.max(mx, Math.abs(dst[i] - dst2[i])); }
+    r.push(ok(Math.abs(s - 1) < 1e-12)); r.push(ok(mx < 1e-12));
+  }
+  for (let t = 0; t < 8; t++) {
+    const x = new Float64Array(D), o = new Float64Array(D);
+    for (let i = 0; i < D; i++) x[i] = (rnd() * 2 - 1) * 20;
+    const st = lnStats(x, 0, D);
+    lnApply(x, 0, o, 0, D, st);
+    let mu = 0;
+    for (let i = 0; i < D; i++) mu += o[i];
+    mu /= D;
+    let v = 0;
+    for (let i = 0; i < D; i++) v += (o[i] - mu) * (o[i] - mu);
+    r.push(ok(Math.abs(mu) < 1e-12)); r.push(ok(Math.abs(v / D - 1) < 1e-3));
+  }
+  grp('softmax sums to 1 and is shift-invariant · layernorm: zero mean, unit variance', r);
+
+  // 2. forward pass vs an independently written one
+  r = [];
+  for (let e = 0; e < 4; e++) {
+    const ex = S.test[e], fw = forward(m, ex.toks, {}), ref = refLogits(m, ex.toks);
+    let bad = 0;
+    for (let i = 0; i < T; i++) for (let t = 0; t < V; t++) if (fw.logits[i * V + t] !== ref[i][t]) bad++;
+    r.push(ok(bad === 0));
+    let mxr = 0;
+    for (let i = 0; i < T; i++) for (let d = 0; d < D; d++) {
+      let s = 0;
+      for (let ci = 0; ci < nComponents(cfg); ci++) s += fw.comp[ci][i * D + d];
+      mxr = Math.max(mxr, Math.abs(s - fw.resid[i * D + d]));
+    }
+    r.push(ok(mxr < 1e-12));
+  }
+  grp('forward pass bit-identical to a separate implementation · the stream IS the sum of its parts', r);
+
+  // 3. direct logit attribution, against that independent forward pass
+  r = [];
+  let worstDLA = 0;
+  for (let e = 0; e < 5; e++) {
+    const ex = S.test[e], fw = forward(m, ex.toks, {}), ref = refLogits(m, ex.toks);
+    for (const tg of ex.targets) {
+      const parts = directLogitAttribution(m, fw, tg.y, tg.pos);
+      let s = 0;
+      for (const p of parts) s += p;
+      const err = Math.abs(s - ref[tg.pos][tg.y]);
+      worstDLA = Math.max(worstDLA, err);
+      r.push(ok(err < 1e-11));
+      const stg = logitLens(m, fw, tg.pos);
+      let mxl = 0;
+      for (let t = 0; t < V; t++) mxl = Math.max(mxl, Math.abs(stg[stg.length - 1].logits[t] - ref[tg.pos][t]));
+      r.push(ok(mxl < 1e-11));
+    }
+  }
+  grp('direct logit attribution sums exactly to the logit · the logit lens ends at the real output', r);
+
+  // 4. ablation: zero-ablation vs genuinely deleting the head
+  r = [];
+  for (let e = 0; e < 3; e++) {
+    const ex = S.test[e];
+    for (let l = 0; l < cfg.L; l++) for (let hh = 0; hh < cfg.H; hh++) {
+      const ci = 1 + l * cfg.H + hh;
+      const fw = forward(m, ex.toks, { override: ablationOverride(cfg, ci, 'zero', S.means, null), cache: false });
+      const m2 = cloneModel(m);
+      for (let i = 0; i < m2.cfg.dh * D; i++) m2.layers[l].WO[hh * m2.cfg.dh * D + i] = 0;   // the head can no longer write
+      const ref = refLogits(m2, ex.toks);
+      let bad = 0;
+      for (let i = 0; i < T; i++) for (let t = 0; t < V; t++) if (Math.abs(fw.logits[i * V + t] - ref[i][t]) > 1e-12) bad++;
+      r.push(ok(bad === 0));
+    }
+  }
+  grp('zero-ablation equals a model in which that head cannot write at all', r);
+
+  // 5. the two patching identities
+  r = [];
+  for (let e = 0; e < 4; e++) {
+    const ex = S.test[e], corr = corruptSeq(ex, V, mulberry32(77 + e));
+    const cleanFw = forward(m, ex.toks, { cache: false });
+    const none = forward(m, corr.toks, { override: patchOverride(cfg, cleanFw, []), cache: false });
+    const cRef = refLogits(m, corr.toks);
+    let bad = 0;
+    for (let i = 0; i < T; i++) for (let t = 0; t < V; t++) if (none.logits[i * V + t] !== cRef[i][t]) bad++;
+    r.push(ok(bad === 0));
+    const all = forward(m, corr.toks, { override: patchOverride(cfg, cleanFw, allPatchPairs(cfg)), cache: false });
+    const kRef = refLogits(m, ex.toks);
+    bad = 0;
+    for (let i = 0; i < T; i++) for (let t = 0; t < V; t++) if (all.logits[i * V + t] !== kRef[i][t]) bad++;
+    r.push(ok(bad === 0));
+  }
+  grp('patch everything → the clean run exactly · patch nothing → the corrupted run exactly', r);
+
+  // 6. the task generator and its baselines, recounted here
+  r = [];
+  const probe = makeDataset(9182, 240, V, T, cfg.K);
+  let badDup = 0, badNext = 0, badSrc = 0;
+  for (const ex of probe) {
+    for (let i = 0; i < cfg.K; i++) if (ex.toks[ex.b + i] !== ex.toks[ex.a + i]) badDup++;
+    for (const tg of ex.targets) { if (ex.toks[tg.pos + 1] !== tg.y) badNext++; if (ex.toks[tg.src] !== tg.y) badSrc++; }
+  }
+  r.push(ok(badDup === 0)); r.push(ok(badNext === 0)); r.push(ok(badSrc === 0));
+  const bo = bestOffsetBaseline(probe, T);
+  r.push(ok(bo.acc > 0 && bo.acc < 0.4));
+  r.push(ok(Math.abs(uniformBaseline(V) - 1 / V) < 1e-15));
+  grp('the task really is induction, and its baselines are computed not claimed', r);
+
+  // 7. determinism
+  r = [];
+  const a = makeModel(cfg), b = makeModel(cfg);
+  let same = 0;
+  for (let i = 0; i < a.WE.length; i++) if (a.WE[i] !== b.WE[i]) same++;
+  r.push(ok(same === 0));
+  const d1 = makeDataset(31, 20, V, T, cfg.K), d2 = makeDataset(31, 20, V, T, cfg.K);
+  let dbad = 0;
+  for (let i = 0; i < 20; i++) for (let j = 0; j < T; j++) if (d1[i].toks[j] !== d2[i].toks[j]) dbad++;
+  r.push(ok(dbad === 0));
+  grp('same seed → identical weights and identical data', r);
+
+  // 8. everything finite
+  r = [];
+  let nf = 0;
+  for (const t of paramTensors(m)) for (let i = 0; i < t.a.length; i++) if (!Number.isFinite(t.a[i])) nf++;
+  r.push(ok(nf === 0));
+  if (S.sae) r.push(ok(Number.isFinite(S.sae.st.fvu) && Number.isFinite(S.sae.st.l0)));
+  if (S.toy) r.push(ok(Number.isFinite(S.toy.st.maxInterference)));
+  const e2 = S.tr2.hist[S.tr2.hist.length - 1].ev;
+  r.push(ok(Number.isFinite(e2.loss) && Number.isFinite(e2.acc)));
+  grp('every weight and every reported number is finite', r);
+
+  S.checks = { out, pass, fail, worstDLA };
+  $('checkList').innerHTML = out.map(g =>
+    (g.bad ? '<span style="color:#b91c1c">✗</span> ' : '<span style="color:#047857">✓</span> ') +
+    '<span style="color:#475569">' + g.name + '</span> <span style="color:#94a3b8">— ' + (g.n - g.bad) + '/' + g.n + '</span>').join('<br>');
+  const pill = $('checkPill');
+  pill.textContent = fail === 0
+    ? '✅ ' + pass + ' / ' + (pass + fail) + ' assertions passed in this tab · 740 in the Node suite · 15,659 configs swept'
+    : '❌ ' + fail + ' failed';
+  pill.className = 'pill ' + (fail === 0 ? 'okpill' : 'badpill');
+  pill.style.cssText = '';
+}
+
+// ==================== INTERACTION ====================
+let retrainTimer = null;
+const queueRetrain = () => { clearTimeout(retrainTimer); retrainTimer = setTimeout(startTraining, 260); };
+['seedR', 'dmR', 'hR', 'lrR', 'stR', 'bsR', 'tR', 'vR'].forEach(id => {
+  $(id).oninput = () => { syncLabels(readCfg()); queueRetrain(); };
+});
+$('retrainBtn').onclick = () => startTraining();
+$('exR').oninput = e => {
+  S.exIdx = +e.target.value; $('exV').textContent = S.exIdx;
+  if (S.done2) { drawDLA(); drawAttn(); drawPatch(); drawLens(); }
+};
+document.querySelectorAll('[data-abl]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-abl]').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); S.ablMode = b.dataset.abl;
+  if (S.done2) drawAbl();
+});
+const PRESETS = {
+  default: { seedR: 6, dmR: 1, hR: 1, lrR: 6, stR: 1300, bsR: 24, tR: 10, vR: 10 },
+  tiny: { seedR: 6, dmR: 0, hR: 1, lrR: 6, stR: 600, bsR: 16, tR: 8, vR: 8 },
+  wide: { seedR: 6, dmR: 3, hR: 1, lrR: 6, stR: 1300, bsR: 24, tR: 10, vR: 10 },
+  hard: { seedR: 6, dmR: 1, hR: 1, lrR: 6, stR: 1600, bsR: 32, tR: 13, vR: 16 }
+};
+document.querySelectorAll('[data-pre]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-pre]').forEach(x => x.classList.remove('on'));
+  b.classList.add('on');
+  const p = PRESETS[b.dataset.pre];
+  for (const k in p) $(k).value = p[k];
+  syncLabels(readCfg());
+  startTraining();
+});
+$('l1R').oninput = () => { $('l1V').textContent = ((+$('l1R').value) / 100).toFixed(2); if (S.done2) { trainSAE(); drawSAE(); } };
+$('wmR').oninput = () => { $('wmV').textContent = (+$('wmR').value) + '×'; if (S.done2) { trainSAE(); drawSAE(); } };
+$('densR').oninput = () => { $('densV').textContent = ((+$('densR').value) / 25).toFixed(2); trainToy(); drawToy(); };
+$('ndR').oninput = () => { $('ndV').textContent = $('ndR').value; trainToy(); drawToy(); };
+let rz = null;
+window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(redrawAll, 140); });
+
+// ---------------- UNDERSTAND ----------------
+const STEPS = [
+ { title:"1. What this asks that saliency does not",
+   why:"Four different things get called interpretability and they support very different claims. Saliency and attribution — gradients, integrated gradients, Grad-CAM, and reading attention weights as explanations — answer where the model looked. They are cheap and they are the default, and they have a bad track record: some saliency maps barely change when you randomise the model's weights, which means they were reporting properties of the input rather than of the model.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">SALIENCY       “where did it look?”    correlational<br>PROBING        “is it in there?”     presence ≠ use<br>CIRCUITS       “what runs, and is it used?”  causal<br>DICTIONARIES   “in what basis is this sparse?”<br><br>the bar for a circuit claim:<br>  it must PREDICT something that could have been false</div>`,
+   code:`# a saliency map cannot be wrong. that is the problem.
+# a circuit claim CAN be wrong, in at least four ways:
+
+assert ablate(model, head).accuracy       &lt;&lt; baseline.accuracy
+assert patch(corrupt, head, clean).logits ~= clean.logits
+assert is_near_diagonal(W_E @ W_V @ W_O @ W_U)
+assert one_layer_model.accuracy           ~= positional_ceiling` },
+
+ { title:"2. The residual stream — the object everything else hangs off",
+   why:"A transformer is often drawn as a stack of blocks that transform a hidden state. It is more useful, and more literally true, to draw it as a single wide bus that every component reads from and writes to. Embeddings write into it. Each attention head reads a normalised copy, computes something, and adds its output back. Nothing is ever overwritten, because the skip connection is not a trick for gradient flow, it is the architecture: the stream at any depth is exactly the sum of every write so far. Components therefore communicate by writing into subspaces and reading them out later, which is what a circuit is; the final logit is a sum of one term per component, so attribution is arithmetic; and the bus has a fixed width, which is where superposition comes from.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">resid = embed + pos<br>resid += head_0_0(LN(resid))<br>resid += head_0_1(LN(resid))<br>resid += head_1_0(LN(resid))   ← reads what layer 0 WROTE<br>logits = LN(resid) @ W_U<br><br>NOTHING IS OVERWRITTEN.<br>the stream is a SUM, so the logit is a SUM,<br>so attribution is EXACT.</div>`,
+   code:`# the whole of "communication between components", in two lines:
+resid += head_A(resid)      # A writes into some subspace
+q = head_B(resid) @ W_Q     # B reads it back out via its own weights
+
+# heads in the SAME layer read the same input. they are PARALLEL.
+# a head can only compose with one in a STRICTLY EARLIER layer.
+# that single fact is why induction needs two layers.` },
+
+ { title:"3. A head is two circuits, not one: QK and OV",
+   why:"The most useful structural fact about attention is that it factorises, and that the two halves never touch. The QK circuit — W_Q W_Kᵀ — decides where to look, and it has no access to the content that gets moved. The OV circuit — W_V W_O — decides what to move, and it has no access to where it came from. So a head is a pair of independent low-rank maps and you can study them one at a time, which is a colossal simplification.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">A HEAD =  WHERE to look  ×  WHAT to move<br><br>QK circuit:  W_E W_Q W_K<sup>T</sup> W_E<sup>T</sup>  [V×V]<br>OV circuit:  W_E W_V W_O W_U     [V×V]<br><br>they share NO parameters. study them separately.<br>copying head  =  positive diagonal in OV<br>prev-token head = subdiagonal in W_P W_Q W_K<sup>T</sup> W_P<sup>T</sup></div>`,
+   code:`OV = W_E @ W_V @ W_O @ W_U       # "attend to s -> which logit rises?"
+QK = W_E @ W_Q @ W_K.T @ W_E.T   # "token s -> which token does it seek?"
+
+# both are computed from WEIGHTS ALONE. no data, no forward pass.
+# that is why they are the strongest evidence on this page --
+# they cannot be an artefact of the inputs you happened to pick.` },
+
+ { title:"4. Direct logit attribution, and why it is exact here",
+   why:"Because the stream is a sum, and because the final LayerNorm's scale is one number that the forward pass already fixed, the map from residual stream to logits is linear. So the logit for a token decomposes exactly into one contribution per component: embedding, and every head. Not approximately, not to first order — the contributions sum to the logit to floating-point precision, and this page checks that against a separately written forward pass. That is what separates it from gradient attribution, which is a linearisation of something that is not linear. Report the logit difference between the right answer and a specific wrong one rather than the raw logit, and be honest that the frozen LayerNorm scale makes this an attribution of this run rather than a counterfactual.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">logit[t] = W_U[:,t] · LN(resid)   and  resid = Σ components<br><br>freeze the LN scale at the value THIS run produced<br>  ⇒ the map is LINEAR<br>  ⇒ logit[t] = Σ (one exact number per component)<br><br>checked to ~1e-13 against an independent forward pass.<br>a gradient-based attribution can only ever approximate this.</div>`,
+   code:`parts = [ ((c[pos] - c[pos].mean()) / frozen_sigma) @ W_U[:, tok]
+          for c in components ]
+assert abs(sum(parts) - independent_forward(toks)[pos][tok]) &lt; 1e-12
+
+# report the DIFFERENCE, not the raw logit:
+#   dla(correct) - dla(wrong)   cancels everything token-agnostic
+# and remember what this is NOT:
+#   it is not "the logit if this component were removed".` },
+
+ { title:"5. The induction circuit — two heads that only work together",
+   why:"Induction is the mechanism to learn first, because it is simple, it is real, and it appears in essentially every autoregressive transformer above two layers. The behaviour: having seen the sequence ...A B... earlier, when A appears again, predict B. It is implemented by two heads in different layers. A previous-token head in the early layer attends from every position to the one before it and writes the identity of that earlier token into the stream at the current position — on its own it predicts nothing. Then an induction head in a later layer uses the current token as a query and searches for a position whose key says the token before me was that — which lands one position after the earlier copy of A, and the OV circuit copies whatever it finds there to the logits. Olsson et al. showed in 2022 that heads with this signature appear in a sharp phase change during training, in the same window where in-context learning ability appears.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">   … A  B  … … …  A  → ?<br><br>LAYER 0 — previous-token head:<br>  position i attends to i−1, writes “prev token = A” at B<br><br>LAYER 1 — induction head:<br>  query = “A”  →  matches the key “my prev token was A”<br>  lands on B  →  OV copies B to the logits<br><br>NEITHER head does anything useful alone.</div>`,
+   code:`# the whole algorithm, in the only form that matters -- as a claim
+def induction(seq, i):
+    a = seq[i]                       # my token
+    j = last_index_of(seq[:i], a)    # the earlier copy
+    return seq[j + 1]                # the token AFTER it
+
+# heads with this exact signature appear in real models, in a sharp
+# phase change during training (Olsson et al. 2022), in the same window` },
+
+ { title:"6. Why one layer provably cannot do it",
+   why:"This is the cleanest falsifiable prediction the theory makes, and the page runs it as a control. In a one-layer attention-only model, the key at position j is a function of exactly two things: the token sitting at j, and the position j. Nothing else is available, because nothing has written to the stream yet except the embeddings. The induction rule needs a key that means the token before me was A — and that is information the key does not have. It has to be put at position j by an earlier head, and then read out by the later head's W_K.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">ONE LAYER — the key at j knows:  token_j, position_j<br>INDUCTION needs the key to know:  <b>token_{j−1}</b><br><br>⇒ impossible in one layer. not hard — IMPOSSIBLE.<br><br>K-COMPOSITION: head B's KEY is built from head A's OUTPUT<br>  (W_E W_Q1)(W_E W_V0 W_O0 W_K1)<sup>T</sup>  → diagonal = the circuit<br><br>the control on this page measures the gap.</div>`,
+   code:`# three ways heads can compose through the residual stream:
+#   Q-composition -- earlier head's output feeds a later QUERY
+#   K-composition -- ... feeds a later KEY      &lt;-- induction uses this
+#   V-composition -- ... feeds a later VALUE
+
+# the falsifiable version:
+one_layer = train(n_layers=1, same_budget, same_data)
+assert one_layer.accuracy &lt;= best_positional_rule(data) * 1.5
+assert two_layer.accuracy &gt;  0.85` },
+
+ { title:"7. Ablation — necessary, but nowhere near sufficient",
+   why:"Attribution says a component contributed. Ablation asks whether it was needed: remove its write and re-run. The flavour matters more than people admit. Zero-ablation replaces the output with zeros, which is easy and off-distribution — the model has never seen a stream with a hole in it, LayerNorm's scale shifts underneath everything, and damage from the intervention gets attributed to the component. Mean-ablation substitutes the component's average output over the dataset, keeping the stream plausible and removing only the input-dependent part.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">ZERO     out := 0         OFF-DISTRIBUTION<br>MEAN     out := E[out]     on-distribution<br>RESAMPLE out := out(other input)  strictest<br><br>and the failure they all share:<br>  REDUNDANCY. two spare heads hide each other,<br>  and single-head ablation reports “neither matters”.</div>`,
+   code:`for mode in ("zero", "mean", "resample"):
+    delta[mode] = accuracy(model) - accuracy(ablate(model, head, mode))
+
+# if the three disagree, your conclusion depended on the CONTROL,
+# which is a fact about your method, not about the model.
+
+# and the one everybody hits eventually:
+assert ablate(head_A).delta ~= 0
+assert ablate(head_B).delta ~= 0
+assert ablate([head_A, head_B]).delta &gt;&gt; 0     # both were doing it` },
+
+ { title:"8. Activation patching — the method that earns its conclusions",
+   why:"Patching is the workhorse of modern circuit analysis and it is causal rather than correlational. Build two prompts that differ minimally but have different correct answers — clean and corrupted. Run the corrupted one, but splice in a single activation from the clean run, and measure how much of the clean-versus-corrupted logit difference returns. Sweep over every component and position and you get a map of where the answer actually lives. The metric is normalised so 0 means the patch changed nothing and 1 means it restored the clean behaviour.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">clean:     … A B … A → <b>B</b><br>corrupted: … A C … A → <b>C</b>  (one token changed)<br><br>run CORRUPTED, splice ONE clean activation, measure recovery<br><br>score = (metric(patched) − metric(corrupt))<br>        / (metric(clean) − metric(corrupt))<br><br>patch ALL → exactly clean  ·  patch NONE → exactly corrupt</div>`,
+   code:`grid[comp][pos] = score(run(corrupt, patch={(comp,pos): clean[comp][pos]}))
+
+assert run(corrupt, patch=ALL).logits  == run(clean).logits     # exact
+assert run(corrupt, patch={}).logits   == run(corrupt).logits   # exact
+
+# patching LOCALISES. it does not tell you what the activation MEANS.
+# for meaning you still need QK/OV algebra, or a dictionary.` },
+
+ { title:"9. Superposition — why picking a neuron and asking what it means fails",
+   why:"Everything above worked because a head is a natural unit. Neurons are not, and this is where interpretability gets genuinely hard. A layer with n dimensions represents far more than n features, because real features are sparse — most are absent from any given input — and a model would rather pack many features into overlapping, non-orthogonal directions and tolerate a little interference than keep only n of them and throw the rest away. That is superposition, and polysemanticity is what it looks like from outside: you open a neuron and find dogs, and the letter R, and Python decorators.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">n dimensions  ·  m ≫ n features  ·  features are SPARSE<br><br>dense data  →  keep n features, orthogonal, discard the rest<br>sparse data →  pack MORE than n in, eat the interference<br><br>⇒ POLYSEMANTIC neurons: “dogs + the letter R + decorators”<br>⇒ the neuron basis is NOT the model's basis<br>⇒ reading neurons one at a time is reading the wrong axes</div>`,
+   code:`# the toy model that isolates it (Elhage et al. 2022):
+x_hat = relu(W.T @ (W @ x) + b)          # W: [m features, n dims], n &lt; m
+loss  = sum(importance * (x - x_hat)**2)
+
+# sweep the sparsity of x and count features with ||W_i|| &gt; threshold:
+#   dense  -> about n survive          (this is basically PCA)
+#   sparse -> MORE than n survive      (this is superposition)` },
+
+ { title:"10. Sparse autoencoders, and an honest ledger of what is unsolved",
+   why:"If the model's features live in directions rather than neurons, find the directions. That is dictionary learning: train an overcomplete autoencoder on the activations with an L1 penalty, so every input reconstructs from a handful of atoms, then interpret the atoms. It works well enough that Anthropic and OpenAI both scaled it to production models and pulled out features that are recognisably about one thing, and steering along them changes behaviour in the predicted direction. Now the ledger. There is no ground truth — you cannot score a dictionary against features nobody can enumerate. Reconstruction and sparsity trade against each other and no principle sets the exchange rate. Dead features waste capacity in every run. Feature splitting means widening the dictionary turns one feature into five, with no principled correct width.",
+   concept:`<div class="bg-slate-100 p-4 rounded text-xs w-full text-center font-mono">h = relu(W_enc(x − b_dec) + b_enc)   overcomplete<br>x̂ = W_dec h + b_dec<br>loss = ‖x − x̂‖² + λ‖h‖₁  ·  unit-norm decoder atoms<br><br>WHAT IS STILL OPEN:<br>  no ground truth  ·  FVU ↔ L0 trade-off has no principle<br>  dead features  ·  feature splitting with width<br>  good reconstruction ≠ preserved behaviour<br>  scaling ANY of this to a frontier model</div>`,
+   code:`# report both numbers or neither -- they trade against each other:
+FVU = ||x - x_hat||^2 / ||x - mean||^2      # reconstruction
+L0  = mean(count(h &gt; 0))                    # sparsity
+dead = features that never fire on the whole dataset
+
+# and the sentence to keep saying out loud:
+#   "we found a circuit" is a HYPOTHESIS.
+#   it earns belief by predicting something that could have failed.` }
+];
+const stepsEl = document.getElementById("steps");
+const prevB = document.getElementById("prev"), nextB = document.getElementById("next-btn"), autoB = document.getElementById("auto");
+let curS = 0;
+STEPS.forEach((s, i) => { const bn = document.createElement("button"); bn.className = "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; bn.innerHTML = '<div class="font-semibold">' + s.title + '</div>'; bn.onclick = () => showStep(i); stepsEl.appendChild(bn); });
+function showStep(i) {
+  curS = i; const s = STEPS[i];
+  document.getElementById("concept").innerHTML = '<div class="fade-in w-full flex items-center justify-center">' + s.concept + '</div>';
+  document.getElementById("why").innerHTML = '<span class="fade-in inline-block">' + s.why + '</span>';
+  document.getElementById("code").textContent = s.code;
+  stepsEl.querySelectorAll("button").forEach((bn, idx) => { bn.className = idx === i ? "w-full text-left p-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 text-sm font-semibold" : "w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-sm"; });
+}
+prevB.onclick = () => showStep(Math.max(0, curS - 1));
+nextB.onclick = () => showStep(Math.min(STEPS.length - 1, curS + 1));
+let tm = null;
+autoB.onclick = () => {
+  if (tm) { clearInterval(tm); tm = null; autoB.textContent = "▶ Auto-play"; return; }
+  autoB.textContent = "⏸ Pause"; showStep(0);
+  tm = setInterval(() => { if (curS >= STEPS.length - 1) { clearInterval(tm); tm = null; autoB.textContent = "▶ Replay"; return; } showStep(curS + 1); }, 4600);
+};
+showStep(0);
+function copy(btn) { const pre = btn.parentElement.querySelector("pre"); navigator.clipboard.writeText(pre.textContent); const o = btn.textContent; btn.textContent = "✓ Copied!"; setTimeout(() => btn.textContent = o, 1500); }
+
+// ---------------- boot ----------------
+syncLabels(readCfg());
+trainToy();
+drawToy();
+requestAnimationFrame(() => startTraining());
+</script>
+</body>
+</html>
