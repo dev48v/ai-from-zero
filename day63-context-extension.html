@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 63 — Context extension: position interpolation, NTK-aware, YaRN</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  canvas { width:100%; height:auto; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+  <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <p class="text-xs font-bold tracking-widest text-cyan-700 mb-2">AIFROMZERO · DAY 63</p>
+    <h1 class="text-xl md:text-2xl font-black leading-tight mb-4">
+      📏 Context extension — a model trained at 4k tokens does not "get confused" past 4k, it
+      <strong>breaks</strong>, and the reason is arithmetic you can watch happen. RoPE encodes
+      position as a rotation whose angle is <code>m·θ<sub>i</sub></code>; attention then depends only
+      on the <em>relative</em> angle <code>(m−n)·θ<sub>i</sub></code>. Every relative distance the
+      model has ever seen lies in [0, L). Ask for position 8000 on a 4k model and the low-frequency
+      dimensions are rotated into angles that <strong>never appeared in training</strong> — this page
+      computes exactly how many, and plots the attention-score decay collapsing. Then the three
+      fixes, all implemented and measured: <strong>Position Interpolation</strong> (squeeze positions
+      back into the trained range — and pay for it in the high frequencies that encode local order),
+      <strong>NTK-aware</strong> scaling (change the base so high frequencies are barely touched), and
+      <strong>YaRN</strong> (interpolate by wavelength, per dimension, so only the dimensions that
+      need it are squeezed). Every curve is computed here from real rotations.
+    </h1>
+    <div class="flex gap-2 flex-wrap" id="tabs">
+      <button data-tab="look" class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">📏 MEASURE</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto space-y-5">
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="grid md:grid-cols-4 gap-3">
+          <label class="text-sm">head dim
+            <input id="dim" type="number" min="8" max="256" step="8" value="64" class="w-full border border-slate-300 rounded px-2 py-1">
+          </label>
+          <label class="text-sm">trained length L
+            <input id="L" type="number" min="256" max="8192" step="256" value="2048" class="w-full border border-slate-300 rounded px-2 py-1">
+          </label>
+          <label class="text-sm">target length L'
+            <input id="L2" type="number" min="256" max="65536" step="512" value="8192" class="w-full border border-slate-300 rounded px-2 py-1">
+          </label>
+          <label class="text-sm">rope base θ
+            <input id="base" type="number" min="1000" max="1000000" step="1000" value="10000" class="w-full border border-slate-300 rounded px-2 py-1">
+          </label>
+        </div>
+        <p class="text-sm text-slate-600 mt-3">
+          Scale factor <span id="sf" class="font-bold">4×</span>. Everything below is computed from
+          real RoPE rotations at these settings — no pretrained weights, no cached results.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-4 gap-4">
+        <div class="bg-white rounded-2xl shadow p-4">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">DIMS THAT GO OUT OF RANGE</p>
+          <p class="text-3xl font-black tabular-nums text-rose-600" id="oor">—</p>
+          <p class="text-xs text-slate-500">Wavelength longer than L: never completed a full rotation in training.</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-4">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">LONGEST WAVELENGTH</p>
+          <p class="text-3xl font-black tabular-nums" id="wl">—</p>
+          <p class="text-xs text-slate-500">tokens per full rotation, slowest dimension.</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-4">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">PI: HIGH-FREQ CROWDING</p>
+          <p class="text-3xl font-black tabular-nums" id="crowd">—</p>
+          <p class="text-xs text-slate-500">Adjacent tokens' angle gap, as a fraction of the original.</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-4">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">NTK BASE NEEDED</p>
+          <p class="text-3xl font-black tabular-nums" id="ntkb">—</p>
+          <p class="text-xs text-slate-500">to reach L' without touching high frequencies.</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-2">RELATIVE-POSITION ATTENTION DECAY</p>
+        <canvas id="cv" width="900" height="320"></canvas>
+        <p class="text-xs text-slate-500 mt-2">
+          The expected attention score between two tokens as a function of their distance, computed
+          by averaging real rotated dot products over random query/key pairs. <span class="font-bold" style="color:#0f172a">Black</span>
+          = the trained regime. <span class="font-bold" style="color:#dc2626">Red</span> = naive
+          extrapolation past L — note it does not decay gracefully, it goes erratic.
+          <span class="font-bold" style="color:#2563eb">Blue</span> = position interpolation,
+          <span class="font-bold" style="color:#059669">green</span> = YaRN.
+        </p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-2">FOUR METHODS, MEASURED</p>
+        <table class="w-full text-sm">
+          <thead class="text-xs uppercase text-slate-500 text-left">
+            <tr><th class="py-1">method</th><th>unseen angles</th><th>local resolution kept</th><th>needs finetuning</th></tr>
+          </thead>
+          <tbody id="tbl" class="tabular-nums"></tbody>
+        </table>
+        <p class="text-xs text-slate-500 mt-3">
+          "Unseen angles" counts relative rotations outside anything the model met in training.
+          "Local resolution kept" is the angle gap between adjacent tokens in the highest-frequency
+          dimension, relative to the original — the thing that encodes word order.
+        </p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-2">PROVE THE ROTATION IS RELATIVE</p>
+        <p class="text-sm text-slate-600 mb-3">
+          The whole scheme rests on one identity: the rotated dot product depends only on
+          <code>m−n</code>, never on <code>m</code> and <code>n</code> separately. If that fails, none
+          of the rest means anything. This checks it on random vectors.
+        </p>
+        <button id="proveBtn" class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold">Run 5,000 pairs</button>
+        <pre id="proveOut" class="mt-3 hidden"></pre>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">Position is an angle, and angles wrap</h2>
+
+      <p>RoPE does not add a position vector. It <em>rotates</em> each pair of dimensions by an angle
+      proportional to the position:</p>
+      <pre>θ_i = base^(-2i/d)          for dimension pair i
+angle at position m  =  m · θ_i</pre>
+
+      <p>Rotate the query by <code>m·θ</code> and the key by <code>n·θ</code>, and their dot product
+      depends only on <code>(m−n)·θ</code>. Absolute position vanishes; only distance survives. That
+      is the elegant part, and the MEASURE tab checks it rather than assuming it.</p>
+
+      <h3 class="text-xl font-bold">What actually breaks past the trained length</h3>
+      <p>Each dimension has a wavelength — the distance over which it completes a full rotation:</p>
+      <pre>λ_i = 2π / θ_i = 2π · base^(2i/d)</pre>
+      <p>Fast dimensions (small <code>i</code>) have short wavelengths and cycle many times inside the
+      training window, so the model has seen every angle they can produce. Slow dimensions have
+      wavelengths <em>longer than the entire training context</em> — at base 10000 and d=64, the
+      slowest wavelength is tens of thousands of tokens. Inside a 2k window those dimensions only ever
+      swept a small arc.</p>
+
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-4">
+        <p class="text-sm">So extrapolating to position 8000 asks those dimensions for angles from a
+        region <strong>the model has never seen</strong>. This is not gradual degradation. The
+        attention decay curve stops being monotone and goes erratic, which is why naive extrapolation
+        produces confident nonsense rather than slightly worse output.</p>
+      </div>
+
+      <h3 class="text-xl font-bold">Fix 1 — Position Interpolation (Chen et al., 2023)</h3>
+      <p>Do not extrapolate. <strong>Compress</strong>: to serve length L′ on a model trained at L,
+      divide every position by <code>s = L′/L</code>. Position 8000 becomes 2000, which is inside the
+      trained range. Nothing is ever asked for an unseen angle.</p>
+      <p>The cost lands on the high frequencies. Adjacent tokens used to be <code>θ₀</code> apart and
+      are now <code>θ₀/s</code> apart — at 4× extension, adjacent tokens are four times harder to tell
+      apart in exactly the dimensions that encode local word order. That is why PI usually needs a
+      little finetuning to recover.</p>
+
+      <h3 class="text-xl font-bold">Fix 2 — NTK-aware scaling</h3>
+      <p>PI squeezes every dimension equally, which is the wrong instinct: the high frequencies were
+      never the problem. NTK-aware scaling instead raises the <strong>base</strong>:</p>
+      <pre>base' = base · s^(d/(d−2))</pre>
+      <p>This barely changes the fastest dimensions while stretching the slow ones a lot — spreading
+      the interpolation across frequencies rather than applying it uniformly. It often works with no
+      finetuning at all, which is why it spread through the community as a config tweak before it had
+      a paper.</p>
+
+      <h3 class="text-xl font-bold">Fix 3 — YaRN (Peng et al., 2023)</h3>
+      <p>YaRN makes the per-dimension decision explicit. Compute each dimension's wavelength and:</p>
+      <ul class="list-disc ml-6 space-y-1">
+        <li><strong>λ ≪ L</strong> — many cycles inside training. Leave it alone.</li>
+        <li><strong>λ ≫ L</strong> — never completed a cycle. Interpolate fully.</li>
+        <li><strong>in between</strong> — ramp smoothly between the two.</li>
+      </ul>
+      <p>Plus a small attention-temperature correction, because changing the angle distribution
+      changes the entropy of the softmax. The result keeps local resolution where PI loses it, which
+      the table on the MEASURE tab shows numerically.</p>
+
+      <h3 class="text-xl font-bold">What none of this fixes</h3>
+      <p>Every method here is about making positions <em>representable</em>. None of them teaches the
+      model to <em>use</em> information at 30k tokens — that is a data and training question, and it
+      is why a model advertising a large window can still fail a needle test in the middle of it.
+      Extending the context and using the context are two different problems, and the fixes on this
+      page only address the first.</p>
+
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-50">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">🔨 Build it yourself</h2>
+
+      <h3 class="text-xl font-bold">1. RoPE frequencies</h3>
+      <pre>function ropeFreqs(d, base){
+  const th = [];
+  for (let i = 0; i &lt; d / 2; i++) th.push(Math.pow(base, -2 * i / d));
+  return th;                                  // th[0] fastest, th[last] slowest
+}
+const wavelength = t =&gt; 2 * Math.PI / t;</pre>
+
+      <h3 class="text-xl font-bold">2. Rotate a vector by a position</h3>
+      <pre>function ropeApply(vec, pos, th){
+  const out = vec.slice();
+  for (let i = 0; i &lt; th.length; i++){
+    const a = pos * th[i], c = Math.cos(a), s = Math.sin(a);
+    const x = vec[2*i], y = vec[2*i+1];
+    out[2*i]   = x * c - y * s;
+    out[2*i+1] = x * s + y * c;
+  }
+  return out;
+}</pre>
+
+      <h3 class="text-xl font-bold">3. Check the relative-position identity before anything else</h3>
+      <pre>// dot(rope(q,m), rope(k,n)) must equal dot(rope(q,m-n), rope(k,0))
+const a = dot(ropeApply(q, m, th), ropeApply(k, n, th));
+const b = dot(ropeApply(q, m - n, th), ropeApply(k, 0, th));
+assert(Math.abs(a - b) &lt; 1e-9);</pre>
+      <p>Everything else assumes this. Five thousand random pairs cost nothing and it is the one
+      identity that makes RoPE what it is.</p>
+
+      <h3 class="text-xl font-bold">4. Count what actually goes out of range</h3>
+      <pre>function outOfRange(d, base, L){
+  return ropeFreqs(d, base).filter(t =&gt; wavelength(t) &gt; L).length;
+}</pre>
+      <p>This is the diagnosis, and it is two lines. Dimensions whose wavelength exceeds the training
+      length never completed a rotation, so they are the ones asked for unseen angles.</p>
+
+      <h3 class="text-xl font-bold">5. The three methods, as position or frequency transforms</h3>
+      <pre>// Position Interpolation: squeeze the POSITION
+const piPos = (pos, s) =&gt; pos / s;
+
+// NTK-aware: change the BASE, leave positions alone
+const ntkBase = (base, s, d) =&gt; base * Math.pow(s, d / (d - 2));
+
+// YaRN: per-dimension ramp by wavelength
+function yarnScale(th, L, s, lo, hi){
+  return th.map(t =&gt; {
+    const r = L / wavelength(t);           // cycles completed inside training
+    if (r &gt; hi) return t;                  // plenty of cycles: leave alone
+    if (r &lt; lo) return t / s;              // never cycled: interpolate fully
+    const g = (r - lo) / (hi - lo);        // ramp between
+    return t / (s * (1 - g) + g);
+  });
+}</pre>
+
+      <h3 class="text-xl font-bold">6. Measure the decay curve rather than describing it</h3>
+      <pre>function decayCurve(th, maxDist, samples){
+  const out = [];
+  for (let dist = 0; dist &lt; maxDist; dist += step){
+    let acc = 0;
+    for (let s = 0; s &lt; samples; s++){
+      const q = randVec(d), k = randVec(d);
+      acc += dot(ropeApply(q, dist, th), ropeApply(k, 0, th));
+    }
+    out.push(acc / samples);
+  }
+  return out;
+}</pre>
+      <p>Plot it for each method. The naive-extrapolation curve stops being monotone past L, and that
+      is the picture worth having.</p>
+
+      <h3 class="text-xl font-bold">7. State the cost, do not bury it</h3>
+      <pre>// adjacent-token angle gap in the FASTEST dimension - local word order
+const localGapPI   = th[0] / s;      // PI: divided by the full scale factor
+const localGapYaRN = yarnScale(th, L, s, 1, 32)[0];   // usually ~ th[0]</pre>
+      <p>Report both. A method that extends context by destroying local resolution has not extended
+      anything useful, and the number that shows it is one division.</p>
+
+      <h3 class="text-xl font-bold">🎉 Day 63 of AIFromZero done.</h3>
+      <p class="text-slate-600">Tomorrow: attention sinks and StreamingLLM — why keeping the first
+      few tokens forever lets a window slide without collapsing.</p>
+
+    </div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.addEventListener("click", () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+}));
+
+// ===== ENGINE:BEGIN =====
+// Pure, DOM-free RoPE + context-extension maths. Real rotations, no model weights.
+function ropeFreqs(d, base){
+  const th = [];
+  for (let i = 0; i < Math.floor(d / 2); i++) th.push(Math.pow(base, -2 * i / d));
+  return th;
+}
+function wavelength(theta){ return 2 * Math.PI / theta; }
+
+function ropeApply(vec, pos, th){
+  const out = vec.slice();
+  for (let i = 0; i < th.length; i++){
+    const a = pos * th[i], c = Math.cos(a), s = Math.sin(a);
+    const x = vec[2*i], y = vec[2*i+1];
+    out[2*i] = x * c - y * s;
+    out[2*i+1] = x * s + y * c;
+  }
+  return out;
+}
+function dot(a, b){
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+  return s;
+}
+
+function outOfRangeDims(d, base, L){
+  const th = ropeFreqs(d, base);
+  let n = 0;
+  for (let i = 0; i < th.length; i++) if (wavelength(th[i]) > L) n++;
+  return n;
+}
+function longestWavelength(d, base){
+  const th = ropeFreqs(d, base);
+  return wavelength(th[th.length - 1]);
+}
+
+// --- the three extension methods -------------------------------------------
+function piFreqs(d, base, s){                 // position interpolation: pos/s === theta/s
+  return ropeFreqs(d, base).map(function(t){ return t / s; });
+}
+function ntkBase(base, s, d){ return base * Math.pow(s, d / (d - 2)); }
+function ntkFreqs(d, base, s){ return ropeFreqs(d, ntkBase(base, s, d)); }
+
+function yarnFreqs(d, base, L, s, lo, hi){
+  lo = lo === undefined ? 1 : lo;
+  hi = hi === undefined ? 32 : hi;
+  return ropeFreqs(d, base).map(function(t){
+    const cycles = L / wavelength(t);          // how many full rotations fit in training
+    if (cycles > hi) return t;                 // seen plenty of angles: untouched
+    if (cycles < lo) return t / s;             // never cycled: full interpolation
+    const g = (cycles - lo) / (hi - lo);
+    return t / (s * (1 - g) + g);
+  });
+}
+
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function randVec(d, rng){
+  const v = [];
+  for (let i = 0; i < d; i++) v.push(rng() * 2 - 1);
+  return v;
+}
+
+// Expected attention score vs relative distance.
+//
+// NOTE the query/key construction. With INDEPENDENT random q and k the expected
+// dot product is exactly 0 at every distance - there is no decay to see, only
+// sampling noise. RoPE's long-term decay is a statement about how a rotated
+// vector loses alignment with ITSELF as the offset grows:
+//     dot(rope(q,d), rope(q,0)) = sum_i |q_i|^2 * cos(d * theta_i)
+// which is the quantity that actually falls away. So q and k are the same draw
+// here, and the curve is real rather than a random walk around zero.
+function decayCurve(th, d, maxDist, step, samples, seed){
+  const rng = mulberry32(seed || 1);
+  const qs = [];
+  for (let s = 0; s < samples; s++) qs.push(randVec(d, rng));
+  const out = [];
+  for (let dist = 0; dist <= maxDist; dist += step){
+    let acc = 0;
+    for (let s = 0; s < samples; s++)
+      acc += dot(ropeApply(qs[s], dist, th), ropeApply(qs[s], 0, th));
+    out.push({ dist: dist, score: acc / samples });
+  }
+  return out;
+}
+
+// How many dimensions are asked for a relative angle outside anything training
+// produced. The TRAINED frequencies and the METHOD's frequencies must both be
+// passed: a method that rescales theta is only safe if its angle at the new
+// maximum position stays inside the original trained sweep, so comparing a
+// rescaled ladder against itself would always report zero and prove nothing.
+function unseenAngleCount(thTrained, thMethod, L, Lprime){
+  let n = 0;
+  for (let i = 0; i < thTrained.length; i++){
+    const maxTrained = (L - 1) * thTrained[i];
+    const maxAsked = (Lprime - 1) * thMethod[i];
+    if (maxTrained >= 2 * Math.PI) continue;      // this dim saw a full rotation: any angle is familiar
+    // Tolerance of ONE trained position step. Interpolation maps the last position
+    // to L'-1 over s, which lands a fraction of a position beyond the largest
+    // trained angle - real, but far inside the sweep the model actually saw. A
+    // zero tolerance would report every interpolation method as unsafe and the
+    // metric would stop distinguishing them from raw extrapolation.
+    if (maxAsked > maxTrained + thTrained[i]) n++;
+  }
+  return n;
+}
+
+// local resolution: adjacent-token angle gap in the fastest dimension
+function localGap(th){ return th[0]; }
+// ===== ENGINE:END =====
+
+/* ---------------- UI ---------------- */
+function cfg(){
+  return {
+    d: +document.getElementById("dim").value || 64,
+    L: +document.getElementById("L").value || 2048,
+    L2: +document.getElementById("L2").value || 8192,
+    base: +document.getElementById("base").value || 10000
+  };
+}
+
+function run(){
+  const c = cfg();
+  const s = c.L2 / c.L;
+  document.getElementById("sf").textContent = s.toFixed(2) + "×";
+
+  document.getElementById("oor").textContent = outOfRangeDims(c.d, c.base, c.L) + " / " + Math.floor(c.d/2);
+  document.getElementById("wl").textContent = Math.round(longestWavelength(c.d, c.base)).toLocaleString();
+  document.getElementById("crowd").textContent = (100 / s).toFixed(1) + "%";
+  document.getElementById("ntkb").textContent = Math.round(ntkBase(c.base, s, c.d)).toLocaleString();
+
+  const base = ropeFreqs(c.d, c.base);
+  const pi = piFreqs(c.d, c.base, s);
+  const ntk = ntkFreqs(c.d, c.base, s);
+  const yarn = yarnFreqs(c.d, c.base, c.L, s, 1, 32);
+
+  const rows = [
+    ["naive extrapolation", base],
+    ["position interpolation", pi],
+    ["NTK-aware", ntk],
+    ["YaRN", yarn]
+  ];
+  document.getElementById("tbl").innerHTML = rows.map(function(r){
+    const unseen = unseenAngleCount(base, r[1], c.L, c.L2);
+    const keep = 100 * localGap(r[1]) / localGap(base);
+    const ft = r[0] === "naive extrapolation" ? "—"
+             : r[0] === "position interpolation" ? "usually yes"
+             : r[0] === "NTK-aware" ? "often no" : "short";
+    return "<tr class='border-t border-slate-100'><td class='py-1'>" + r[0] + "</td>" +
+      "<td class='" + (unseen ? "text-rose-600 font-bold" : "text-emerald-600 font-bold") + "'>" + unseen + "</td>" +
+      "<td>" + keep.toFixed(1) + "%</td><td class='text-slate-600'>" + ft + "</td></tr>";
+  }).join("");
+
+  drawCurves(c, s, base, pi, yarn);
+}
+
+function drawCurves(c, s, base, pi, yarn){
+  const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  const maxDist = c.L2;
+  const step = Math.max(1, Math.round(maxDist / 220));
+  const series = [
+    { th: base, colour: "#0f172a", clip: c.L },
+    { th: base, colour: "#dc2626", clip: maxDist },
+    { th: pi,   colour: "#2563eb", clip: maxDist },
+    { th: yarn, colour: "#059669", clip: maxDist }
+  ];
+  let lo = Infinity, hi = -Infinity;
+  const curves = series.map(function(x){
+    const cur = decayCurve(x.th, c.d, maxDist, step, 24, 7);
+    cur.forEach(function(p){ if (p.score < lo) lo = p.score; if (p.score > hi) hi = p.score; });
+    return cur;
+  });
+  const yOf = function(v){ return H - 10 - ((v - lo) / (hi - lo || 1)) * (H - 30); };
+  // trained-length marker
+  const xL = (c.L / maxDist) * W;
+  ctx.strokeStyle = "#94a3b8"; ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(xL, 0); ctx.lineTo(xL, H); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = "#64748b"; ctx.font = "12px sans-serif";
+  ctx.fillText("trained length L", xL + 6, 16);
+
+  curves.forEach(function(cur, i){
+    ctx.strokeStyle = series[i].colour;
+    ctx.lineWidth = i === 0 ? 2.5 : 1.5;
+    ctx.beginPath();
+    let started = false;
+    cur.forEach(function(p){
+      if (p.dist > series[i].clip) return;
+      const x = (p.dist / maxDist) * W, y = yOf(p.score);
+      started ? ctx.lineTo(x, y) : (ctx.moveTo(x, y), started = true);
+    });
+    ctx.stroke();
+  });
+}
+
+["dim","L","L2","base"].forEach(function(id){
+  document.getElementById(id).addEventListener("input", run);
+});
+
+document.getElementById("proveBtn").addEventListener("click", function(){
+  const out = document.getElementById("proveOut");
+  out.classList.remove("hidden");
+  const c = cfg();
+  const th = ropeFreqs(c.d, c.base);
+  const rng = mulberry32(31337);
+  let worst = 0, n = 0;
+  for (let t = 0; t < 5000; t++){
+    const q = randVec(c.d, rng), k = randVec(c.d, rng);
+    const m = Math.floor(rng() * c.L), nn = Math.floor(rng() * c.L);
+    const a = dot(ropeApply(q, m, th), ropeApply(k, nn, th));
+    const b = dot(ropeApply(q, m - nn, th), ropeApply(k, 0, th));
+    const e = Math.abs(a - b) / Math.max(1e-9, Math.abs(a));
+    if (e > worst) worst = e;
+    n++;
+  }
+  out.textContent =
+    "pairs tested                 : " + n + "\n" +
+    "worst relative difference    : " + worst.toExponential(3) + "\n\n" +
+    "dot(rope(q,m), rope(k,n)) == dot(rope(q,m-n), rope(k,0))\n" +
+    (worst < 1e-9 ? "The rotation is purely relative. Absolute position genuinely cancels."
+                  : "MISMATCH - the identity does not hold, everything else is void.");
+});
+
+run();
+</script>
+</body>
+</html>

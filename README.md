@@ -64,6 +64,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 60 — Continuous Batching](https://dev48v.infy.uk/ai/days/day60-continuous-batching.html) — `day60-continuous-batching.html`
 - [AIFromZero · Day 61 — Differential Privacy](https://dev48v.infy.uk/ai/days/day61-differential-privacy.html) — `day61-differential-privacy.html`
 - [AIFromZero · Day 62 — Mechanistic Interpretability](https://dev48v.infy.uk/ai/days/day62-mechanistic-interpretability.html) — `day62-mechanistic-interpretability.html`
+- [AIFromZero · Day 63 — Context extension: PI, NTK-aware, YaRN](https://dev48v.infy.uk/ai/days/day63-context-extension.html) — `day63-context-extension.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
