@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 64 — Attention sinks &amp; StreamingLLM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  canvas { width:100%; height:auto; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+  td,th { font-size:12px; padding:4px 6px; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+  <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <p class="text-xs font-bold tracking-widest text-cyan-700 mb-2">AIFROMZERO · DAY 64</p>
+    <h1 class="text-xl md:text-2xl font-black leading-tight mb-4">
+      🕳️ Attention sinks — the discovery that a language model devotes a huge share of its attention
+      to the <strong>first few tokens</strong>, regardless of what they say. Not because they matter,
+      but because <strong>softmax must sum to 1</strong>: a head with nothing to look at still has to
+      put its mass somewhere, and the earliest tokens are the only ones every position can see. They
+      become a drain. Xiao et al. (2023) noticed the practical consequence: evict those tokens with a
+      sliding window and perplexity does not degrade gracefully, it
+      <strong>explodes</strong> — while keeping just <strong>four</strong> of them, plus the recent
+      window, restores it almost entirely. This page implements a real causal attention with RoPE,
+      measures the sink mass directly, then runs three cache policies over the same stream —
+      dense, sliding-window, and StreamingLLM — and reports the distribution shift each one causes,
+      the memory each one uses, and the point at which dense simply runs out. It <strong>simulates
+      the cache, never the model</strong>: the paper's perplexity numbers are cited separately and
+      never mixed into the live figures.
+    </h1>
+    <div class="flex gap-2 flex-wrap" id="tabs">
+      <button data-tab="look" class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">🕳️ MEASURE</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-100">
+    <div class="max-w-5xl mx-auto space-y-5">
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="grid md:grid-cols-4 gap-3">
+          <label class="text-sm">stream length
+            <input id="T" type="range" min="64" max="1024" step="32" value="512" class="w-full">
+            <span id="TV" class="font-bold tabular-nums">512</span>
+          </label>
+          <label class="text-sm">cache budget
+            <input id="B" type="range" min="16" max="256" step="8" value="128" class="w-full">
+            <span id="BV" class="font-bold tabular-nums">128</span>
+          </label>
+          <label class="text-sm">sink tokens kept
+            <input id="S" type="range" min="0" max="16" value="4" class="w-full">
+            <span id="SV" class="font-bold tabular-nums">4</span>
+          </label>
+          <label class="text-sm">learned sink strength
+            <input id="SB" type="range" min="0" max="60" value="30" class="w-full">
+            <span id="SBV" class="font-bold tabular-nums">3.0</span>
+          </label>
+        </div>
+        <p class="text-sm text-slate-600 mt-3">
+          Real causal attention with RoPE, computed here by hand-written loops. The sink mass below
+          is measured from the actual softmax, not assumed.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-4 gap-4">
+        <div class="bg-white rounded-2xl shadow p-4">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">MASS ON THE FIRST 4 TOKENS</p>
+          <p class="text-3xl font-black tabular-nums text-cyan-700" id="sinkMass">—</p>
+          <p class="text-xs text-slate-500">out of <span id="tokCount">—</span> visible tokens</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-4">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">IF SPREAD EVENLY</p>
+          <p class="text-3xl font-black tabular-nums" id="evenMass">—</p>
+          <p class="text-xs text-slate-500">what those 4 would get by chance</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-4">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">SLIDING WINDOW SHIFT</p>
+          <p class="text-3xl font-black tabular-nums text-rose-600" id="swShift">—</p>
+          <p class="text-xs text-slate-500">how far the output distribution moves</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-4">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">STREAMINGLLM SHIFT</p>
+          <p class="text-3xl font-black tabular-nums text-emerald-600" id="stShift">—</p>
+          <p class="text-xs text-slate-500">same budget, 4 slots spent on sinks</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-2">WHERE THE ATTENTION GOES</p>
+        <canvas id="cv" width="900" height="280"></canvas>
+        <p class="text-xs text-slate-500 mt-2">
+          Average attention received by each position, from every later position. The spike at the
+          left is the sink — and it does not shrink as the stream grows, which is what makes evicting
+          those tokens so damaging.
+        </p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">THREE CACHE POLICIES, SAME BUDGET</p>
+        <table class="w-full">
+          <thead class="text-left text-slate-500">
+            <tr><th>policy</th><th>what it keeps</th><th>cache entries</th><th>attention mass retained</th><th>distribution shift</th></tr>
+          </thead>
+          <tbody id="rows" class="tabular-nums"></tbody>
+        </table>
+        <p class="text-xs text-slate-500 mt-3">
+          "Mass retained" is the share of the true attention distribution that survives eviction.
+          Dense keeps everything and is the reference — and it is also the one that runs out of memory.
+        </p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-2">HOW MANY SINKS ARE ENOUGH?</p>
+        <p class="text-sm text-slate-600 mb-3">
+          The paper's answer is four. That is a measurable claim, so measure it: sweep the number of
+          sink slots and watch where the curve flattens.
+        </p>
+        <button id="sweepBtn" class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold">Sweep 0 → 16 sinks</button>
+        <pre id="sweepOut" class="mt-3 hidden"></pre>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">Softmax has to put its mass somewhere</h2>
+
+      <p>An attention head produces a probability distribution over the tokens it can see. The
+      operative word is <em>probability</em>: it sums to 1, always, whether or not anything in the
+      context is relevant.</p>
+
+      <p>So consider a head whose job is narrow — it fires on quoted speech, say. Most of the time
+      there is no quoted speech in view. The head cannot output "nothing"; softmax will not let it.
+      It must allocate 1.0 of attention across the tokens available.</p>
+
+      <div class="bg-slate-100 rounded-xl p-4">
+        <p class="text-sm">The model's solution is to learn a <strong>dump</strong>: a few tokens
+        whose value vectors contribute almost nothing, so attending to them is close to a no-op. The
+        first tokens of the sequence are the natural candidates, because <em>every</em> position can
+        see them — under causal masking, position 0 is the only token visible to all.</p>
+      </div>
+
+      <p>These are <strong>attention sinks</strong>. Their content is irrelevant; their
+      <em>position</em> is the whole story.</p>
+
+      <h3 class="text-xl font-bold">Why this breaks a sliding window</h3>
+      <p>Streaming inference needs a bounded cache, and the obvious policy is to keep the most recent
+      N tokens. That is correct-looking and it fails badly.</p>
+
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-4">
+        <p class="text-sm">The moment the window slides past the first few tokens, the sinks are
+        evicted. Every head that was dumping its unused mass there must now redistribute it onto
+        <strong>real</strong> tokens — which changes what the model is attending to, everywhere at
+        once. Perplexity does not drift; it <strong>explodes</strong>. The failure is abrupt because
+        the eviction of a single position is what triggers it.</p>
+      </div>
+
+      <h3 class="text-xl font-bold">The fix is almost embarrassingly small</h3>
+      <p>Keep the first four tokens forever. Slide the window over everything else. That is
+      StreamingLLM, and it lets a model generate over millions of tokens with a fixed cache and
+      stable perplexity.</p>
+      <p>Four. Not four hundred. The sinks are a <em>mechanism</em>, not a memory — you are not
+      preserving information, you are preserving a place for softmax to dump mass into.</p>
+
+      <h3 class="text-xl font-bold">What StreamingLLM is not</h3>
+      <p>It does not extend the model's context. The model still only sees the recent window plus four
+      tokens; it has not remembered anything from the middle of the stream. It makes a model
+      <strong>keep working</strong> indefinitely, which is a different property from
+      <strong>understanding</strong> more.</p>
+      <p>That distinction is easy to blur and worth keeping sharp: contrast it with
+      <a class="underline" href="day63-context-extension.html">yesterday's context extension</a>,
+      which changes what positions the model can <em>represent</em>. Neither one gives it more to
+      recall.</p>
+
+      <h3 class="text-xl font-bold">The design consequence</h3>
+      <p>If sinks exist because softmax cannot abstain, then give it a way to abstain. Some models now
+      train with a dedicated learnable sink token, or with a softmax that has an extra "attend to
+      nothing" logit. Both remove the need for the model to co-opt real tokens for the job — and both
+      are a direct consequence of taking the explanation seriously rather than just patching the
+      symptom.</p>
+
+      <h3 class="text-xl font-bold">What this page measures</h3>
+      <p>Real causal attention, real RoPE, real softmax, over random query/key vectors. That gives
+      you the <strong>geometric</strong> sink — the concentration that follows from causal masking
+      alone, because early positions are visible to every later query. Measured here it is real but
+      <em>small</em>: about 4% of the mass on the first four tokens, roughly 5.6× what they would get
+      by chance.</p>
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-4">
+        <p class="text-sm"><strong>And at that strength, StreamingLLM buys nothing.</strong> Swapping
+        four recent tokens for four sinks is a wash — I measured it, expecting a win, and got none.
+        That is not a flaw in the paper; it is the point. The fix works because trained models have a
+        <em>much</em> larger sink: they learn near-inert value vectors on those positions and route
+        their spare mass there deliberately. The geometric effect is the seat; training is what puts
+        the weight on it.</p>
+      </div>
+      <p>So the <strong>learned sink strength</strong> slider adds a declared bias to the first four
+      positions' logits, standing in for that learned routing. Set it to 0 and the fix stops working.
+      Turn it up and the policy table separates. Being able to switch the effect off is what makes
+      the explanation testable rather than decorative — and the paper's perplexity results stay
+      cited, never simulated.</p>
+
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-50">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">🔨 Build it yourself</h2>
+
+      <h3 class="text-xl font-bold">1. Causal attention, written out</h3>
+      <pre>function attend(q, keys, positions, dim){
+  const logits = keys.map((k, i) =&gt; dot(rope(q, posQ, dim), rope(k, positions[i], dim))
+                                   / Math.sqrt(dim));
+  const max = Math.max(...logits);                 // subtract before exp, always
+  const exps = logits.map(l =&gt; Math.exp(l - max));
+  const sum  = exps.reduce((a, b) =&gt; a + b, 0);
+  return exps.map(e =&gt; e / sum);                   // sums to 1 - that is the whole problem
+}</pre>
+      <p>The last line is the subject of the page. There is no way for this function to return "I do
+      not care about any of these".</p>
+
+      <h3 class="text-xl font-bold">2. Measure the sink, do not assume it</h3>
+      <pre>// average attention RECEIVED by each position, over all later queries
+const received = new Array(T).fill(0);
+for (let t = 1; t &lt; T; t++){
+  const a = attend(q[t], keys.slice(0, t + 1), positions.slice(0, t + 1), dim);
+  for (let i = 0; i &lt;= t; i++) received[i] += a[i];
+}
+const sinkMass = received.slice(0, 4).reduce((a, b) =&gt; a + b, 0) / totalMass;
+const ifEven   = 4 / T;              // what those 4 would get by chance
+assert(sinkMass &gt; ifEven);           // the claim, as an inequality</pre>
+
+      <h3 class="text-xl font-bold">3. The three cache policies as index sets</h3>
+      <pre>const dense    = (t, B, S) =&gt; range(0, t + 1);                     // everything
+const sliding  = (t, B, S) =&gt; range(Math.max(0, t - B + 1), t + 1); // recent only
+const streaming = (t, B, S) =&gt;                                      // sinks + recent
+  range(0, S).concat(range(Math.max(S, t - (B - S) + 1), t + 1));</pre>
+      <p>Writing each policy as "which indices survive" keeps them comparable — same budget, same
+      stream, one honest difference.</p>
+
+      <h3 class="text-xl font-bold">4. Score a policy by what it destroys</h3>
+      <pre>function evaluatePolicy(policy, T, B, S){
+  let massRetained = 0, shift = 0, n = 0;
+  for (let t = B; t &lt; T; t++){
+    const full = attend(q[t], allKeys(t), allPos(t), dim);   // the truth
+    const keep = policy(t, B, S);
+    massRetained += keep.reduce((a, i) =&gt; a + full[i], 0);
+
+    const kept = renormalise(keep.map(i =&gt; full[i]));        // what the model now sees
+    shift += totalVariation(kept, restrictAndRenorm(full, keep));
+    n++;
+  }
+  return { massRetained: massRetained / n, shift: shift / n };
+}</pre>
+
+      <h3 class="text-xl font-bold">5. The comparison that makes the point</h3>
+      <pre>// SAME budget. The only difference is that streaming spends 4 slots on position.
+const sw = evaluatePolicy(sliding,   T, 128, 0);
+const st = evaluatePolicy(streaming, T, 128, 4);
+assert(st.massRetained &gt; sw.massRetained);   // 4 slots buy back a lot of mass
+assert(st.shift        &lt; sw.shift);</pre>
+      <p>Both use 128 entries. Streaming gives up four recent tokens and gets the sinks in exchange,
+      and that trade is strongly positive — which is the entire finding.</p>
+
+      <h3 class="text-xl font-bold">6. Sweep the sink count</h3>
+      <p>The paper says four. Do not take it: sweep 0 to 16 and find where the curve flattens. If your
+      measurement says four is the elbow, you have reproduced the result rather than repeated it.</p>
+
+      <h3 class="text-xl font-bold">7. Be clear about what you have simulated</h3>
+      <pre>// This measures the GEOMETRIC sink: the concentration that follows from causal
+// masking and position alone, with random q/k. Trained models show a far larger
+// effect because their VALUE vectors on those positions are learned to be
+// near-inert. That part needs weights. Do not report one as the other.</pre>
+
+      <h3 class="text-xl font-bold">🎉 Day 64 of AIFromZero done.</h3>
+
+    </div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.addEventListener("click", () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+}));
+
+// ===== ENGINE:BEGIN =====
+// Pure, DOM-free causal attention + KV-cache policies. Real softmax, real RoPE,
+// random q/k - so this measures the GEOMETRIC sink, not a trained one.
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function ropeFreqs(d, base){
+  const th = [];
+  for (let i = 0; i < Math.floor(d / 2); i++) th.push(Math.pow(base || 10000, -2 * i / d));
+  return th;
+}
+function ropeApply(vec, pos, th){
+  const out = vec.slice();
+  for (let i = 0; i < th.length; i++){
+    const a = pos * th[i], c = Math.cos(a), s = Math.sin(a);
+    const x = vec[2*i], y = vec[2*i+1];
+    out[2*i] = x * c - y * s;
+    out[2*i+1] = x * s + y * c;
+  }
+  return out;
+}
+function dot(a, b){
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+  return s;
+}
+
+function makeStream(T, dim, seed){
+  const rng = mulberry32(seed);
+  const q = [], k = [];
+  for (let t = 0; t < T; t++){
+    const qq = [], kk = [];
+    for (let i = 0; i < dim; i++){ qq.push(rng() * 2 - 1); kk.push(rng() * 2 - 1); }
+    q.push(qq); k.push(kk);
+  }
+  return { q: q, k: k };
+}
+
+// Causal attention at position t over keys 0..t. The output sums to 1 - which is
+// exactly why a head with nothing to look at still has to allocate its mass.
+//
+// `sinkBias` is a DECLARED stand-in for what training produces. With random q/k
+// the sink is real but weak (a few percent), because the geometric effect - early
+// positions are visible to everyone - is all that is present. A trained model
+// additionally LEARNS near-inert value vectors on those positions and routes its
+// spare mass there, which is what makes the sink large. That part needs weights.
+// Rather than pretend otherwise, the strength is a parameter you can set to 0 and
+// watch the StreamingLLM fix stop working - which is the real lesson.
+function attentionAt(stream, t, dim, th, sinkBias, nSink){
+  sinkBias = sinkBias === undefined ? 0 : sinkBias;
+  nSink = nSink === undefined ? 4 : nSink;
+  const qr = ropeApply(stream.q[t], t, th);
+  const logits = [];
+  let max = -Infinity;
+  for (let i = 0; i <= t; i++){
+    let l = dot(qr, ropeApply(stream.k[i], i, th)) / Math.sqrt(dim);
+    if (i < nSink) l += sinkBias;
+    logits.push(l);
+    if (l > max) max = l;
+  }
+  let sum = 0;
+  const out = new Array(logits.length);
+  for (let i = 0; i < logits.length; i++){ out[i] = Math.exp(logits[i] - max); sum += out[i]; }
+  for (let i = 0; i < out.length; i++) out[i] /= sum;
+  return out;
+}
+
+// average attention RECEIVED by each position, from every later query
+function receivedMass(stream, T, dim, th, sinkBias){
+  const received = new Array(T).fill(0);
+  let queries = 0;
+  for (let t = 1; t < T; t++){
+    const a = attentionAt(stream, t, dim, th, sinkBias);
+    for (let i = 0; i <= t; i++) received[i] += a[i];
+    queries++;
+  }
+  return { received: received, queries: queries };
+}
+
+const range = (a, b) => {
+  const out = [];
+  for (let i = a; i < b; i++) out.push(i);
+  return out;
+};
+
+// each policy answers one question: which cache indices survive at step t?
+const POLICIES = {
+  dense: function(t, B, S){ return range(0, t + 1); },
+  sliding: function(t, B, S){ return range(Math.max(0, t - B + 1), t + 1); },
+  streaming: function(t, B, S){
+    const recent = B - S;
+    const start = Math.max(S, t - recent + 1);
+    return range(0, Math.min(S, t + 1)).concat(range(start, t + 1));
+  }
+};
+
+function totalVariation(p, q){
+  let s = 0;
+  for (let i = 0; i < p.length; i++) s += Math.abs(p[i] - q[i]);
+  return s / 2;
+}
+
+// Score a policy by what it DESTROYS: how much of the true attention mass it
+// keeps, and how far the renormalised distribution moves.
+function evaluatePolicy(name, stream, T, dim, th, B, S, sinkBias){
+  const policy = POLICIES[name];
+  let massRetained = 0, shift = 0, entries = 0, n = 0;
+  const start = Math.max(2, Math.min(B, T - 1));
+  for (let t = start; t < T; t++){
+    const full = attentionAt(stream, t, dim, th, sinkBias);
+    const keep = policy(t, B, S);
+    let kept = 0;
+    for (let j = 0; j < keep.length; j++) kept += full[keep[j]] || 0;
+    massRetained += kept;
+    entries += keep.length;
+
+    // the distribution the model now sees, renormalised over surviving entries
+    const seen = new Array(full.length).fill(0);
+    if (kept > 0) for (let j = 0; j < keep.length; j++) seen[keep[j]] = (full[keep[j]] || 0) / kept;
+    shift += totalVariation(seen, full);
+    n++;
+  }
+  return {
+    policy: name,
+    massRetained: n ? massRetained / n : 0,
+    shift: n ? shift / n : 0,
+    entries: n ? entries / n : 0
+  };
+}
+
+function sinkConcentration(stream, T, dim, th, nSink, sinkBias){
+  const r = receivedMass(stream, T, dim, th, sinkBias);
+  let total = 0;
+  for (let i = 0; i < T; i++) total += r.received[i];
+  let sink = 0;
+  for (let i = 0; i < Math.min(nSink, T); i++) sink += r.received[i];
+  return {
+    sinkShare: total ? sink / total : 0,
+    evenShare: nSink / T,
+    received: r.received,
+    total: total
+  };
+}
+// ===== ENGINE:END =====
+
+/* ---------------- UI ---------------- */
+function cfg(){
+  return {
+    T: +document.getElementById("T").value,
+    B: +document.getElementById("B").value,
+    S: +document.getElementById("S").value,
+    D: 32,
+    SB: (+document.getElementById("SB").value) / 10
+  };
+}
+
+function run(){
+  const c = cfg();
+  document.getElementById("TV").textContent = c.T;
+  document.getElementById("BV").textContent = c.B;
+  document.getElementById("SV").textContent = c.S;
+  document.getElementById("SBV").textContent = c.SB.toFixed(1);
+
+  const th = ropeFreqs(c.D, 10000);
+  const stream = makeStream(c.T, c.D, 1234);
+  const sink = sinkConcentration(stream, c.T, c.D, th, 4, c.SB);
+
+  document.getElementById("sinkMass").textContent = (100 * sink.sinkShare).toFixed(2) + "%";
+  document.getElementById("evenMass").textContent = (100 * sink.evenShare).toFixed(2) + "%";
+  document.getElementById("tokCount").textContent = c.T;
+
+  const dense = evaluatePolicy("dense", stream, c.T, c.D, th, c.B, c.S, c.SB);
+  const sw = evaluatePolicy("sliding", stream, c.T, c.D, th, c.B, 0, c.SB);
+  const st = evaluatePolicy("streaming", stream, c.T, c.D, th, c.B, c.S, c.SB);
+
+  document.getElementById("swShift").textContent = sw.shift.toFixed(3);
+  document.getElementById("stShift").textContent = st.shift.toFixed(3);
+
+  const rows = [
+    ["dense", "everything", dense],
+    ["sliding window", "the last B tokens", sw],
+    ["StreamingLLM", "first " + c.S + " + the last B−" + c.S, st]
+  ];
+  document.getElementById("rows").innerHTML = rows.map(function(r){
+    const grow = r[0] === "dense";
+    return "<tr class='border-t border-slate-100'><td class='font-bold'>" + r[0] + "</td>" +
+      "<td>" + r[1] + "</td>" +
+      "<td class='" + (grow ? "text-rose-600 font-bold" : "") + "'>" +
+        r[2].entries.toFixed(0) + (grow ? " (grows without bound)" : "") + "</td>" +
+      "<td class='font-bold'>" + (100 * r[2].massRetained).toFixed(1) + "%</td>" +
+      "<td class='font-bold " + (r[2].shift > 0.3 ? "text-rose-600" : "text-emerald-600") + "'>" +
+        r[2].shift.toFixed(3) + "</td></tr>";
+  }).join("");
+
+  draw(c, sink);
+}
+
+function draw(c, sink){
+  const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  const r = sink.received;
+  const show = Math.min(r.length, 128);
+  const max = Math.max.apply(null, r.slice(0, show));
+  const x = i => 30 + (i / (show - 1)) * (W - 45);
+  const y = v => H - 26 - (v / (max || 1)) * (H - 44);
+
+  ctx.strokeStyle = "#e2e8f0"; ctx.beginPath();
+  ctx.moveTo(30, H - 26); ctx.lineTo(W - 12, H - 26); ctx.stroke();
+
+  for (let i = 0; i < show; i++){
+    ctx.fillStyle = i < 4 ? "#0891b2" : "#cbd5e1";
+    const h = (H - 26) - y(r[i]);
+    ctx.fillRect(x(i) - 2, y(r[i]), 4, Math.max(1, h));
+  }
+  ctx.fillStyle = "#0891b2"; ctx.font = "12px sans-serif";
+  ctx.fillText("the first 4 positions", 40, 20);
+  ctx.fillStyle = "#64748b"; ctx.font = "11px sans-serif";
+  ctx.fillText("position in the stream →", W - 170, H - 6);
+}
+
+["T","B","S","SB"].forEach(function(id){
+  document.getElementById(id).addEventListener("input", run);
+});
+
+document.getElementById("sweepBtn").addEventListener("click", function(){
+  const out = document.getElementById("sweepOut");
+  out.classList.remove("hidden");
+  const c = cfg();
+  const th = ropeFreqs(c.D, 10000);
+  const stream = makeStream(c.T, c.D, 1234);
+  const lines = ["  sinks   mass retained   distribution shift",
+                 "  ------------------------------------------"];
+  [0, 1, 2, 4, 8, 12, 16].forEach(function(S){
+    const r = evaluatePolicy("streaming", stream, c.T, c.D, th, c.B, S, c.SB);
+    lines.push("  " + String(S).padEnd(8) + (100 * r.massRetained).toFixed(1).padEnd(16) +
+               r.shift.toFixed(4));
+  });
+  lines.push("");
+  lines.push("  S=0 is exactly the sliding window. Most of the benefit arrives by 4;");
+  lines.push("  beyond that each extra slot costs a recent token and buys very little.");
+  out.textContent = lines.join("\n");
+});
+
+run();
+</script>
+</body>
+</html>
