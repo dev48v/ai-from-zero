@@ -66,6 +66,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 62 — Mechanistic Interpretability](https://dev48v.infy.uk/ai/days/day62-mechanistic-interpretability.html) — `day62-mechanistic-interpretability.html`
 - [AIFromZero · Day 63 — Context extension: PI, NTK-aware, YaRN](https://dev48v.infy.uk/ai/days/day63-context-extension.html) — `day63-context-extension.html`
 - [AIFromZero · Day 64 — Attention sinks and StreamingLLM](https://dev48v.infy.uk/ai/days/day64-attention-sinks.html) — `day64-attention-sinks.html`
+- [AIFromZero · Day 65 — Chain-of-thought faithfulness](https://dev48.infy.uk/ai/days/day65-cot-faithfulness.html) — `day65-cot-faithfulness.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

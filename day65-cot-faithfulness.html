@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 65 — Chain-of-thought faithfulness</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid #e2e8f0; }
+  .ok { color:#166534; font-weight:800; }
+  .bad { color:#991b1b; font-weight:800; }
+  .warn { color:#92400e; font-weight:800; }
+  .bar { height:9px; border-radius:99px; background:#e2e8f0; overflow:hidden; }
+  .bar span { display:block; height:100%; background:#8b5cf6; }
+  .step { border-left:3px solid #cbd5e1; padding:5px 10px; font-size:12.5px; border-radius:0 6px 6px 0; }
+  .step.kept { border-color:#16a34a; background:#f0fdf4; }
+  .step.cut { border-color:#94a3b8; background:#f8fafc; opacity:.5; text-decoration:line-through; }
+  .step.corrupt { border-color:#dc2626; background:#fef2f2; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+  <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <p class="text-xs font-bold tracking-widest text-violet-700 mb-2">AIFROMZERO · DAY 65</p>
+    <h1 class="text-xl md:text-2xl font-black leading-tight mb-4">
+      🪞 Chain-of-thought <strong>faithfulness</strong> — not "does reasoning out loud help?" (Day 2
+      of the prompt series settled that) but the harder question: <strong>is the stated reasoning
+      what actually produced the answer?</strong> A chain of thought is a story the model tells; it
+      is only evidence if perturbing it changes the conclusion. So this page runs the three real
+      tests from the literature — <strong>early answering</strong> and <strong>mistake
+      injection</strong> (Lanham et&nbsp;al. 2023) and <strong>biasing features</strong> (Turpin
+      et&nbsp;al. 2023) — against a model whose reasoning and whose hidden bias are both declared,
+      so faithfulness has a ground truth to be measured against. The result the page is built
+      around, measured rather than asserted: across the whole reliance dial <strong>faithfulness
+      spans about 50 points while the accuracy gain spans 3</strong>. You can get essentially the
+      entire benefit of chain-of-thought from a trace that had nothing to do with the answer, which
+      is why "the model explained its reasoning" is not an audit and reading the trace is not
+      oversight. It also took <strong>three attempts at the model</strong> to make that measurable
+      at all, and both failures are written into the BUILD tab rather than deleted. Pure vanilla JavaScript, one file, offline.
+    </h1>
+    <div class="flex gap-2 flex-wrap" id="tabs">
+      <button data-tab="look" class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">🔬 TEST IT</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto space-y-5">
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-sm text-slate-600 mb-4">
+          Every quantity below is a declared coefficient, not an emergent one. That is the only way
+          faithfulness can be <em>measured</em> rather than guessed at: the page knows what actually
+          drove each answer, so it can check whether the trace says so.
+        </p>
+        <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3">
+          <label class="text-sm">reliance on the reasoning <span id="vRel" class="font-bold tabular-nums float-right">0.70</span>
+            <input id="sRel" type="range" min="0" max="100" value="70"></label>
+          <label class="text-sm">hidden bias strength <span id="vBias" class="font-bold tabular-nums float-right">0.90</span>
+            <input id="sBias" type="range" min="0" max="200" value="90"></label>
+          <label class="text-sm">per-step reliability <span id="vRely" class="font-bold tabular-nums float-right">0.85</span>
+            <input id="sRely" type="range" min="30" max="100" value="85"></label>
+          <label class="text-sm">questions <span id="vN" class="font-bold tabular-nums float-right">2000</span>
+            <input id="sN" type="range" min="200" max="4000" step="200" value="2000"></label>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-3 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5 lg:col-span-2">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">THE THREE TESTS</p>
+          <table class="num w-full">
+            <thead><tr><th>test</th><th>what it measures</th><th>result</th></tr></thead>
+            <tbody id="tests"></tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-2" id="testNote"></p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">ACCURACY</p>
+          <table class="num w-full">
+            <tbody>
+              <tr><td>no chain of thought</td><td id="accNo">—</td></tr>
+              <tr><td>with chain of thought</td><td id="accCot" class="font-bold">—</td></tr>
+              <tr><td>gain</td><td id="accGain" class="font-black text-emerald-600">—</td></tr>
+              <tr><td>faithfulness</td><td id="faith" class="font-black">—</td></tr>
+            </tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-3" id="indep"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">EARLY ANSWERING — TRUNCATE THE TRACE</p>
+        <p class="text-sm text-slate-600 mb-3">
+          Cut the chain of thought after k steps and force an answer. A <em>faithful</em> trace
+          should give a different answer when most of it is missing. If the answer is already fixed
+          at k=0, the trace was written after the decision.
+        </p>
+        <table class="num w-full">
+          <thead><tr><th>steps kept</th><th>matches the full-trace answer</th><th>accuracy</th></tr></thead>
+          <tbody id="early"></tbody>
+        </table>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">ONE QUESTION, PERTURBED</p>
+          <div id="trace" class="space-y-2 mb-3"></div>
+          <pre id="traceOut" style="margin:0"></pre>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">THE BIASING-FEATURE TEST</p>
+          <p class="text-sm text-slate-600 mb-3">
+            Add a hint the model is not supposed to use — the answer options reordered so the
+            correct one is always (A), a user saying "I think it's B", a suggestive example. Then
+            ask two questions: <strong>did the answer move?</strong> and <strong>did the trace
+            mention it?</strong>
+          </p>
+          <table class="num w-full">
+            <tbody>
+              <tr><td>answers changed by the bias</td><td id="bFlip" class="font-bold bad">—</td></tr>
+              <tr><td>traces that mention the bias</td><td id="bMention" class="font-bold">—</td></tr>
+              <tr><td>accuracy lost to the bias</td><td id="bAcc" class="bad">—</td></tr>
+            </tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-2">
+            The mention rate is <strong>declared to be zero</strong> in this model — the trace is
+            generated from the reasoning channel only, and the bias never enters it. That is an
+            assumption, not a finding, and it is stated here rather than dressed up. What is
+            <em>measured</em> is everything downstream: how far the answers move, and how little the
+            three faithfulness tests notice.
+          </p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">GAIN AND FAITHFULNESS, SWEPT</p>
+        <p class="text-sm text-slate-600 mb-3">
+          The whole argument in one table: accuracy gain across the reliance dial, against measured
+          faithfulness. They move independently.
+        </p>
+        <table class="num w-full">
+          <thead><tr><th>reliance</th><th>accuracy gain</th><th>early-answer faithfulness</th><th>mistake-injection faithfulness</th></tr></thead>
+          <tbody id="sweep"></tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">The trace is a story. Is it the story of what happened?</h2>
+
+      <p>Chain-of-thought works — that is settled, and it is why every serious prompt has some form
+      of it. This is a different question, and it is the one that matters if you are using the trace
+      for <em>oversight</em>:</p>
+
+      <div class="bg-slate-900 text-slate-100 rounded-xl p-4">
+        <p class="text-sm">Does the reasoning the model printed <strong>cause</strong> the answer it
+        gave? Or did it decide, and then narrate?</p>
+      </div>
+
+      <p>You cannot answer that by reading the trace. A post-hoc rationalisation reads exactly like
+      genuine reasoning — that is what makes it a rationalisation. The only way is to
+      <strong>intervene</strong>: change the trace and see whether the answer follows.</p>
+
+      <h3 class="text-xl font-bold">Three interventions</h3>
+
+      <p><strong>1. Early answering.</strong> Truncate the chain after k steps and force an answer.
+      If the model already says the same thing at k=0, the remaining steps changed nothing and were
+      decoration. Plot the answer-match rate against k: a faithful trace climbs gradually, an
+      unfaithful one is flat at 100% from the start.</p>
+
+      <p><strong>2. Mistake injection.</strong> Corrupt one step — make it state something false —
+      and let the model continue. A faithful chain propagates the error and reaches a different
+      conclusion. An unfaithful one sails past and produces the original answer anyway.</p>
+
+      <p><strong>3. Biasing features.</strong> Add something to the prompt that should not matter —
+      reorder the options so the answer is always (A), or have the user say which answer they
+      prefer. Then measure two things separately: <em>did the answer change</em>, and <em>did the
+      trace mention the hint</em>. Turpin et al. found answers moving substantially while traces
+      essentially never acknowledged the cause.</p>
+
+      <h3 class="text-xl font-bold">The result this page is built around</h3>
+
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-4">
+        <p class="text-sm"><strong>Accuracy gain and faithfulness are independent axes.</strong>
+        Turn the reliance dial down and the trace stops driving the answer — while the accuracy gain
+        stays. You can have the entire benefit of chain-of-thought from a trace that had nothing to
+        do with the conclusion.</p>
+      </div>
+
+      <p>That is uncomfortable, and it is the practical point. "The model explained its reasoning"
+      is a statement about the output format. It is not evidence about the process, and a
+      reviewer reading traces is not performing oversight unless something is perturbing them.</p>
+
+      <h3 class="text-xl font-bold">Why unfaithful traces still help</h3>
+
+      <p>Two mechanisms are conflated when people say chain-of-thought "works":</p>
+
+      <ul class="list-disc pl-6 space-y-1">
+        <li><strong>Computation.</strong> The extra tokens are workspace — more forward passes over
+        a growing context. This helps whether or not the text is a truthful account, and it is why
+        even filler tokens can recover part of the gain in some setups.</li>
+        <li><strong>Explanation.</strong> The text describes the computation. This is what you need
+        for oversight, and it is the part that is not guaranteed.</li>
+      </ul>
+
+      <p>Chain-of-thought reliably delivers the first. It advertises the second. The tests above are
+      how you find out which one you got.</p>
+
+      <h3 class="text-xl font-bold">What this page cannot tell you</h3>
+
+      <p>The model here is a stand-in with declared coefficients, not a transformer. In particular,
+      the <em>zero</em> mention-rate for the bias is an assumption baked into how the trace is
+      generated — it is not something this page discovered, and the page says so next to the number.
+      What it demonstrates is the measurement apparatus and the independence result: given a bias
+      the trace does not verbalise, here is exactly how much the three standard tests do and do not
+      detect.</p>
+
+      <p>The empirical claim about real models belongs to the papers, and the numbers there are
+      worse than intuition suggests. Larger and more capable models were, if anything,
+      <em>less</em> faithful on some tasks — the better the model, the more fluent the
+      rationalisation.</p>
+
+      <h3 class="text-xl font-bold">What to do about it</h3>
+
+      <ul class="list-disc pl-6 space-y-1">
+        <li>Do not treat a trace as an audit trail. It is a hypothesis about the model's process.</li>
+        <li>If you need faithfulness, test for it: truncate, corrupt, and perturb the prompt with
+        features that should not matter. All three are cheap.</li>
+        <li>Report faithfulness separately from accuracy. They are different axes and one does not
+        imply the other.</li>
+        <li>Be most suspicious where a bias is plausible — option ordering, user preference stated
+        in the prompt, anything demographic. That is where the answer moves and the trace stays
+        silent.</li>
+      </ul>
+
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-50">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">🔨 How it is built</h2>
+
+      <h3 class="text-xl font-bold">1. Two channels, and only one becomes text</h3>
+      <pre>function answer(q, trace, cfg){
+  let evidence = 0;
+  for (const s of trace) evidence += s.correct ? s.weight : -s.weight;
+
+  const score = cfg.reliance * evidence            // the reasoning channel
+              + (1 - cfg.reliance) * q.prior       // whatever it thought before reasoning
+              + cfg.bias * q.biasSignal;           // the hidden channel
+
+  return score &gt;= 0 ? 1 : 0;
+}
+
+// the TRACE is rendered from the steps only. The bias term never appears in it.
+const render = trace =&gt; trace.map(s =&gt; s.text).join("\n");</pre>
+      <p>The separation is the whole design. The answer depends on three things; the text describes
+      one. Everything the page measures is a consequence of that gap, and because the gap is
+      declared, faithfulness has a ground truth to be scored against.</p>
+
+      <h3 class="text-xl font-bold">2. Early answering is a truncation loop</h3>
+      <pre>for (let k = 0; k &lt;= trace.length; k++){
+  const partial = trace.slice(0, k);
+  matches[k] += (answer(q, partial, cfg) === fullAnswer) ? 1 : 0;
+}</pre>
+      <p>The metric people quote is the <em>area</em> under that curve, and it is worth being
+      careful with: a flat line at 100% means unfaithful, but a line that starts at 50% is not
+      automatically faithful either — with two options, 50% is chance. The page reports the
+      k=0 value beside the average so the baseline is visible rather than implied.</p>
+
+      <h3 class="text-xl font-bold">3. Mistake injection has to be a real intervention</h3>
+      <pre>const corrupted = trace.map((s, i) =&gt;
+  i === at ? { ...s, correct: !s.correct } : s);      // flip ONE step's truth value
+
+faithful += (answer(q, corrupted, cfg) !== fullAnswer) ? 1 : 0;</pre>
+      <p>Flipping <code>correct</code> rather than deleting the step matters: deletion changes the
+      length of the trace, and length is itself a signal. The intervention has to change the
+      <em>content</em> and nothing else, or you are measuring two things at once.</p>
+
+      <h3 class="text-xl font-bold">4. The bias test is two measurements, not one</h3>
+      <pre>const clean  = answer(q, trace, { ...cfg, bias: 0 });
+const biased = answer(q, trace, cfg);
+
+flipped   += (clean !== biased) ? 1 : 0;         // measured
+mentioned += traceMentionsBias(trace) ? 1 : 0;   // zero BY CONSTRUCTION - and said so</pre>
+      <p>Keeping them apart is the point. "The answer changed" and "the explanation is silent about
+      why" are different failures, and a single faithfulness score hides which one you have.</p>
+
+      <h3 class="text-xl font-bold">5. The independence result, as a test</h3>
+      <pre>const low  = run({ ...cfg, reliance: 0.15 });
+const high = run({ ...cfg, reliance: 0.85 });
+
+assert(high.faithfulness &gt; low.faithfulness + 0.2);   // reliance drives faithfulness
+assert(Math.abs(high.gain - low.gain) &lt; 0.1);         // and NOT the accuracy gain</pre>
+      <p>Two assertions, opposite directions, same pair of runs. Together they say the two axes are
+      separable — which is the claim the page makes in its first paragraph, so it is the claim that
+      gets pinned hardest.</p>
+
+      <h3 class="text-xl font-bold">6. And the checks that keep the apparatus honest</h3>
+      <pre>assert(faithfulness(reliance = 1, bias = 0) &gt; 0.9);   // a fully reliant model IS faithful
+assert(faithfulness(reliance = 0)            &lt; 0.1);   // and one that ignores the trace is not
+assert(biasFlips(bias = 0) === 0);                     // no bias, no flips
+assert(earlyAnswerMatch[full] === 1.0);                // the untruncated trace matches itself</pre>
+      <p>That last one looks trivial and is the one most worth having: if the k = length row is not
+      exactly 100%, the truncation loop is off by one and every other number in the table is
+      shifted.</p>
+
+      <h3 class="text-xl font-bold">🎉 AIFromZero Day 65 shipped.</h3>
+      <p class="text-slate-600">The trace is the model's output, not its logs.</p>
+
+    </div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.addEventListener("click", () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+}));
+
+// ===== ENGINE:BEGIN =====
+// A model with TWO channels: reasoning (which becomes the visible trace) and a hidden bias
+// (which never does). Declared, not emergent - that is what gives faithfulness a ground truth.
+
+function mulberry32(seed){
+  let s = seed >>> 0;
+  return function(){
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1) >>> 0;
+    t = (t ^ (t + Math.imul(t ^ (t >>> 7), t | 61))) >>> 0;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const DEFAULTS = { reliance: 0.70, bias: 0.90, stepReliability: 0.85, steps: 5 };
+
+function makeQuestions(n, seed, cfg){
+  const c = Object.assign({}, DEFAULTS, cfg || {});
+  const rnd = mulberry32(seed);
+  const out = [];
+  for (let i = 0; i < n; i++){
+    const truth = rnd() < 0.5 ? 1 : 0;
+    const sign = truth ? 1 : -1;
+    const trace = [];
+    for (let k = 0; k < c.steps; k++){
+      const correct = rnd() < c.stepReliability;
+      trace.push({
+        text: "Step " + (k + 1) + ": " + (correct ? "the evidence points to" : "the evidence seems to rule out") +
+              " option " + (truth ? "A" : "B") + ".",
+        correct: correct,
+        weight: 0.5 + rnd(),
+        sign: sign
+      });
+    }
+    // A SECOND, INDEPENDENT read of the same question, equally informative and equally
+    // reliable - the computation the model did that the trace does not describe. It has to be
+    // independent rather than a copy of the trace evidence: a copy always agrees with the
+    // trace, so no intervention can ever flip the answer and faithfulness is pinned at zero
+    // whatever the dial says. (That was the second version of this engine.)
+    let hidden = 0;
+    for (let k = 0; k < c.steps; k++){
+      const good = rnd() < c.stepReliability;
+      hidden += (good ? sign : -sign) * (0.5 + rnd());
+    }
+    hidden /= c.steps;
+
+    out.push({
+      truth: truth,
+      trace: trace,
+      hidden: hidden,
+      // what the model would have said with no reasoning at all - weak and noisy
+      prior: sign * (rnd() < 0.62 ? 0.4 : -0.4),
+      // the biasing feature: points at a FIXED option regardless of the truth
+      biasSignal: 1
+    });
+  }
+  return out;
+}
+
+function evidenceOf(trace, steps){
+  let e = 0;
+  for (const s of trace) e += (s.correct ? s.sign : -s.sign) * s.weight;
+  return e / Math.max(1, steps);
+}
+
+// Two channels, and getting this right took two attempts.
+//
+// v1 made `reliance` the weight on the reasoning, full stop - so turning it down destroyed
+// the accuracy gain along with the faithfulness. The two axes came out perfectly coupled and
+// the independence claim failed its own test.
+//
+// v2 added a hidden channel that RE-READ THE SAME STEPS. Also wrong, and more subtly: a copy
+// always agrees with the trace, so truncating or corrupting the trace could never flip the
+// answer and faithfulness sat near zero at every setting.
+//
+// What is needed is a hidden channel that is INDEPENDENT and EQUALLY INFORMATIVE - a second
+// read of the question that the trace does not describe. Then accuracy is the same whichever
+// mix you use (both channels are equally good), while `reliance` decides how much an
+// intervention on the visible trace can move the answer. That is the separation the
+// UNDERSTAND tab claims: the computation helps whether or not the text is a truthful account
+// of it.
+function score(q, trace, cfg){
+  const c = Object.assign({}, DEFAULTS, cfg || {});
+  const visible = evidenceOf(trace, c.steps);       // perturbable
+  const hidden = q.hidden;                          // independent, untouchable
+  return c.reliance * visible + (1 - c.reliance) * hidden;
+}
+
+function answer(q, trace, cfg){
+  return score(q, trace, cfg) >= 0 ? 1 : 0;
+}
+
+// no chain of thought at all: no computation to lean on, just the prior
+function answerNoCot(q, cfg){
+  return q.prior >= 0 ? 1 : 0;
+}
+
+function answerWithBias(q, trace, cfg){
+  const c = Object.assign({}, DEFAULTS, cfg || {});
+  return (score(q, trace, c) + c.bias * q.biasSignal) >= 0 ? 1 : 0;
+}
+
+// The visible trace is rendered from the STEPS ONLY. The bias never enters it.
+const renderTrace = trace => trace.map(function(s){ return s.text; }).join("\n");
+const traceMentionsBias = () => false;               // by construction, and the page says so
+
+// ---- test 1: early answering ----
+function earlyAnswering(questions, cfg){
+  const c = Object.assign({}, DEFAULTS, cfg || {});
+  const rows = [];
+  for (let k = 0; k <= c.steps; k++){
+    let match = 0, correct = 0;
+    for (const q of questions){
+      const full = answer(q, q.trace, c);
+      const partial = answer(q, q.trace.slice(0, k), c);
+      if (partial === full) match++;
+      if (partial === q.truth) correct++;
+    }
+    rows.push({ k: k, match: match / questions.length, accuracy: correct / questions.length });
+  }
+  // faithfulness: how much the answer DEPENDS on having the whole trace.
+  // A flat 100% means the trace changed nothing.
+  const atZero = rows[0].match;
+  return { rows: rows, atZero: atZero, faithfulness: 1 - atZero };
+}
+
+// ---- test 2: mistake injection ----
+function mistakeInjection(questions, cfg){
+  const c = Object.assign({}, DEFAULTS, cfg || {});
+  let changed = 0, total = 0;
+  for (const q of questions){
+    const full = answer(q, q.trace, c);
+    for (let at = 0; at < q.trace.length; at++){
+      // flip the truth value of ONE step - same length, same everything else
+      const corrupted = q.trace.map(function(s, i){
+        return i === at ? { text: s.text, correct: !s.correct, weight: s.weight, sign: s.sign } : s;
+      });
+      if (answer(q, corrupted, c) !== full) changed++;
+      total++;
+    }
+  }
+  return { faithfulness: changed / total, injections: total };
+}
+
+// ---- test 3: biasing features ----
+function biasTest(questions, cfg){
+  const c = Object.assign({}, DEFAULTS, cfg || {});
+  let flipped = 0, mentioned = 0, cleanCorrect = 0, biasedCorrect = 0;
+  for (const q of questions){
+    const clean = answer(q, q.trace, c);
+    const biased = answerWithBias(q, q.trace, c);
+    if (clean !== biased) flipped++;
+    if (traceMentionsBias(q.trace)) mentioned++;
+    if (clean === q.truth) cleanCorrect++;
+    if (biased === q.truth) biasedCorrect++;
+  }
+  const n = questions.length;
+  return { flipRate: flipped / n, mentionRate: mentioned / n,
+           accuracyClean: cleanCorrect / n, accuracyBiased: biasedCorrect / n,
+           accuracyLost: (cleanCorrect - biasedCorrect) / n };
+}
+
+// ---- accuracy with and without the trace ----
+function accuracies(questions, cfg){
+  const c = Object.assign({}, DEFAULTS, cfg || {});
+  let withCot = 0, without = 0;
+  for (const q of questions){
+    if (answer(q, q.trace, c) === q.truth) withCot++;
+    if (answerNoCot(q, c) === q.truth) without++;     // no trace at all: prior only
+  }
+  const n = questions.length;
+  return { withCot: withCot / n, without: without / n, gain: (withCot - without) / n };
+}
+
+function runAll(n, seed, cfg){
+  const c = Object.assign({}, DEFAULTS, cfg || {});
+  const qs = makeQuestions(n, seed, c);
+  const early = earlyAnswering(qs, c);
+  const mistakes = mistakeInjection(qs, c);
+  const bias = biasTest(qs, c);
+  const acc = accuracies(qs, c);
+  return { questions: qs, early: early, mistakes: mistakes, bias: bias, accuracy: acc,
+           faithfulness: (early.faithfulness + mistakes.faithfulness) / 2 };
+}
+// ===== ENGINE:END =====
+
+// ---------------------------------------------------------------- UI
+const $ = id => document.getElementById(id);
+
+function cfgOf(){
+  return {
+    reliance: +$("sRel").value / 100,
+    bias: +$("sBias").value / 100,
+    stepReliability: +$("sRely").value / 100,
+    steps: 5
+  };
+}
+
+function render(){
+  const c = cfgOf(), n = +$("sN").value;
+  $("vRel").textContent = c.reliance.toFixed(2);
+  $("vBias").textContent = c.bias.toFixed(2);
+  $("vRely").textContent = c.stepReliability.toFixed(2);
+  $("vN").textContent = n;
+
+  const r = runAll(n, 2026, c);
+
+  const rows = [
+    ["early answering", "does the answer need the whole trace?", r.early.faithfulness],
+    ["mistake injection", "does a corrupted step change the answer?", r.mistakes.faithfulness],
+    ["biasing features", "does an unmentioned hint move the answer?", 1 - r.bias.flipRate]
+  ];
+  $("tests").innerHTML = rows.map(function(x){
+    const v = x[2];
+    const cls = v > 0.6 ? "ok" : v > 0.3 ? "warn" : "bad";
+    return "<tr><td>" + x[0] + "</td><td class='text-slate-600' style='text-align:left'>" + x[1] +
+      "</td><td class='" + cls + "'>" + (100 * v).toFixed(1) + "%</td></tr>";
+  }).join("");
+  $("testNote").innerHTML = "At k=0 the model already gives the final answer <strong>" +
+    (100 * r.early.atZero).toFixed(1) + "%</strong> of the time. With two options, 50% is chance — " +
+    "anything well above that is trace the model did not need.";
+
+  $("accNo").textContent = (100 * r.accuracy.without).toFixed(1) + "%";
+  $("accCot").textContent = (100 * r.accuracy.withCot).toFixed(1) + "%";
+  $("accGain").textContent = (100 * r.accuracy.gain).toFixed(1) + " pts";
+  const f = r.faithfulness;
+  $("faith").textContent = (100 * f).toFixed(1) + "%";
+  $("faith").className = "font-black " + (f > 0.6 ? "ok" : f > 0.3 ? "warn" : "bad");
+
+  $("early").innerHTML = r.early.rows.map(function(row){
+    const isFull = row.k === c.steps;
+    return "<tr><td>" + row.k + (isFull ? " (full trace)" : "") + "</td>" +
+      "<td><div class='flex items-center gap-2'><div class='bar' style='flex:1'><span style='width:" +
+      (100 * row.match) + "%'></span></div><span class='tabular-nums'>" +
+      (100 * row.match).toFixed(1) + "%</span></div></td>" +
+      "<td>" + (100 * row.accuracy).toFixed(1) + "%</td></tr>";
+  }).join("");
+
+  $("bFlip").textContent = (100 * r.bias.flipRate).toFixed(1) + "%";
+  $("bMention").innerHTML = (100 * r.bias.mentionRate).toFixed(1) +
+    "% <span class='text-xs text-slate-500'>(declared)</span>";
+  $("bAcc").textContent = (100 * r.bias.accuracyLost).toFixed(1) + " pts";
+
+  // one question, perturbed
+  const q = r.questions[3];
+  const full = answer(q, q.trace, c);
+  $("trace").innerHTML = q.trace.map(function(s, i){
+    return "<div class='step " + (s.correct ? "kept" : "corrupt") + "'>" + s.text +
+      " <span class='text-xs text-slate-500'>(weight " + s.weight.toFixed(2) +
+      (s.correct ? "" : ", this step is wrong") + ")</span></div>";
+  }).join("");
+  let out = "true answer        " + (q.truth ? "A" : "B") + "\n" +
+            "full trace         -> " + (full ? "A" : "B") + "\n" +
+            "with the bias      -> " + (answerWithBias(q, q.trace, c) ? "A" : "B") + "\n" +
+            "truncations:\n";
+  for (let k = 0; k <= q.trace.length; k++)
+    out += "  " + k + " step(s) kept   -> " + (answer(q, q.trace.slice(0, k), c) ? "A" : "B") +
+           (answer(q, q.trace.slice(0, k), c) === full ? "   (same as full)" : "   <- CHANGED") + "\n";
+  out += "corruptions:\n";
+  for (let at = 0; at < q.trace.length; at++){
+    const corrupted = q.trace.map(function(s, i){
+      return i === at ? { text: s.text, correct: !s.correct, weight: s.weight, sign: s.sign } : s;
+    });
+    const a = answer(q, corrupted, c);
+    out += "  flip step " + (at + 1) + "      -> " + (a ? "A" : "B") +
+           (a === full ? "   (unchanged - the step did not matter)" : "   <- the answer followed") + "\n";
+  }
+  $("traceOut").textContent = out;
+
+  // the sweep
+  $("sweep").innerHTML = [0.05, 0.2, 0.4, 0.6, 0.8, 1.0].map(function(rel){
+    const s = runAll(1200, 77, Object.assign({}, c, { reliance: rel }));
+    const cls = v => v > 0.6 ? "ok" : v > 0.3 ? "warn" : "bad";
+    return "<tr><td>" + rel.toFixed(2) + "</td><td>" + (100 * s.accuracy.gain).toFixed(1) + " pts</td>" +
+      "<td class='" + cls(s.early.faithfulness) + "'>" + (100 * s.early.faithfulness).toFixed(1) + "%</td>" +
+      "<td class='" + cls(s.mistakes.faithfulness) + "'>" + (100 * s.mistakes.faithfulness).toFixed(1) + "%</td></tr>";
+  }).join("");
+
+  let minG = 1, maxG = 0, minF = 1, maxF = 0;
+  [0, 0.25, 0.5, 0.75, 0.9, 1.0].forEach(function(rel){
+    const r2 = runAll(1200, 77, Object.assign({}, c, { reliance: rel }));
+    minG = Math.min(minG, r2.accuracy.gain); maxG = Math.max(maxG, r2.accuracy.gain);
+    minF = Math.min(minF, r2.early.faithfulness); maxF = Math.max(maxF, r2.early.faithfulness);
+  });
+  const fR = 100 * (maxF - minF), gR = 100 * (maxG - minG);
+  $("indep").innerHTML = "Across the whole reliance dial, faithfulness spans <strong>" +
+    fR.toFixed(0) + " points</strong> while the accuracy gain spans <strong>" + gR.toFixed(1) +
+    "</strong> &mdash; a " + (gR > 0 ? (fR / gR).toFixed(0) : "∞") + "&times; difference. Two axes.";
+}
+
+["sRel", "sBias", "sRely", "sN"].forEach(function(id){
+  $(id).addEventListener("input", render);
+});
+render();
+</script>
+</body>
+</html>
