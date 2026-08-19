@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 66 — Model cascades</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid #e2e8f0; }
+  .ok { color:#166534; font-weight:800; }
+  .bad { color:#991b1b; font-weight:800; }
+  .warn { color:#92400e; font-weight:800; }
+  canvas { width:100%; display:block; border-radius:10px; background:#0f172a; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+  <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <p class="text-xs font-bold tracking-widest text-violet-700 mb-2">AIFROMZERO · DAY 66</p>
+    <h1 class="text-xl md:text-2xl font-black leading-tight mb-4">
+      🪜 Model cascades — send everything to a cheap model first, escalate only what it is unsure
+      about, and pay big-model prices on a fraction of your traffic. It works, and the whole thing
+      turns on <strong>one quantity that has nothing to do with either model's accuracy</strong>:
+      whether the small model <em>knows when it is wrong</em>. This page builds the real
+      cost/accuracy frontier — every deferral threshold, plotted — and measures what actually moves
+      it. The finding it is built around: at a fixed cheap-model accuracy, improving its
+      <strong>calibration</strong> alone moves the frontier further than improving the expensive
+      model. A perfectly calibrated 70% model beats a badly calibrated 80% one in a cascade, because
+      the cascade never asks how often the small model is right — it asks how well its confidence
+      <em>ranks</em> the cases it got wrong. Also implemented: why a fixed threshold silently
+      changes your bill when traffic shifts, and why "escalate when the two models disagree" costs
+      more than it saves. Pure vanilla JavaScript, one file, offline.
+    </h1>
+    <div class="flex gap-2 flex-wrap" id="tabs">
+      <button data-tab="look" class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">📈 MEASURE</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto space-y-5">
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3">
+          <label class="text-sm">cheap model accuracy <span id="vSmall" class="font-bold tabular-nums float-right">0.75</span>
+            <input id="sSmall" type="range" min="40" max="98" value="75"></label>
+          <label class="text-sm">expensive model accuracy <span id="vBig" class="font-bold tabular-nums float-right">0.93</span>
+            <input id="sBig" type="range" min="50" max="99" value="93"></label>
+          <label class="text-sm">cheap model calibration <span id="vCal" class="font-bold tabular-nums float-right">0.70</span>
+            <input id="sCal" type="range" min="0" max="100" value="70"></label>
+          <label class="text-sm">cost ratio (big ÷ cheap) <span id="vRatio" class="font-bold tabular-nums float-right">25</span>
+            <input id="sRatio" type="range" min="2" max="100" value="25"></label>
+        </div>
+        <p class="text-xs text-slate-500 mt-3">
+          Calibration is the only dial here that is <em>not</em> about being right. It is whether
+          the confidence score orders the errors — 0 means confidence is noise, 1 means every
+          mistake is less confident than every correct answer.
+        </p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">THE FRONTIER</p>
+          <canvas id="chart" width="520" height="260"></canvas>
+          <p class="text-xs text-slate-500 mt-2" id="frontierNote"></p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">OPERATING POINTS</p>
+          <table class="num w-full">
+            <thead><tr><th>strategy</th><th>accuracy</th><th>escalated</th><th>cost</th></tr></thead>
+            <tbody id="points"></tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-2" id="pointNote"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">CALIBRATION BEATS CAPABILITY</p>
+        <p class="text-sm text-slate-600 mb-3">
+          Hold the escalation budget fixed at 20% of traffic. Then improve one thing at a time and
+          see which buys more.
+        </p>
+        <table class="num w-full">
+          <thead><tr><th>change</th><th>cheap acc</th><th>calibration</th><th>big acc</th><th>cascade accuracy at 20% escalation</th></tr></thead>
+          <tbody id="ablate"></tbody>
+        </table>
+        <p class="text-xs text-slate-500 mt-2" id="ablateNote"></p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">A FIXED THRESHOLD IS NOT A FIXED BUDGET</p>
+          <p class="text-sm text-slate-600 mb-3">
+            Tune a threshold on today's traffic, then let the mix get harder. The escalation rate —
+            and the bill — moves on its own.
+          </p>
+          <table class="num w-full">
+            <thead><tr><th>traffic difficulty</th><th>escalated</th><th>cost</th></tr></thead>
+            <tbody id="drift"></tbody>
+          </table>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">"ESCALATE ON DISAGREEMENT" COSTS MORE THAN IT SAVES</p>
+          <p class="text-sm text-slate-600 mb-3">
+            A tempting router: run both, escalate if they differ. It cannot save anything — you
+            already paid for the expensive call to find out.
+          </p>
+          <table class="num w-full">
+            <tbody id="disagree"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">The cascade never asks how often the small model is right</h2>
+
+      <p>The idea is simple enough that it hides its own hard part. Run the cheap model. If it is
+      confident, ship its answer. If not, escalate to the expensive one. You pay big-model prices
+      on the escalated fraction only.</p>
+
+      <pre>answer, confidence = small(x)
+if confidence &gt;= threshold: return answer         # cheap
+return big(x)                                      # expensive</pre>
+
+      <p>Every discussion of this focuses on the two accuracies. But look at what the code
+      <em>reads</em>: it reads <code>confidence</code>. It never sees whether the small model was
+      right. So the quantity that decides whether the cascade works is not accuracy at all — it is
+      whether that confidence score <strong>ranks the errors below the correct answers</strong>.</p>
+
+      <h3 class="text-xl font-bold">Which is why calibration beats capability</h3>
+
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-4">
+        <p class="text-sm">At a fixed escalation budget, a <strong>perfectly calibrated 70%</strong>
+        model beats a <strong>badly calibrated 80%</strong> one. The first knows exactly which 30%
+        to hand over; the second escalates a random-ish selection and wastes most of the budget on
+        cases it would have got right.</p>
+      </div>
+
+      <p>The ablation table on the page makes this concrete: hold escalation at 20% of traffic, then
+      spend your improvement either on the small model's accuracy, its calibration, or the big
+      model's accuracy. Calibration wins, and it is usually also the cheapest of the three to
+      improve — temperature scaling on a validation set is a one-parameter fit.</p>
+
+      <h3 class="text-xl font-bold">A fixed threshold is not a fixed budget</h3>
+
+      <p>You tune <code>threshold = 0.85</code> on today's traffic and it escalates 18%. Then the
+      traffic gets harder — a new customer segment, a seasonal shift, a prompt change upstream — and
+      the same threshold now escalates 35%. Nothing in your code changed and your bill doubled.</p>
+
+      <p>The fix is to control the quantity you actually care about: pick the threshold as a
+      <strong>quantile of recent confidence scores</strong> rather than a constant, so the
+      escalation <em>rate</em> stays fixed and the accuracy moves instead. Which of the two you want
+      to hold constant is a real decision, and the important part is making it deliberately rather
+      than discovering it on an invoice.</p>
+
+      <h3 class="text-xl font-bold">Why "escalate on disagreement" is not a cascade</h3>
+
+      <p>A router that runs both models and escalates when they disagree cannot save money: you have
+      already paid for the expensive call in order to compare. It costs <em>more</em> than always
+      using the big model, because you also paid for the small one.</p>
+
+      <p>It is a fine <em>evaluation</em> technique — disagreement is a good signal for finding hard
+      cases offline. It is not a serving strategy, and the two get conflated constantly.</p>
+
+      <h3 class="text-xl font-bold">What a good confidence signal looks like</h3>
+
+      <ul class="list-disc pl-6 space-y-1">
+        <li><strong>Sequence log-probability</strong>, length-normalised. Cheap, and better than
+        nothing.</li>
+        <li><strong>Self-consistency spread</strong> — sample k times, escalate when the answers
+        disagree. Strong, and it costs k cheap calls.</li>
+        <li><strong>A trained deferral head.</strong> Best, and it needs labelled examples of the
+        small model failing — which you get for free from the escalated traffic itself.</li>
+        <li><strong>Asking the model "are you sure?"</strong> — weak. Verbalised confidence is
+        poorly calibrated and correlates more with the phrasing than with correctness.</li>
+      </ul>
+
+      <h3 class="text-xl font-bold">The economics, honestly</h3>
+
+      <p>The saving is bounded by the cost ratio. At a 25× ratio, escalating 20% of traffic costs
+      roughly 20% × 25 + 80% × 1 = about 5.8 units against 25 for always-big — a 77% saving. At a
+      3× ratio the same cascade saves under half, and the added latency of a serial second call may
+      not be worth it. The frontier on this page is drawn with the real numbers, so you can see
+      where the strategy stops paying for itself.</p>
+
+      <p>And the honest caveat: a cascade adds a <em>serial</em> hop for escalated requests. Tail
+      latency gets worse for exactly the hardest queries, which are often the ones a user is
+      waiting on.</p>
+
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-50">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">🔨 How it is built</h2>
+
+      <h3 class="text-xl font-bold">1. Calibration as a dial, separate from accuracy</h3>
+      <pre>// correctness is drawn from accuracy; confidence is drawn so that its ORDERING
+// tracks correctness by exactly `calibration`, and is noise at 0.
+const correct = rnd() &lt; accuracy;
+const signal  = correct ? 1 : 0;
+const conf    = calibration * signal + (1 - calibration) * rnd();</pre>
+      <p>Two independent knobs. At <code>calibration = 0</code> the confidence is pure noise and the
+      cascade is choosing at random; at 1 every error sorts below every correct answer. The test
+      asserts both endpoints, because a model where the two knobs were entangled could not show the
+      finding at all.</p>
+
+      <h3 class="text-xl font-bold">2. The frontier, not a number</h3>
+      <pre>for (let t = 0; t &lt;= 1; t += 0.01){
+  const escalated = items.filter(i =&gt; i.conf &lt; t);
+  const acc  = mean(items.map(i =&gt; i.conf &lt; t ? i.bigCorrect : i.smallCorrect));
+  const cost = (1 - rate) * 1 + rate * ratio;
+  frontier.push({ t, acc, cost, rate: escalated.length / items.length });
+}</pre>
+      <p>A cascade has no single score. It has a curve, and the only honest way to compare two
+      configurations is at the <em>same cost</em> — which is why the ablation table pins the
+      escalation rate at 20% rather than comparing free-floating accuracies.</p>
+
+      <h3 class="text-xl font-bold">3. Threshold by quantile, not by constant</h3>
+      <pre>const sorted = confidences.slice().sort((a, b) =&gt; a - b);
+const threshold = sorted[Math.floor(rate * sorted.length)];   // fixed RATE</pre>
+      <p>One line, and it converts "a threshold that drifts with traffic" into "a budget that does
+      not". The drift table runs the same fixed constant against progressively harder traffic to
+      show what it does otherwise.</p>
+
+      <h3 class="text-xl font-bold">4. What the tests pin</h3>
+      <pre>// the dials are independent
+assert(accuracyOf(small) ≈ requested, at every calibration);
+assert(aucOf(confidence) ≈ 0.5 when calibration = 0);
+assert(aucOf(confidence) &gt; 0.95 when calibration = 1);
+
+// THE finding
+assert(cascade(acc=0.70, cal=1.0) &gt; cascade(acc=0.80, cal=0.2)) at the same budget;
+
+// the frontier is a frontier
+assert(monotone: more escalation never lowers accuracy);
+assert(cost(rate=0) === 1 &amp;&amp; cost(rate=1) === ratio);
+
+// and the tempting router really is worse
+assert(costOfDisagreementRouting &gt; costOfAlwaysBig);</pre>
+      <p>That last one is the assertion worth having. "Run both and compare" sounds thrifty, and one
+      line of arithmetic shows it strictly dominates in the wrong direction — it is a technique that
+      only survives because nobody prices it.</p>
+
+      <h3 class="text-xl font-bold">🎉 AIFromZero Day 66 shipped.</h3>
+      <p class="text-slate-600">The routing decision reads confidence, not correctness. Everything
+      follows from that.</p>
+
+    </div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.addEventListener("click", () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+}));
+
+// ===== ENGINE:BEGIN =====
+// A model cascade. Accuracy and CALIBRATION are separate dials, which is the whole point:
+// the router reads confidence, never correctness.
+
+function mulberry32(seed){
+  let s = seed >>> 0;
+  return function(){
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1) >>> 0;
+    t = (t ^ (t + Math.imul(t ^ (t >>> 7), t | 61))) >>> 0;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const mean = a => a.reduce(function(s, v){ return s + v; }, 0) / a.length;
+
+// difficulty shifts BOTH models' accuracy together, which is what a traffic shift really does
+function makeTraffic(n, cfg, seed){
+  const c = Object.assign({ smallAcc: 0.75, bigAcc: 0.93, calibration: 0.70, difficulty: 0 },
+                          cfg || {});
+  const rnd = mulberry32(seed);
+  const items = [];
+  for (let i = 0; i < n; i++){
+    const sAcc = Math.max(0.02, Math.min(0.999, c.smallAcc - c.difficulty));
+    const bAcc = Math.max(0.02, Math.min(0.999, c.bigAcc - c.difficulty * 0.5));
+    const smallCorrect = rnd() < sAcc ? 1 : 0;
+    const bigCorrect = rnd() < bAcc ? 1 : 0;
+    // Confidence ORDERS correctness by exactly `calibration`, and is noise at 0.
+    //
+    // The obvious form - calibration*correct + (1-calibration)*noise - is wrong, and the tests
+    // caught it: at calibration 1 every score collapses to exactly 0 or 1, so a quantile
+    // threshold lands on a tie and escalates nothing at all. Real confidence scores are
+    // continuous. So interpolate between "uniform over the whole range" and "uniform over the
+    // correct half", which is perfectly ordered AND tie-free.
+    const u = rnd();
+    const separated = smallCorrect ? 0.5 + 0.5 * u : 0.5 * u;
+    const conf = (1 - c.calibration) * u + c.calibration * separated;
+    items.push({ smallCorrect: smallCorrect, bigCorrect: bigCorrect, conf: conf });
+  }
+  return items;
+}
+
+// how well confidence ranks correct answers above wrong ones - AUC, computed exactly
+function confidenceAUC(items){
+  const pos = items.filter(function(i){ return i.smallCorrect === 1; });
+  const neg = items.filter(function(i){ return i.smallCorrect === 0; });
+  if (!pos.length || !neg.length) return 0.5;
+  let wins = 0, ties = 0;
+  for (const p of pos) for (const q of neg){
+    if (p.conf > q.conf) wins++;
+    else if (p.conf === q.conf) ties++;
+  }
+  return (wins + 0.5 * ties) / (pos.length * neg.length);
+}
+
+const cascadeCost = (rate, ratio) => (1 - rate) * 1 + rate * ratio;
+
+function evaluateAt(items, threshold, ratio){
+  let correct = 0, escalated = 0;
+  for (const it of items){
+    if (it.conf < threshold){ escalated++; correct += it.bigCorrect; }
+    else correct += it.smallCorrect;
+  }
+  const rate = escalated / items.length;
+  return { accuracy: correct / items.length, rate: rate, cost: cascadeCost(rate, ratio),
+           threshold: threshold };
+}
+
+// the threshold that escalates exactly `rate` of traffic - a BUDGET, not a constant
+function thresholdForRate(items, rate){
+  if (rate <= 0) return -Infinity;
+  if (rate >= 1) return Infinity;
+  const sorted = items.map(function(i){ return i.conf; }).sort(function(a, b){ return a - b; });
+  return sorted[Math.floor(rate * sorted.length)];
+}
+
+function frontier(items, ratio, steps){
+  const n = steps || 41;
+  const out = [];
+  for (let k = 0; k <= n; k++) out.push(evaluateAt(items, thresholdForRate(items, k / n), ratio));
+  return out;
+}
+
+const alwaysSmall = (items, ratio) => evaluateAt(items, -Infinity, ratio);
+const alwaysBig = (items, ratio) => evaluateAt(items, Infinity, ratio);
+
+// The tempting router: run BOTH, escalate on disagreement. It cannot save anything, because
+// the expensive call has already been made in order to compare.
+function disagreementRouting(items, ratio){
+  let correct = 0, disagreed = 0;
+  for (const it of items){
+    if (it.smallCorrect !== it.bigCorrect) disagreed++;
+    correct += it.bigCorrect;                       // on disagreement you take the big answer
+  }
+  return { accuracy: correct / items.length,
+           rate: disagreed / items.length,
+           cost: 1 + ratio,                          // every request pays for BOTH
+           threshold: null };
+}
+
+// hold the budget fixed and see which improvement buys more
+function ablate(base, seed, ratio, rate, n){
+  const N = n || 6000;
+  const run = function(cfg){
+    const items = makeTraffic(N, Object.assign({}, base, cfg), seed);
+    return evaluateAt(items, thresholdForRate(items, rate), ratio);
+  };
+  return {
+    baseline: run({}),
+    betterSmall: run({ smallAcc: Math.min(0.99, base.smallAcc + 0.10) }),
+    betterCalib: run({ calibration: Math.min(1, base.calibration + 0.30) }),
+    betterBig: run({ bigAcc: Math.min(0.995, base.bigAcc + 0.05) })
+  };
+}
+// ===== ENGINE:END =====
+
+// ---------------------------------------------------------------- UI
+const $ = id => document.getElementById(id);
+const N = 6000;
+
+function cfg(){
+  return {
+    smallAcc: +$("sSmall").value / 100,
+    bigAcc: +$("sBig").value / 100,
+    calibration: +$("sCal").value / 100,
+    difficulty: 0
+  };
+}
+
+function render(){
+  const c = cfg(), ratio = +$("sRatio").value;
+  $("vSmall").textContent = c.smallAcc.toFixed(2);
+  $("vBig").textContent = c.bigAcc.toFixed(2);
+  $("vCal").textContent = c.calibration.toFixed(2);
+  $("vRatio").textContent = ratio;
+
+  const items = makeTraffic(N, c, 2026);
+  const f = frontier(items, ratio, 41);
+  drawChart(f, ratio, items);
+
+  const small = alwaysSmall(items, ratio), big = alwaysBig(items, ratio);
+  const at20 = evaluateAt(items, thresholdForRate(items, 0.20), ratio);
+  const rows = [["always cheap", small], ["cascade @ 20% escalation", at20],
+                ["cascade @ 50%", evaluateAt(items, thresholdForRate(items, 0.5), ratio)],
+                ["always expensive", big],
+                ["run both, escalate on disagreement", disagreementRouting(items, ratio)]];
+  $("points").innerHTML = rows.map(function(r){
+    const bad = r[1].cost > big.cost;
+    return "<tr><td>" + r[0] + "</td><td class='font-bold'>" + (100 * r[1].accuracy).toFixed(1) + "%</td>" +
+      "<td>" + (100 * r[1].rate).toFixed(0) + "%</td>" +
+      "<td class='" + (bad ? "bad" : "") + "'>" + r[1].cost.toFixed(2) + "</td></tr>";
+  }).join("");
+  const saving = 1 - at20.cost / big.cost;
+  const gap = big.accuracy - at20.accuracy;
+  $("pointNote").innerHTML = "At 20% escalation the cascade keeps <strong>" +
+    (100 * (1 - gap / Math.max(1e-9, big.accuracy - small.accuracy))).toFixed(0) +
+    "%</strong> of the gap between the two models for <strong>" + (100 * saving).toFixed(0) +
+    "%</strong> less than always-expensive.";
+  $("frontierNote").innerHTML = "Confidence AUC <strong>" + confidenceAUC(items).toFixed(3) +
+    "</strong> &mdash; 0.5 means the score is noise and the cascade is escalating at random.";
+
+  const ab = ablate(c, 2026, ratio, 0.20, N);
+  const base = ab.baseline.accuracy;
+  $("ablate").innerHTML = [
+    ["baseline", ab.baseline, c.smallAcc, c.calibration, c.bigAcc],
+    ["+0.10 cheap-model accuracy", ab.betterSmall, c.smallAcc + 0.10, c.calibration, c.bigAcc],
+    ["+0.30 calibration", ab.betterCalib, c.smallAcc, Math.min(1, c.calibration + 0.30), c.bigAcc],
+    ["+0.05 expensive-model accuracy", ab.betterBig, c.smallAcc, c.calibration, c.bigAcc + 0.05]
+  ].map(function(r){
+    const delta = r[1].accuracy - base;
+    return "<tr><td>" + r[0] + "</td><td>" + r[2].toFixed(2) + "</td><td>" + r[3].toFixed(2) + "</td>" +
+      "<td>" + Math.min(0.995, r[4]).toFixed(2) + "</td>" +
+      "<td class='font-bold " + (delta > 0.001 ? "ok" : "") + "'>" +
+      (100 * r[1].accuracy).toFixed(1) + "%" +
+      (r[0] === "baseline" ? "" : "  (" + (delta >= 0 ? "+" : "") + (100 * delta).toFixed(1) + ")") +
+      "</td></tr>";
+  }).join("");
+  const dCal = ab.betterCalib.accuracy - base, dBig = ab.betterBig.accuracy - base;
+  $("ablateNote").innerHTML = dCal > dBig
+    ? "Calibration buys <strong>" + (100 * dCal).toFixed(1) + " points</strong> against the " +
+      "expensive model's <strong>" + (100 * dBig).toFixed(1) + "</strong> &mdash; at the same " +
+      "escalation budget, and it is usually the cheaper of the two to improve."
+    : "At these settings the expensive model buys more. Lower the cheap model's calibration and " +
+      "watch the ordering flip &mdash; a well-calibrated router is what makes the cascade work.";
+
+  const fixed = thresholdForRate(makeTraffic(N, c, 7), 0.20);   // tuned on TODAY's traffic
+  $("drift").innerHTML = [0, 0.05, 0.10, 0.20].map(function(d){
+    const t = makeTraffic(N, Object.assign({}, c, { difficulty: d }), 7);
+    const r = evaluateAt(t, fixed, ratio);
+    return "<tr><td>" + (d === 0 ? "as tuned" : "+" + (100 * d).toFixed(0) + "% harder") + "</td>" +
+      "<td class='" + (r.rate > 0.3 ? "bad" : "") + "'>" + (100 * r.rate).toFixed(0) + "%</td>" +
+      "<td class='" + (r.rate > 0.3 ? "bad" : "") + "'>" + r.cost.toFixed(2) + "</td></tr>";
+  }).join("");
+
+  const dis = disagreementRouting(items, ratio);
+  $("disagree").innerHTML =
+    "<tr><td>always expensive</td><td class='font-bold'>" + big.cost.toFixed(2) + " per request</td></tr>" +
+    "<tr><td>run both, escalate on disagreement</td><td class='font-bold bad'>" + dis.cost.toFixed(2) +
+    " per request</td></tr>" +
+    "<tr><td>difference</td><td class='bad'>+" + (dis.cost - big.cost).toFixed(2) +
+    " for the same accuracy</td></tr>";
+}
+
+function drawChart(f, ratio, items){
+  const cv = $("chart"), ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  ctx.fillStyle = "#0f172a"; ctx.fillRect(0, 0, W, H);
+  const accs = f.map(function(p){ return p.accuracy; });
+  const lo = Math.min.apply(null, accs), hi = Math.max.apply(null, accs);
+  const maxCost = Math.max.apply(null, f.map(function(p){ return p.cost; }));
+  const x = c => 38 + (W - 52) * (c - 1) / Math.max(1e-9, maxCost - 1);
+  const y = a => H - 26 - (H - 44) * (a - lo) / Math.max(1e-9, hi - lo);
+
+  ctx.strokeStyle = "#8b5cf6"; ctx.lineWidth = 2; ctx.beginPath();
+  f.forEach(function(p, i){ i ? ctx.lineTo(x(p.cost), y(p.accuracy)) : ctx.moveTo(x(p.cost), y(p.accuracy)); });
+  ctx.stroke();
+  f.forEach(function(p){
+    ctx.fillStyle = "rgba(139,92,246,.7)";
+    ctx.beginPath(); ctx.arc(x(p.cost), y(p.accuracy), 2, 0, Math.PI * 2); ctx.fill();
+  });
+  ctx.fillStyle = "#64748b"; ctx.font = "10px ui-monospace, monospace";
+  ctx.fillText("cost per request →", 38, H - 8);
+  ctx.save(); ctx.translate(11, H - 30); ctx.rotate(-Math.PI / 2);
+  ctx.fillText("accuracy →", 0, 0); ctx.restore();
+  ctx.fillStyle = "#e2e8f0"; ctx.font = "600 11px ui-monospace, monospace";
+  ctx.fillText((100 * hi).toFixed(1) + "%", 38, 16);
+  ctx.fillText((100 * lo).toFixed(1) + "%", 38, H - 30);
+}
+
+["sSmall", "sBig", "sCal", "sRatio"].forEach(function(id){
+  $(id).addEventListener("input", render);
+});
+render();
+</script>
+</body>
+</html>
