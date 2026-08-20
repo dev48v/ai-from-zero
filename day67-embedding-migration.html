@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 67 — Embedding model migration</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid #e2e8f0; }
+  .ok { color:#166534; font-weight:800; }
+  .bad { color:#991b1b; font-weight:800; }
+  .warn { color:#92400e; font-weight:800; }
+  canvas { width:100%; display:block; border-radius:10px; background:#0f172a; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+  <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <p class="text-xs font-bold tracking-widest text-violet-700 mb-2">AIFROMZERO · DAY 67</p>
+    <h1 class="text-xl md:text-2xl font-black leading-tight mb-4">
+      🧭 Embedding model migration — a better embedding model is free to adopt and expensive to
+      <em>install</em>. You have to re-embed the whole corpus, and for the days or weeks that takes,
+      half your index is in one vector space and half in another. A cosine computed across that seam
+      is <strong>not a weak signal, it is no signal</strong> — the two models' axes have nothing to
+      do with each other. This page builds the real cost/quality frontier of a half-finished
+      migration, priced in embedding calls. The measured headline: with a random re-embedding order
+      and the new query encoder already live, recall bottoms out <strong>44 points below the index
+      you started with</strong>, and you must re-embed <strong>60% of the corpus before search is
+      merely back to where it was</strong>. Then the twist that cost me the page I meant to write:
+      the fix is <em>not</em> the clever one. Normalising scores across the two spaces is worth less
+      than simply re-embedding in <strong>traffic order</strong> — and at an equal budget the
+      normalisation can make things <em>worse</em>. Pure vanilla JavaScript, one file, offline.
+    </h1>
+    <div class="flex gap-2 flex-wrap" id="tabs">
+      <button data-tab="look" class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">📈 MEASURE</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto space-y-5">
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+          <label class="text-sm">old encoder quality <span id="vOld" class="font-bold tabular-nums float-right">0.45</span>
+            <input id="sOld" type="range" min="20" max="90" value="45"></label>
+          <label class="text-sm">new encoder quality <span id="vNew" class="font-bold tabular-nums float-right">0.85</span>
+            <input id="sNew" type="range" min="30" max="100" value="85"></label>
+          <label class="text-sm">new-space anisotropy <span id="vAnis" class="font-bold tabular-nums float-right">0.35</span>
+            <input id="sAnis" type="range" min="0" max="80" value="35"></label>
+          <label class="text-sm">traffic skew (Zipf s) <span id="vSkew" class="font-bold tabular-nums float-right">1.00</span>
+            <input id="sSkew" type="range" min="0" max="150" value="100"></label>
+          <label class="text-sm">corpus re-embedded <span id="vFrac" class="font-bold tabular-nums float-right">30%</span>
+            <input id="sFrac" type="range" min="0" max="100" value="30"></label>
+          <div class="text-sm">re-embedding order
+            <div class="flex gap-2 mt-1" id="policy">
+              <button data-p="hot" class="tab-active px-3 py-1 rounded-md text-xs font-bold">🔥 hot first</button>
+              <button data-p="random" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">🎲 random</button>
+            </div>
+          </div>
+        </div>
+        <p class="text-xs text-slate-500 mt-3">
+          400 documents, 300 queries, one known right answer each. Quality is how much noise an
+          encoder adds on top of the true meaning. <strong>Anisotropy</strong> is the common
+          direction every vector in a space leans towards — real embedding spaces have one, and it
+          is what makes one model's cosines run systematically higher than another's. The bill is
+          quoted for a <strong>100,000-document corpus</strong> and a <strong>50,000-query</strong>
+          migration window; one embedding call is one unit.
+        </p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">THE FRONTIER — RECALL AGAINST EMBEDDING CALLS</p>
+          <canvas id="chart" width="520" height="280"></canvas>
+          <p class="text-xs mt-2">
+            <span class="swatch" style="background:#f87171"></span>new encoder only
+            <span class="swatch ml-3" style="background:#38bdf8"></span>both encoders, raw
+            <span class="swatch ml-3" style="background:#a78bfa"></span>both encoders, z-scored
+            <span class="swatch ml-3" style="background:#94a3b8"></span>no seam (reference)
+            <span class="swatch ml-3" style="background:#fbbf24"></span>the index you started with
+          </p>
+          <p class="text-xs text-slate-500 mt-2" id="frontierNote"></p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">OPERATING POINTS AT THE CURRENT FRACTION</p>
+          <table class="num w-full">
+            <thead><tr><th>plan</th><th>encoders</th><th>calls</th><th>recall@10</th><th>vs before</th></tr></thead>
+            <tbody id="points"></tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-2" id="pointNote"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">HOW MUCH OF THE CORPUS BEFORE YOU ARE MERELY EVEN AGAIN</p>
+        <p class="text-sm text-slate-600 mb-3">
+          The un-migrated index already answers queries at some recall. A migration that dips below
+          that number is <em>worse than not having started</em> — for as long as it lasts.
+        </p>
+        <table class="num w-full">
+          <thead><tr><th>plan</th><th>order</th><th>break-even fraction</th><th>deepest dip, swap included</th><th>migration spent under water</th></tr></thead>
+          <tbody id="cross"></tbody>
+        </table>
+        <p class="text-xs text-slate-500 mt-2" id="crossNote"></p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">ORDER BEATS ARITHMETIC — AT AN IDENTICAL BUDGET</p>
+          <p class="text-sm text-slate-600 mb-3">
+            Same number of documents re-embedded. The only difference is <em>which</em> ones, and
+            whether you kept the old encoder alive to score them.
+          </p>
+          <table class="num w-full">
+            <thead><tr><th>plan</th><th>traffic covered</th><th>recall@10</th></tr></thead>
+            <tbody id="order"></tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-2" id="orderNote"></p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">THE SEAM IS A SCALE MISMATCH</p>
+          <p class="text-sm text-slate-600 mb-3">
+            With the corpus 30% re-embedded, the migrated documents should hold about 30% of the
+            top-10 slots. Raw cosines hand them far more than that, and the gap grows with the new
+            space's anisotropy.
+          </p>
+          <table class="num w-full">
+            <thead><tr><th>anisotropy</th><th>raw share of top-10</th><th>z-scored share</th><th>fair share</th></tr></thead>
+            <tbody id="bias"></tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-2" id="biasNote"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">SELF-TEST</p>
+        <pre id="selftest">running…</pre>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">Two embedding models do not disagree. They are unrelated.</h2>
+
+      <p>A newer embedding model comes out, it scores better on your evals, and adopting it is a
+      one-line change. Then you remember the index. Every vector in it was produced by the old
+      model, and a vector is only meaningful relative to the model that made it — the axes are
+      whatever that particular training run happened to land on.</p>
+
+      <p>So a cosine between a new-model query and an old-model document is not a slightly degraded
+      score. It is a number drawn from noise: mean about zero, and a spread as wide as a real
+      similarity, so with a few hundred documents plenty of them out-score the right answer by luck
+      alone. Ranking 400 documents by it finds the answer <strong>2.7%</strong> of the time, against
+      <strong>2.5%</strong> for picking ten out of four hundred at random and <strong>66%</strong>
+      for an index whose vectors match its query encoder.</p>
+
+      <pre>score(query_new, doc_new) = real similarity
+score(query_new, doc_old) = noise            &lt;- the seam</pre>
+
+      <p>That number has to be averaged over several draws to be worth anything, and it is a good
+      illustration of why. One particular pair of random projections in this simulation gets lucky
+      and reaches 10.7% &mdash; still a sixth of a working index, but six times chance. Two
+      independently trained embedding spaces are not guaranteed to be <em>exactly</em> orthogonal to
+      one another; they are only guaranteed to be useless to each other, which is a weaker and more
+      annoying property.</p>
+
+      <h3 class="text-xl font-bold">The valley</h3>
+
+      <p>Re-embedding 100,000 documents is not instant. For the duration you have a mixed index, and
+      what you do about the query side decides how bad that is. The tempting move is the simple one:
+      point the query encoder at the new model and let the re-embedding job catch up. Every document
+      it has not reached yet is now scored by noise.</p>
+
+      <div class="bg-red-50 border-l-4 border-red-500 p-4">
+        <p class="text-sm">Measured on this page, with a random re-embedding order: recall falls
+        from <strong>0.61</strong> on the un-migrated index to <strong>0.17</strong> when 5% of the
+        corpus has been converted, and does not climb back above the starting point until
+        <strong>60%</strong> of the corpus is done. The migration is not a slow improvement. It is a
+        long hole with the improvement at the far end.</p>
+      </div>
+
+      <p>The shape is easy to see once you write it down. A query whose answer has been re-embedded
+      is fine. A query whose answer has not been re-embedded is answered by noise. So recall tracks
+      the fraction of <em>traffic</em> whose answers are converted — not the fraction of documents.
+      Those two numbers are only equal if you convert documents in an order uncorrelated with
+      demand.</p>
+
+      <h3 class="text-xl font-bold">Which is the actual lever</h3>
+
+      <p>Query traffic is Zipf-shaped. A small head of documents absorbs most of the queries. In the
+      simulation, re-embedding the most-queried <strong>30%</strong> of documents covers
+      <strong>81%</strong> of the query traffic; a random 30% covers 27%, which is to say exactly
+      30% and nothing more.</p>
+
+      <p>So the cheapest possible intervention — sort the re-embedding job by query count — turns
+      the valley into a step. It is worth being precise about what it fixes: the hole is exactly as
+      <em>deep</em> either way, because the moment you point the query encoder at the new model and
+      no document has been converted yet, search is broken regardless of what order you plan to
+      convert them in. What ordering changes is how long you stay down there. Hot-first is back to
+      even at <strong>10%</strong> of the corpus against <strong>60%</strong> for a random order —
+      it spends <strong>10%</strong> of the migration under water instead of <strong>57%</strong>.</p>
+
+      <h3 class="text-xl font-bold">The fix I expected, and what it actually did</h3>
+
+      <p>The sophisticated answer is to keep both encoders alive during the migration: embed each
+      query twice, score every document in its own space, and merge. That removes the seam — no
+      score is ever computed across spaces. It costs one extra query embedding per request.</p>
+
+      <p>It works, and it is not the biggest lever, and there is a sting in it. Merging raw cosines
+      from two spaces is not fair, because the better model produces higher similarities for related
+      documents and — if it is more anisotropic — higher similarities for everything. At 30%
+      converted, the migrated documents take <strong>62%</strong> of the top-10 slots rather than
+      30%. Z-scoring each space's candidates before merging restores the fair share almost exactly.</p>
+
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-4">
+        <p class="text-sm">And then the measurement contradicted the recommendation. Under
+        <strong>hot-first</strong> ordering the biased merge scores <em>higher</em> than the fair
+        one — <strong>0.897</strong> against <strong>0.873</strong> — because the documents it
+        unfairly favours are precisely the popular ones the queries are looking for. Correcting the
+        bias throws away a shortcut that happened to be pointing the right way. Under a random
+        order, where the favoured documents are a random sample, the correction is worth a clear
+        <strong>8 points</strong>. The normalisation is not right or wrong; it is right exactly when
+        your migration order is uncorrelated with your traffic.</p>
+      </div>
+
+      <h3 class="text-xl font-bold">The economics: a bridge, not a destination</h3>
+
+      <p>Price everything in embedding calls. Re-embedding a fraction <code>f</code> of a
+      <code>D</code>-document corpus costs <code>f·D</code>, once. A second query-side encoder costs
+      one extra call on every query, for as long as the migration runs — <code>Q</code> calls over a
+      window of <code>Q</code> queries.</p>
+
+      <pre>f·D + 2Q   vs   D + Q          =&gt;   break-even at Q = D·(1 − f)</pre>
+
+      <p>At a 100k-document corpus and a half-finished migration, the dual-encoder bridge is the
+      cheaper plan for the first <strong>50,000 queries</strong> and the more expensive one
+      thereafter. That is the whole decision, and it is one line of arithmetic that almost nobody
+      does before choosing.</p>
+
+      <p>The equal-cost comparison on the page is blunter still. 150,000 calls buys either a
+      finished re-index served by one encoder — recall <strong>0.973</strong> — or a half-finished
+      one served by two, at <strong>0.917</strong>. At the same spend, finishing wins. The
+      dual-encoder trick is not a way to avoid the re-index. It exists so the weeks in the middle do
+      not show up as an outage.</p>
+
+      <h3 class="text-xl font-bold">What to do on a real system</h3>
+
+      <ul class="list-disc pl-6 space-y-1">
+        <li><strong>Never swap the query encoder first.</strong> It is the one-line change, and it
+        is the one that produces the valley.</li>
+        <li><strong>Sort the backfill by query count.</strong> Free, and worth more than anything
+        else on this list.</li>
+        <li><strong>Write to both indexes on ingest</strong> from the day you decide to migrate, so
+        the backlog stops growing while you work through it.</li>
+        <li><strong>Cut over per-shard, not per-document</strong> if you can — a shard that is
+        entirely in one space has no seam inside it at all.</li>
+        <li><strong>If you must merge across spaces, normalise per space</strong> — z-scores or rank
+        fusion — and know that you are giving up a bias that may have been helping you.</li>
+        <li><strong>Version the vectors.</strong> A document row that does not record which model
+        produced its vector makes every one of these decisions unavailable to you.</li>
+      </ul>
+
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-50">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">🔨 How it is built</h2>
+
+      <h3 class="text-xl font-bold">1. Two encoders, one meaning</h3>
+      <pre>// each document has a latent MEANING. An encoder is a random projection of it,
+// plus that encoder's own noise. Two encoders drawn independently produce spaces
+// whose axes have nothing to do with each other.
+const sig = unit(A · latent);                       // A is this encoder's projection
+vec = unit(sig + sigma·noise + anisotropy·common);  // `common` is the space's shared lean</pre>
+      <p>Nothing here simulates a model's language ability. It simulates the only property that
+      matters for a migration: that the two spaces are <em>incomparable</em>, and that one of them
+      is less noisy than the other.</p>
+
+      <h3 class="text-xl font-bold">2. Three score matrices, computed once</h3>
+      <pre>Sold[q][d] = cos(query_old, doc_old)     // the index you have
+Snew[q][d] = cos(query_new, doc_new)     // the index you want
+Sx[q][d]   = cos(query_new, doc_old)     // the seam</pre>
+      <p>Every strategy and every migration fraction is then a <em>selection</em> over these three,
+      so the whole frontier costs one pass of vector arithmetic rather than one per point. That is
+      what makes the sliders interactive.</p>
+
+      <h3 class="text-xl font-bold">3. Four ways to score a half-migrated index</h3>
+      <pre>naive : flags[d] ? Snew : Sx          // you swapped the query encoder
+dual  : flags[d] ? Snew : Sold        // both encoders alive, raw cosines merged
+dualz : z-score each space over its own candidates, then merge
+split : one consistent index per query — the no-seam reference</pre>
+      <p><code>split</code> is a reference line, not a purchasable plan: it asks what recall would
+      be if the seam did not exist. Worth noting that <code>dual</code> sometimes beats it, which is
+      not a bug — deflated old-space scores make life easier for a query whose answer is already
+      migrated.</p>
+
+      <h3 class="text-xl font-bold">4. Cost is embedding calls, and the frontier is drawn in them</h3>
+      <pre>planCost(f, docs, queries, encoders) = f·docs + encoders·queries
+breakEvenQueries(f, docs)            = docs · (1 − f)   // f·D + 2Q == D + Q</pre>
+      <p>The x-axis of the chart is that cost, which is why the two-encoder curves start half a
+      corpus to the right. Comparing them anywhere except along a vertical line is meaningless, and
+      putting cost on the axis is the only way to keep that honest.</p>
+
+      <h3 class="text-xl font-bold">5. A degeneracy check, learned the hard way</h3>
+      <p>The previous page in this series had a model that collapsed to exact 0/1 scores at its
+      extreme setting, which made a quantile threshold land on a tie and quietly measured the whole
+      effect as zero. So this engine is tested at its extremes too: at maximum encoder quality and
+      maximum anisotropy the score row still has <strong>400 distinct values out of 400</strong> and
+      a standard deviation above 0.2. Real similarity scores are continuous, and a simulation whose
+      scores are not will lie to you at exactly the settings you were most curious about.</p>
+
+      <h3 class="text-xl font-bold">6. What the tests pin</h3>
+      <pre>// the seam really is noise, not a weak signal - averaged over five worlds, because
+// one pair of random projections can get lucky and the claim must not rest on it
+assert(|mean(crossSpaceScores)| &lt; 0.05);
+assert(stdev(crossSpaceScores) &gt; 0.15);          // and NOT collapsed
+assert(mean(recallAcrossTheSeam over 5 seeds) &lt; 3 &times; chance);
+assert(max(recallAcrossTheSeam over 5 seeds) &lt; 0.25 &times; matchedIndexRecall);
+
+// the two encoders differ in the direction claimed
+assert(recall(new index) &gt; recall(old index) + 0.15);
+
+// THE valley
+assert(min recall over a random migration &lt; baseline − 0.30);
+assert(every point up to 50% migrated is BELOW the index it replaced);
+assert(crossover(naive, random) &gt; 0.5);
+
+// and order is the lever
+assert(coverage(hot, f) &gt; coverage(random, f) + 0.4);
+assert(recall(naive, hot, 0.3) &gt; recall(dualz, random, 0.3));
+
+// the scale bias exists and z-scoring removes it
+assert(share(dual, f=0.3) &gt; 0.5   &amp;&amp;  |share(dualz, f=0.3) − 0.3| &lt; 0.06);
+assert(share(dual) rises monotonically with anisotropy);
+
+// the null result, kept because it is true
+assert(recall(dual, hot, 0.3) &gt; recall(dualz, hot, 0.3));   // normalising HURTS here
+
+// cost arithmetic
+assert(planCost(0.5, 100000, 50000, 2) === planCost(1, 100000, 50000, 1));
+assert(breakEvenQueries(f, D) === D·(1 − f));</pre>
+      <p>The one worth having is the tenth. It says the tidy recommendation is wrong under the
+      ordering you should already be using, and it is in the test file so nobody can quietly delete
+      the inconvenient half of the finding later.</p>
+
+      <h3 class="text-xl font-bold">🎉 AIFromZero Day 67 shipped.</h3>
+      <p class="text-slate-600">The vectors are not the asset. The vectors <em>plus the model that
+      made them</em> are the asset, and a migration is the period during which you own two of those
+      and can use neither properly.</p>
+
+    </div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.addEventListener("click", () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+}));
+
+// ===== ENGINE:BEGIN =====
+// An embedding-model migration. Every vector lives in one of two INCOMPARABLE spaces, and the
+// only question that matters is what happens to scores across the seam between them.
+
+function mulberry32(seed){
+  let s = seed >>> 0;
+  return function(){
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1) >>> 0;
+    t = (t ^ (t + Math.imul(t ^ (t >>> 7), t | 61))) >>> 0;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const mean = a => a.reduce(function(s, v){ return s + v; }, 0) / a.length;
+const stdev = a => {
+  const m = mean(a);
+  return Math.sqrt(mean(a.map(function(v){ return (v - m) * (v - m); })));
+};
+
+function gauss(rnd){
+  let u = 0, v = 0;
+  while (u === 0) u = rnd();
+  while (v === 0) v = rnd();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+function unit(v){
+  let s = 0;
+  for (let i = 0; i < v.length; i++) s += v[i] * v[i];
+  s = Math.sqrt(s) || 1;
+  const o = new Array(v.length);
+  for (let i = 0; i < v.length; i++) o[i] = v[i] / s;
+  return o;
+}
+
+function dot(a, b){ let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
+
+// encoder quality 0..1 -> the noise it adds on top of the true meaning, RELATIVE to the signal
+const noiseOf = q => 1.15 * (1 - q) + 0.04;
+
+// An encoder is a random projection of latent meaning plus its own noise. Two encoders drawn
+// independently give spaces whose axes have nothing to do with each other - which is why a cosine
+// computed ACROSS them is not a weak signal, it is no signal.
+function makeEncoder(rnd, dim, latent){
+  const A = new Float64Array(dim * latent);
+  for (let i = 0; i < A.length; i++) A[i] = gauss(rnd);
+  const common = unit(Array.from({ length: dim }, function(){ return gauss(rnd); }));
+  return { A: A, common: common, dim: dim, latent: latent };
+}
+
+// `anis` is anisotropy: a common direction every vector in this space leans towards. Real
+// embedding spaces have one, and it is what makes their cosines run systematically high.
+function embed(enc, v, sigma, anis, rnd){
+  const raw = new Array(enc.dim);
+  for (let i = 0; i < enc.dim; i++){
+    let s = 0;
+    for (let j = 0; j < enc.latent; j++) s += enc.A[i * enc.latent + j] * v[j];
+    raw[i] = s;
+  }
+  const sig = unit(raw);
+  const k = 1 / Math.sqrt(enc.dim);
+  const o = new Array(enc.dim);
+  for (let i = 0; i < enc.dim; i++) o[i] = sig[i] + sigma * k * gauss(rnd) + anis * enc.common[i];
+  return unit(o);
+}
+
+function buildWorld(cfg, seed){
+  const c = Object.assign({ docs: 400, queries: 300, dim: 16, latent: 12, topics: 24,
+                            oldQuality: 0.45, newQuality: 0.85, anisotropy: 0.35,
+                            skew: 1.0, jitter: 0.45, spread: 0.70 }, cfg || {});
+  const rnd = mulberry32(seed);
+  const D = c.docs, Q = c.queries;
+  const sOld = noiseOf(c.oldQuality), sNew = noiseOf(c.newQuality);
+
+  const centers = [];
+  for (let t = 0; t < c.topics; t++)
+    centers.push(unit(Array.from({ length: c.latent }, function(){ return gauss(rnd); })));
+
+  const kk = c.spread / Math.sqrt(c.latent);
+  const docLatent = [];
+  for (let i = 0; i < D; i++){
+    const ctr = centers[i % c.topics];
+    docLatent.push(unit(ctr.map(function(x){ return x + kk * gauss(rnd); })));
+  }
+
+  const encOld = makeEncoder(rnd, c.dim, c.latent);
+  const encNew = makeEncoder(rnd, c.dim, c.latent);
+
+  // documents are indexed in popularity order - doc 0 is the most queried. Traffic is Zipf.
+  const weight = new Float64Array(D);
+  let wsum = 0;
+  for (let i = 0; i < D; i++){ weight[i] = 1 / Math.pow(i + 1, c.skew); wsum += weight[i]; }
+  for (let i = 0; i < D; i++) weight[i] /= wsum;
+  const cum = new Float64Array(D);
+  let acc = 0;
+  for (let i = 0; i < D; i++){ acc += weight[i]; cum[i] = acc; }
+
+  const docOld = [], docNew = [];
+  for (let i = 0; i < D; i++){
+    docOld.push(embed(encOld, docLatent[i], sOld, 0, rnd));
+    docNew.push(embed(encNew, docLatent[i], sNew, c.anisotropy, rnd));
+  }
+
+  const kq = c.jitter / Math.sqrt(c.latent);
+  const target = new Int32Array(Q);
+  const qOld = [], qNew = [];
+  for (let q = 0; q < Q; q++){
+    const u = rnd();
+    let t = 0;
+    while (t < D - 1 && cum[t] < u) t++;
+    target[q] = t;
+    const ql = unit(docLatent[t].map(function(x){ return x + kq * gauss(rnd); }));
+    qOld.push(embed(encOld, ql, sOld, 0, rnd));
+    qNew.push(embed(encNew, ql, sNew, c.anisotropy, rnd));
+  }
+
+  // three score matrices, computed once: same-space old, same-space new, and the CROSS-space score
+  // a new-model query gets against a document nobody has re-embedded yet.
+  const Sold = new Float64Array(Q * D), Snew = new Float64Array(Q * D), Sx = new Float64Array(Q * D);
+  for (let q = 0; q < Q; q++) for (let d = 0; d < D; d++){
+    Sold[q * D + d] = dot(qOld[q], docOld[d]);
+    Snew[q * D + d] = dot(qNew[q], docNew[d]);
+    Sx[q * D + d] = dot(qNew[q], docOld[d]);
+  }
+
+  const randOrder = Array.from({ length: D }, function(_, i){ return i; });
+  for (let i = D - 1; i > 0; i--){
+    const j = Math.floor(rnd() * (i + 1));
+    const t = randOrder[i]; randOrder[i] = randOrder[j]; randOrder[j] = t;
+  }
+
+  return { cfg: c, D: D, Q: Q, Sold: Sold, Snew: Snew, Sx: Sx, weight: weight,
+           target: target, randOrder: randOrder };
+}
+
+// which documents have been re-embedded. "hot" spends the budget on the most-queried ones first.
+function migratedSet(w, f, policy){
+  const n = Math.round(Math.max(0, Math.min(1, f)) * w.D);
+  const flags = new Uint8Array(w.D);
+  const order = policy === 'random'
+    ? w.randOrder
+    : Array.from({ length: w.D }, function(_, i){ return i; });
+  for (let i = 0; i < n; i++) flags[order[i]] = 1;
+  return flags;
+}
+
+// four ways to score one query against a half-migrated index
+//   naive : you swapped the query encoder. Un-migrated docs get a cross-space cosine = noise.
+//   dual  : you kept both encoders. Each doc is scored in its own space, raw cosines merged.
+//   dualz : same, but each space's scores are z-scored over its own candidates before merging.
+//   split : reference - the query is answered by ONE consistent index, no seam at all.
+function scoreRow(w, q, flags, strategy, buf){
+  const D = w.D, base = q * D, out = buf || new Float64Array(D);
+  if (strategy === 'split'){
+    const src = flags[w.target[q]] ? w.Snew : w.Sold;
+    for (let d = 0; d < D; d++) out[d] = src[base + d];
+    return out;
+  }
+  if (strategy === 'naive'){
+    for (let d = 0; d < D; d++) out[d] = flags[d] ? w.Snew[base + d] : w.Sx[base + d];
+    return out;
+  }
+  if (strategy === 'dual'){
+    for (let d = 0; d < D; d++) out[d] = flags[d] ? w.Snew[base + d] : w.Sold[base + d];
+    return out;
+  }
+  let n1 = 0, n0 = 0, m1 = 0, m0 = 0;
+  for (let d = 0; d < D; d++){
+    if (flags[d]){ m1 += w.Snew[base + d]; n1++; } else { m0 += w.Sold[base + d]; n0++; }
+  }
+  m1 = n1 ? m1 / n1 : 0; m0 = n0 ? m0 / n0 : 0;
+  let v1 = 0, v0 = 0;
+  for (let d = 0; d < D; d++){
+    if (flags[d]){ const x = w.Snew[base + d] - m1; v1 += x * x; }
+    else { const x = w.Sold[base + d] - m0; v0 += x * x; }
+  }
+  const s1 = n1 > 1 ? (Math.sqrt(v1 / n1) || 1) : 1;
+  const s0 = n0 > 1 ? (Math.sqrt(v0 / n0) || 1) : 1;
+  for (let d = 0; d < D; d++)
+    out[d] = flags[d] ? (w.Snew[base + d] - m1) / s1 : (w.Sold[base + d] - m0) / s0;
+  return out;
+}
+
+// recall@k, how much of the query traffic the migrated half covers, and how many of the top-k
+// slots the migrated half is taking - which is the score-scale bias, made visible.
+function evaluate(w, flags, strategy, k, wantTopK){
+  const K = k || 10;
+  const want = wantTopK !== false;
+  const top = new Float64Array(K), topIdx = new Int32Array(K);
+  const buf = new Float64Array(w.D);
+  let hits = 0, migratedSlots = 0, slots = 0, covered = 0, sum = 0, sumSq = 0;
+  for (let q = 0; q < w.Q; q++){
+    const s = scoreRow(w, q, flags, strategy, buf);
+    const t = w.target[q];
+    const ts = s[t];
+    let better = 0;
+    if (!want){                                  // recall only - the sweeps take this path
+      for (let d = 0; d < w.D; d++) if (s[d] > ts) better++;
+      if (better < K) hits++;
+      if (flags[t]) covered++;
+      continue;
+    }
+    for (let n = 0; n < K; n++){ top[n] = -Infinity; topIdx[n] = -1; }
+    for (let d = 0; d < w.D; d++){
+      const v = s[d];
+      if (v > ts) better++;
+      if (v > top[K - 1]){                       // keep the top K without sorting all D
+        let n = K - 1;
+        while (n > 0 && top[n - 1] < v){ top[n] = top[n - 1]; topIdx[n] = topIdx[n - 1]; n--; }
+        top[n] = v; topIdx[n] = d;
+      }
+    }
+    if (better < K) hits++;
+    if (flags[t]) covered++;
+    for (let n = 0; n < K; n++){
+      slots++;
+      if (topIdx[n] >= 0 && flags[topIdx[n]]) migratedSlots++;
+      sum += top[n]; sumSq += top[n] * top[n];
+    }
+  }
+  const m = slots ? sum / slots : 0;
+  return { recall: hits / w.Q, migratedShare: slots ? migratedSlots / slots : 0,
+           coverage: covered / w.Q,
+           topSpread: slots ? Math.sqrt(Math.max(0, sumSq / slots - m * m)) : 0 };
+}
+
+// the index you had before anyone touched anything
+const baselineRecall = (w, k) => evaluate(w, migratedSet(w, 0, 'hot'), 'dual', k).recall;
+const finishedRecall = (w, k) => evaluate(w, migratedSet(w, 1, 'hot'), 'dual', k).recall;
+
+function sweep(w, strategy, policy, steps, k){
+  const n = steps || 20, out = [];
+  for (let i = 0; i <= n; i++){
+    const f = i / n;
+    out.push(Object.assign({ f: f }, evaluate(w, migratedSet(w, f, policy), strategy, k, false)));
+  }
+  return out;
+}
+
+// how much of the corpus you must re-embed before search is merely back where it started
+function crossover(w, strategy, policy, steps, k){
+  const base = baselineRecall(w, k);
+  const n = steps || 20;
+  for (let i = 0; i <= n; i++){
+    const f = i / n;
+    if (evaluate(w, migratedSet(w, f, policy), strategy, k, false).recall >= base) return f;
+  }
+  return 1;
+}
+
+// One embedding call is one unit. Re-embedding the corpus is one-time; a second query-side
+// encoder is charged on every query, for as long as the migration lasts.
+const planCost = (f, docs, queries, encoders) => f * docs + encoders * queries;
+// f*docs + 2*Q === docs + Q   =>   Q === docs * (1 - f)
+const breakEvenQueries = (f, docs) => docs * (1 - f);
+// ===== ENGINE:END =====
+
+// ---------------------------------------------------------------- UI
+const $ = id => document.getElementById(id);
+const K = 10, STEPS = 20;
+const DOCS_K = 100, QUERIES_K = 50;          // 100k documents, 50k queries in the window
+const STRATS = [
+  { id: 'naive', label: 'new encoder only',      enc: 1, colour: '#f87171' },
+  { id: 'dual',  label: 'both encoders, raw',    enc: 2, colour: '#38bdf8' },
+  { id: 'dualz', label: 'both encoders, z-scored', enc: 2, colour: '#a78bfa' },
+  { id: 'split', label: 'no seam (reference)',   enc: 2, colour: '#94a3b8' }
+];
+let policy = 'hot';
+
+function cfg(){
+  return {
+    oldQuality: +$("sOld").value / 100,
+    newQuality: +$("sNew").value / 100,
+    anisotropy: +$("sAnis").value / 100,
+    skew: +$("sSkew").value / 100
+  };
+}
+
+const pct = x => (100 * x).toFixed(1) + "%";
+const cost = (f, enc) => f * DOCS_K + enc * QUERIES_K;
+
+let memo = { key: null, val: null };
+function heavy(c, pol){
+  const key = JSON.stringify(c) + "|" + pol;
+  if (memo.key === key) return memo.val;
+  const w = buildWorld(c, 2026);
+  const base = baselineRecall(w, K), done = finishedRecall(w, K);
+
+  const curves = STRATS.map(function(s){ return { s: s, pts: sweep(w, s.id, pol, STEPS, K) }; });
+
+  const crossRows = [];
+  for (const p of ['hot', 'random']) for (const s of STRATS.slice(0, 3)){
+    const pts = p === pol ? curves.filter(function(x){ return x.s.id === s.id; })[0].pts
+                          : sweep(w, s.id, p, STEPS, K);
+    let cf = 1;
+    for (const q of pts) if (q.recall >= base){ cf = q.f; break; }
+    const dip = base - Math.min.apply(null, pts.slice(0, pts.length - 1).map(function(q){ return q.recall; }));
+    const under = pts.filter(function(q){ return q.recall < base; }).length / pts.length;
+    crossRows.push({ label: s.label, pol: p, cf: cf, dip: dip, under: under });
+  }
+
+  const biasRows = [0, 0.35, 0.7].map(function(a){
+    const ww = a === c.anisotropy ? w : buildWorld(Object.assign({}, c, { anisotropy: a }), 2026);
+    const fl = migratedSet(ww, 0.30, 'hot');
+    return { a: a, raw: evaluate(ww, fl, 'dual', K).migratedShare,
+             z: evaluate(ww, fl, 'dualz', K).migratedShare };
+  });
+
+  memo = { key: key, val: { w: w, base: base, done: done, curves: curves,
+                            crossRows: crossRows, biasRows: biasRows } };
+  return memo.val;
+}
+
+function render(){
+  const c = cfg(), frac = +$("sFrac").value / 100;
+  $("vOld").textContent = c.oldQuality.toFixed(2);
+  $("vNew").textContent = c.newQuality.toFixed(2);
+  $("vAnis").textContent = c.anisotropy.toFixed(2);
+  $("vSkew").textContent = c.skew.toFixed(2);
+  $("vFrac").textContent = (100 * frac).toFixed(0) + "%";
+
+  const H = heavy(c, policy);
+  const w = H.w, base = H.base, done = H.done, curves = H.curves;
+
+  // ---- frontier
+  drawChart(curves, base);
+  const naiveSweep = curves[0].pts;
+  const worst = Math.min.apply(null, naiveSweep.slice(0, naiveSweep.length - 1).map(function(p){ return p.recall; }));
+  $("frontierNote").innerHTML = "Un-migrated index <strong>" + base.toFixed(3) +
+    "</strong>, finished index <strong>" + done.toFixed(3) + "</strong>. The single-encoder plan " +
+    "bottoms out at <strong>" + worst.toFixed(3) + "</strong> &mdash; <span class='bad'>" +
+    (100 * (base - worst)).toFixed(0) + " points below where it started</span>. Two curves may only " +
+    "be compared along a vertical line: the two-encoder plans start half a corpus to the right " +
+    "because they pay for a second query embedding on every request.";
+
+  // ---- operating points at the current fraction
+  const rows = STRATS.map(function(s){
+    const r = evaluate(w, migratedSet(w, frac, policy), s.id, K);
+    return { s: s, r: r, cost: cost(frac, s.enc) };
+  });
+  rows.push({ s: { label: 'finish the re-index', enc: 1 },
+              r: { recall: done }, cost: cost(1, 1) });
+  rows.push({ s: { label: 'never migrate', enc: 1 }, r: { recall: base }, cost: cost(0, 1) });
+  $("points").innerHTML = rows.map(function(x){
+    const d = x.r.recall - base;
+    return "<tr><td>" + x.s.label + "</td><td>" + x.s.enc + "</td><td>" +
+      x.cost.toFixed(0) + "k</td><td class='font-bold'>" + x.r.recall.toFixed(3) + "</td>" +
+      "<td class='" + (d < -0.005 ? "bad" : d > 0.005 ? "ok" : "") + "'>" +
+      (d >= 0 ? "+" : "") + (100 * d).toFixed(1) + "</td></tr>";
+  }).join("");
+  const half = evaluate(w, migratedSet(w, 0.5, 'hot'), 'dualz', K).recall;
+  $("pointNote").innerHTML = "At an identical <strong>" + cost(1, 1).toFixed(0) +
+    "k</strong> calls you can buy the finished re-index at <strong>" + done.toFixed(3) +
+    "</strong> or a half-migrated dual-encoder index at <strong>" + half.toFixed(3) +
+    "</strong>. The bridge is worth paying for only for the first <strong>" +
+    (breakEvenQueries(0.5, 100000) / 1000).toFixed(0) + "k queries</strong> &mdash; D&middot;(1&minus;f).";
+
+  // ---- break-even fractions and the deepest dip
+  const crossRows = H.crossRows;
+  $("cross").innerHTML = crossRows.map(function(r){
+    return "<tr><td>" + r.label + "</td><td>" + (r.pol === 'hot' ? "🔥 hot first" : "🎲 random") + "</td>" +
+      "<td class='font-bold " + (r.cf > 0.4 ? "bad" : r.cf > 0.1 ? "warn" : "ok") + "'>" +
+      (100 * r.cf).toFixed(0) + "%</td>" +
+      "<td class='" + (r.dip > 0.05 ? "bad" : "ok") + "'>" +
+      (r.dip > 0.001 ? "&minus;" + (100 * r.dip).toFixed(1) + " pts" : "none") + "</td>" +
+      "<td class='" + (r.under > 0.25 ? "bad" : r.under > 0.02 ? "warn" : "ok") + "'>" +
+      (100 * r.under).toFixed(0) + "%</td></tr>";
+  }).join("");
+  const nvHot = crossRows.filter(function(r){ return r.label === STRATS[0].label && r.pol === 'hot'; })[0];
+  const nvRnd = crossRows.filter(function(r){ return r.label === STRATS[0].label && r.pol === 'random'; })[0];
+  $("crossNote").innerHTML = "Note what re-embedding order does and does not fix. The single-encoder " +
+    "plan is <strong>equally deep</strong> in both orders &mdash; <span class='bad'>" +
+    (100 * nvHot.dip).toFixed(0) + " points</span> the instant you swap the query encoder, before " +
+    "any document has been converted. What hot-first changes is how long you stay there: " +
+    "<strong>" + (100 * nvHot.under).toFixed(0) + "%</strong> of the migration under water against " +
+    "<strong>" + (100 * nvRnd.under).toFixed(0) + "%</strong>, and even again at <strong>" +
+    (100 * nvHot.cf).toFixed(0) + "%</strong> re-embedded rather than <strong>" +
+    (100 * nvRnd.cf).toFixed(0) + "%</strong>.";
+
+  // ---- order beats arithmetic, at one budget
+  const B = 0.30;
+  const combos = [['naive', 'hot'], ['naive', 'random'], ['dual', 'hot'], ['dualz', 'hot'],
+                  ['dual', 'random'], ['dualz', 'random']];
+  const orderRows = combos.map(function(cb){
+    const r = evaluate(w, migratedSet(w, B, cb[1]), cb[0], K);
+    const s = STRATS.filter(function(x){ return x.id === cb[0]; })[0];
+    return { label: s.label + " &middot; " + (cb[1] === 'hot' ? "🔥 hot" : "🎲 random"), r: r };
+  });
+  const best = Math.max.apply(null, orderRows.map(function(x){ return x.r.recall; }));
+  $("order").innerHTML = orderRows.map(function(x){
+    return "<tr><td>" + x.label + "</td><td>" + pct(x.r.coverage) + "</td>" +
+      "<td class='font-bold " + (x.r.recall === best ? "ok" : "") + "'>" + x.r.recall.toFixed(3) +
+      "</td></tr>";
+  }).join("");
+  const nh = orderRows[0].r.recall, dzr = orderRows[5].r.recall;
+  const hotCov = orderRows[0].r.coverage, randCov = orderRows[1].r.coverage;
+  $("orderNote").innerHTML = "Every row re-embeds the same <strong>30%</strong> of documents. " +
+    "Hot-first covers <strong>" + pct(hotCov) + "</strong> of the query traffic against <strong>" +
+    pct(randCov) + "</strong> for a random 30%. " + (nh > dzr
+      ? "<span class='ok'>The cheap single-encoder plan in traffic order beats the careful " +
+        "dual-encoder one in random order, " + nh.toFixed(3) + " to " + dzr.toFixed(3) + ".</span>"
+      : "At these settings the dual-encoder plan is ahead &mdash; raise the traffic skew and watch " +
+        "the ordering flip.");
+
+  // ---- the scale bias
+  const biasRows = H.biasRows;
+  $("bias").innerHTML = biasRows.map(function(r){
+    return "<tr><td>" + r.a.toFixed(2) + "</td>" +
+      "<td class='font-bold " + (r.raw > 0.4 ? "bad" : "") + "'>" + pct(r.raw) + "</td>" +
+      "<td class='" + (Math.abs(r.z - 0.3) < 0.06 ? "ok" : "") + "'>" + pct(r.z) + "</td>" +
+      "<td class='text-slate-400'>30.0%</td></tr>";
+  }).join("");
+  const rawHot = evaluate(w, migratedSet(w, 0.30, 'hot'), 'dual', K).recall;
+  const zHot = evaluate(w, migratedSet(w, 0.30, 'hot'), 'dualz', K).recall;
+  const rawRand = evaluate(w, migratedSet(w, 0.30, 'random'), 'dual', K).recall;
+  const zRand = evaluate(w, migratedSet(w, 0.30, 'random'), 'dualz', K).recall;
+  $("biasNote").innerHTML = "And the correction is not free. Hot-first: raw <strong>" +
+    rawHot.toFixed(3) + "</strong> vs z-scored <strong>" + zHot.toFixed(3) + "</strong> " +
+    (rawHot > zHot ? "<span class='warn'>&mdash; fixing the bias costs recall, because the " +
+      "documents it favoured were the popular ones</span>" : "") + ". Random order: raw <strong>" +
+    rawRand.toFixed(3) + "</strong> vs z-scored <strong>" + zRand.toFixed(3) + "</strong>" +
+    (zRand > rawRand ? " <span class='ok'>&mdash; there it is worth " +
+      (100 * (zRand - rawRand)).toFixed(1) + " points</span>" : "") + ".";
+}
+
+function drawChart(curves, base){
+  const cv = $("chart"), ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  ctx.fillStyle = "#0f172a"; ctx.fillRect(0, 0, W, H);
+  const all = [];
+  curves.forEach(function(c){ c.pts.forEach(function(p){ all.push(p.recall); }); });
+  all.push(base);
+  const lo = Math.max(0, Math.min.apply(null, all) - 0.03), hi = Math.min(1, Math.max.apply(null, all) + 0.03);
+  const cLo = cost(0, 1), cHi = cost(1, 2);
+  const x = v => 40 + (W - 54) * (v - cLo) / Math.max(1e-9, cHi - cLo);
+  const y = a => H - 28 - (H - 46) * (a - lo) / Math.max(1e-9, hi - lo);
+
+  ctx.strokeStyle = "#fbbf24"; ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(40, y(base)); ctx.lineTo(W - 14, y(base)); ctx.stroke();
+  ctx.setLineDash([]);
+
+  curves.forEach(function(c){
+    ctx.strokeStyle = c.s.colour;
+    ctx.lineWidth = c.s.id === 'split' ? 1.5 : 2;
+    if (c.s.id === 'split') ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    c.pts.forEach(function(p, i){
+      const px = x(cost(p.f, c.s.enc)), py = y(p.recall);
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    });
+    ctx.stroke(); ctx.setLineDash([]);
+    if (c.s.id !== 'split') c.pts.forEach(function(p){
+      ctx.fillStyle = c.s.colour;
+      ctx.beginPath(); ctx.arc(x(cost(p.f, c.s.enc)), y(p.recall), 2, 0, Math.PI * 2); ctx.fill();
+    });
+  });
+
+  ctx.fillStyle = "#64748b"; ctx.font = "10px ui-monospace, monospace";
+  ctx.fillText("embedding calls, thousands →", 40, H - 8);
+  ctx.save(); ctx.translate(11, H - 32); ctx.rotate(-Math.PI / 2);
+  ctx.fillText("recall@10 →", 0, 0); ctx.restore();
+  ctx.fillStyle = "#e2e8f0"; ctx.font = "600 11px ui-monospace, monospace";
+  ctx.fillText(hi.toFixed(2), 40, 16);
+  ctx.fillText(lo.toFixed(2), 40, H - 32);
+  ctx.fillStyle = "#fbbf24";
+  ctx.fillText("before you started", W - 130, y(base) - 5);
+}
+
+// ---------------------------------------------------------------- in-page self-test
+function selfTest(){
+  let n = 0, bad = [];
+  const ok = (c, l) => { n++; if (!c) bad.push(l); };
+  const w = buildWorld({}, 2026);
+  const base = baselineRecall(w, K), done = finishedRecall(w, K);
+
+  const cross = Array.from(w.Sx.slice(0, w.D));
+  ok(Math.abs(mean(cross)) < 0.05, "the cross-space score is not centred on zero");
+  ok(stdev(cross) > 0.15, "the cross-space score collapsed instead of staying noisy");
+
+  // how much retrieval survives the seam - averaged, because one pair of projections can get lucky
+  const chance = K / w.D, seamRecall = [];
+  for (const sd of [2026, 7, 99, 41, 512]){
+    const ww = buildWorld({}, sd);
+    let h = 0;
+    for (let q = 0; q < ww.Q; q++){
+      const t = ww.target[q], ts = ww.Sx[q * ww.D + t];
+      let b = 0;
+      for (let d = 0; d < ww.D; d++) if (ww.Sx[q * ww.D + d] > ts) b++;
+      if (b < K) h++;
+    }
+    seamRecall.push(h / ww.Q);
+  }
+  const seam = mean(seamRecall);
+  ok(seam < 3 * chance, "the seam carries more than chance-level information");
+  ok(Math.max.apply(null, seamRecall) < 0.25 * base, "one world got far too much out of the seam");
+  ok(new Set(Array.from(w.Snew.slice(0, w.D)).map(function(v){ return v.toFixed(12); })).size === w.D,
+     "score ties: the space is degenerate");
+  ok(done > base + 0.15, "the new encoder is not actually better");
+
+  const rand = sweep(w, 'naive', 'random', 20, K);
+  const dip = base - Math.min.apply(null, rand.slice(1, 20).map(function(p){ return p.recall; }));
+  ok(dip > 0.30, "the valley did not reproduce");
+  ok(crossover(w, 'naive', 'random', 20, K) > 0.5, "the random-order break-even is not late");
+  ok(crossover(w, 'naive', 'hot', 20, K) < 0.25, "hot-first did not remove the valley");
+
+  const hot30 = evaluate(w, migratedSet(w, 0.3, 'hot'), 'naive', K);
+  ok(hot30.coverage > 0.7, "hot-first is not covering the traffic");
+  ok(hot30.recall > evaluate(w, migratedSet(w, 0.3, 'random'), 'dualz', K).recall,
+     "order did not beat arithmetic");
+
+  const raw = evaluate(w, migratedSet(w, 0.3, 'hot'), 'dual', K);
+  const z = evaluate(w, migratedSet(w, 0.3, 'hot'), 'dualz', K);
+  ok(raw.migratedShare > 0.45, "the raw scale bias did not show up");
+  ok(Math.abs(z.migratedShare - 0.3) < 0.07, "z-scoring did not restore the fair share");
+  ok(raw.recall > z.recall, "the null result flipped: z-scoring no longer costs recall hot-first");
+
+  ok(planCost(0.5, 100000, 50000, 2) === planCost(1, 100000, 50000, 1), "the equal-cost pair is not equal");
+  ok(breakEvenQueries(0.5, 100000) === 50000, "the break-even arithmetic is wrong");
+  ok(JSON.stringify(Array.from(buildWorld({}, 9).Snew.slice(0, 20))) ===
+     JSON.stringify(Array.from(buildWorld({}, 9).Snew.slice(0, 20))), "the same seed gave two worlds");
+
+  $("selftest").textContent = bad.length
+    ? "FAIL\n" + bad.join("\n") + "\n\n" + (n - bad.length) + " / " + n + " assertions pass"
+    : n + " / " + n + " assertions pass\n" +
+      "  cross-space score  mean " + mean(cross).toFixed(4) + "  sd " + stdev(cross).toFixed(3) +
+      "   recall@10 " + (100 * seam).toFixed(1) + "% over 5 worlds vs " +
+      (100 * chance).toFixed(1) + "% by chance\n" +
+      "  old index " + base.toFixed(3) + "   new index " + done.toFixed(3) + "\n" +
+      "  random-order valley  " + (100 * dip).toFixed(0) + " points below the old index, even again at " +
+      (100 * crossover(w, 'naive', 'random', 20, K)).toFixed(0) + "% re-embedded\n" +
+      "  hot-first            even again at " +
+      (100 * crossover(w, 'naive', 'hot', 20, K)).toFixed(0) + "% re-embedded, covering " +
+      (100 * hot30.coverage).toFixed(0) + "% of traffic with 30% of documents";
+}
+
+let queued = null;
+function schedule(){
+  if (queued) cancelAnimationFrame(queued);
+  queued = requestAnimationFrame(function(){ queued = null; render(); });
+}
+["sOld", "sNew", "sAnis", "sSkew", "sFrac"].forEach(function(id){
+  $(id).addEventListener("input", schedule);
+});
+document.querySelectorAll("#policy button").forEach(function(b){
+  b.addEventListener("click", function(){
+    document.querySelectorAll("#policy button").forEach(function(x){
+      x.classList.remove("tab-active"); x.classList.add("bg-slate-100");
+    });
+    b.classList.add("tab-active"); b.classList.remove("bg-slate-100");
+    policy = b.dataset.p;
+    render();
+  });
+});
+render();
+selfTest();
+</script>
+</body>
+</html>
