@@ -70,6 +70,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 66 — Model cascades](https://dev48.infy.uk/ai/days/day66-model-cascades.html) — `day66-model-cascades.html`
 - [AIFromZero · Day 67 — Embedding model migration](https://dev48.infy.uk/ai/days/day67-embedding-migration.html) — `day67-embedding-migration.html`
 - [AIFromZero · Day 68 — Streaming and partial-output commitment](https://dev48.infy.uk/ai/days/day68-streaming-commitment.html) — `day68-streaming-commitment.html`
+- [AIFromZero · Day 69 — Agent step reliability](https://dev48.infy.uk/ai/days/day69-agent-step-reliability.html) — `day69-agent-step-reliability.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

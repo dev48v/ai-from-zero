@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 69 — Agent step reliability and the silent-failure share</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid #e2e8f0; }
+  .ok { color:#166534; font-weight:800; }
+  .bad { color:#991b1b; font-weight:800; }
+  .warn { color:#92400e; font-weight:800; }
+  canvas { width:100%; display:block; border-radius:10px; background:#0f172a; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; }
+  .cell { border-radius:6px; padding:5px 0; font-size:10px; font-weight:800; text-align:center;
+          color:#fff; line-height:1.35; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+  <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <p class="text-xs font-bold tracking-widest text-violet-700 mb-2">AIFROMZERO · DAY 69</p>
+    <h1 class="text-xl md:text-2xl font-black leading-tight mb-4">
+      🔗 Agent step reliability — a 96.5% agent gets <strong>two steps</strong> before it drops
+      under 90% end to end, and twelve steps land it at <strong>65.2%</strong>. But compounding is
+      the boring half. The half nobody prices is <em>which kind</em> of failure you get: an abort you
+      can escalate, or a confident answer built on a corrupted step. Same model, same twelve steps,
+      same retry budget, same bill — a strict tool contract ships <strong>18 wrong answers per
+      thousand tasks</strong> and a permissive one ships <strong>240</strong>, a
+      <strong>13.6&times;</strong> gap from two numbers that appear in no agent config: whether a
+      wrong call <em>errors</em>, and whether the next call <em>validates its input</em>. Then the
+      recommendation this page set out to make lost at equal cost, twice.
+      Pure vanilla JavaScript, one file, no build step.
+    </h1>
+    <div class="flex gap-2 flex-wrap" id="tabs">
+      <button data-tab="look" class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">📈 MEASURE</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto space-y-5">
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+          <label class="text-sm">steps in the trajectory <span id="vH" class="font-bold tabular-nums float-right">12</span>
+            <input id="sH" type="range" min="2" max="24" value="12"></label>
+          <label class="text-sm">per-step tool choice correct <span id="vP" class="font-bold tabular-nums float-right">96.5%</span>
+            <input id="sP" type="range" min="880" max="998" value="965"></label>
+          <label class="text-sm">wrong calls that return a <em>plausible</em> result <span id="vS" class="font-bold tabular-nums float-right">55%</span>
+            <input id="sS" type="range" min="0" max="100" value="55"></label>
+          <label class="text-sm">later call rejects corrupted input <span id="vT" class="font-bold tabular-nums float-right">22%</span>
+            <input id="sT" type="range" min="0" max="60" value="22"></label>
+          <label class="text-sm">verification budget <span id="vV" class="font-bold tabular-nums float-right">0 checks</span>
+            <input id="sV" type="range" min="0" max="24" value="0"></label>
+          <label class="text-sm">verifier recall <span id="vR" class="font-bold tabular-nums float-right">80%</span>
+            <input id="sR" type="range" min="0" max="100" value="80"></label>
+          <label class="text-sm">verifier false-positive rate <span id="vF" class="font-bold tabular-nums float-right">4%</span>
+            <input id="sF" type="range" min="0" max="20" value="4"></label>
+          <label class="text-sm">tools in the catalogue <span id="vK" class="font-bold tabular-nums float-right">8</span>
+            <input id="sK" type="range" min="2" max="30" value="8"></label>
+          <label class="text-sm">retries per step <span id="vM" class="font-bold tabular-nums float-right">2</span>
+            <input id="sM" type="range" min="0" max="4" value="2"></label>
+          <div class="text-sm">where the checks go
+            <div class="flex gap-2 mt-1" id="where">
+              <button data-w="early" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">front</button>
+              <button data-w="spread" class="tab-active px-3 py-1 rounded-md text-xs font-bold">sampled</button>
+              <button data-w="late" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">tail</button>
+            </div>
+          </div>
+          <div class="text-sm">who runs the steps
+            <div class="flex gap-2 mt-1" id="tier">
+              <button data-t="cheap" class="tab-active px-3 py-1 rounded-md text-xs font-bold">cheap</button>
+              <button data-t="esc" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">cheap, big retries</button>
+              <button data-t="strong" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">big (4&times;)</button>
+            </div>
+          </div>
+        </div>
+        <p class="text-xs text-slate-500 mt-3">
+          1,000 tasks per world, five worlds, one number per configuration averaged over all of them.
+          Nothing here simulates language: a step is a <em>choice among K tools</em> that is right
+          with probability <code>p</code>, and a wrong choice either <strong>errors</strong> (the
+          agent sees it and can retry, excluding the tool that just failed) or
+          <strong>returns something plausible</strong> (the agent proceeds on corrupted state).
+          Cost is in step-calls: a cheap call is 1.00, the big model 4.00, one verification 0.35.
+        </p>
+      </div>
+
+      <div class="grid lg:grid-cols-3 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">SUCCESS</p>
+          <p class="text-4xl font-black tabular-nums" id="bigSucc">—</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteSucc"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">KNOWN FAILURE — you can escalate this</p>
+          <p class="text-4xl font-black tabular-nums text-amber-700" id="bigKnown">—</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteKnown"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">CONFIDENTLY WRONG — you ship this</p>
+          <p class="text-4xl font-black tabular-nums text-red-700" id="bigWrong">—</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteWrong"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE TOOL CONTRACT — IDENTICAL MODEL, IDENTICAL POLICY, IDENTICAL BILL</p>
+        <table class="num w-full">
+          <thead><tr><th>tool layer</th><th>errors loudly</th><th>next call validates</th><th>cost</th>
+            <th>success</th><th>known failure</th><th>confidently wrong</th><th>per 1,000</th>
+            <th>corrupted runs rescued downstream</th></tr></thead>
+          <tbody id="contract"></tbody>
+        </table>
+        <p class="text-xs text-slate-500 mt-2" id="contractNote"></p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">FRONTIER — WRONG ANSWERS AGAINST COST</p>
+          <canvas id="chartWrong" width="520" height="270"></canvas>
+          <p class="text-xs mt-2">
+            <span class="swatch" style="background:#f87171"></span>checks at the front
+            <span class="swatch ml-3" style="background:#38bdf8"></span>sampled across
+            <span class="swatch ml-3" style="background:#4ade80"></span>checks at the tail
+          </p>
+          <p class="text-xs text-slate-500 mt-2" id="wrongNote"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">FRONTIER — TASK SUCCESS AGAINST COST</p>
+          <canvas id="chartSucc" width="520" height="270"></canvas>
+          <p class="text-xs mt-2">
+            <span class="swatch" style="background:#f87171"></span>front
+            <span class="swatch ml-3" style="background:#38bdf8"></span>sampled
+            <span class="swatch ml-3" style="background:#4ade80"></span>tail
+          </p>
+          <p class="text-xs text-slate-500 mt-2" id="succNote"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          EQUAL COST — EVERY ROW SPENDS THE SAME NUMBER OF CHECKS, PLACED DIFFERENTLY</p>
+        <p class="text-sm text-slate-600 mb-3">
+          A verification budget has no single score, so the only legal comparison is a vertical one.
+          Each block below buys exactly the same number of verifier calls.
+        </p>
+        <table class="num w-full">
+          <thead><tr><th>configuration</th><th>checks</th><th>cost</th><th>success</th>
+            <th>known failure</th><th>confidently wrong</th><th>per 1,000</th></tr></thead>
+          <tbody id="equal"></tbody>
+        </table>
+        <p class="text-xs text-slate-500 mt-2" id="equalNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          WHERE THE WRONG ANSWERS COME FROM — CORRUPTION BY STEP POSITION</p>
+        <canvas id="chartSteps" width="1040" height="250"></canvas>
+        <p class="text-xs mt-2">
+          <span class="swatch" style="background:#f87171"></span>measured share of all tasks that
+          shipped a wrong answer corrupted at this step
+          <span class="swatch ml-3" style="background:#fbbf24"></span>closed form
+          <span class="swatch ml-3" style="background:#4ade80"></span>value of one check here,
+          relative to a check on the last step
+        </p>
+        <p class="text-xs text-slate-500 mt-2" id="stepNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-xs font-bold tracking-wider text-slate-500">ONE TRAJECTORY, STEP BY STEP</p>
+          <button id="nextEx" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">another task →</button>
+        </div>
+        <div class="grid gap-1" id="tape" style="grid-template-columns:repeat(auto-fit,minmax(56px,1fr))"></div>
+        <p class="text-xs text-slate-500 mt-3" id="tapeNote"></p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">COMPOUNDING — HOW LONG A CHAIN CAN GET</p>
+          <table class="num w-full">
+            <thead><tr><th>per-step</th><th>4 steps</th><th>12 steps</th><th>30 steps</th>
+              <th>steps to 90%</th><th>steps to 50%</th></tr></thead>
+            <tbody id="compound"></tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-2">
+            Pure <code>p<sup>H</sup></code>, no retries and no verification — the ceiling every
+            trajectory starts from. The last two columns are the whole staffing argument:
+            per-step accuracy that looks fine on a benchmark of single tool calls is a different
+            number entirely once a planner chains twelve of them.
+          </p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+            THE PLANNER SETS <code>H</code> AND NOBODY PRICES IT</p>
+          <table class="num w-full">
+            <thead><tr><th>steps</th><th>per-step</th><th>cost</th><th>success</th>
+              <th>known failure</th><th>confidently wrong</th></tr></thead>
+            <tbody id="gran"></tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-2" id="granNote"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE VERIFIER IS NOT FREE — WHAT ITS FALSE POSITIVES COST</p>
+        <table class="num w-full">
+          <thead><tr><th>false-positive rate</th><th>flags on correct steps, per task</th>
+            <th>check every step: success</th><th>&hellip;wrong</th><th>&hellip;runs killed by a flag</th>
+            <th>4 checks at the tail: success</th><th>&hellip;wrong</th></tr></thead>
+          <tbody id="fptab"></tbody>
+        </table>
+        <p class="text-xs text-slate-500 mt-2" id="fpNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">SELF-TEST</p>
+        <pre id="selftest">running…</pre>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">Your agent's reliability is a property of your tool layer.</h2>
+
+      <p>Start with the arithmetic everyone can do and almost nobody does. An agent that picks the
+      right tool with the right arguments 96.5% of the time — which would be a strong number on any
+      single-call benchmark — completes a twelve-step trajectory
+      <strong>65.2%</strong> of the time, because <code>0.965<sup>12</sup></code> is 0.652. It gets
+      <strong>two</strong> steps before end-to-end accuracy falls under 90%, and nineteen before it
+      is worse than a coin flip. Buying a much better model does not rescue this: at 99% per step it
+      is still 88.6% over twelve steps and a coin flip at sixty-eight.</p>
+
+      <p>So far, so familiar. The part that actually decides whether you can ship the thing is what
+      happens <em>after</em> a step goes wrong, and that is not a property of the model at all.</p>
+
+      <h3 class="text-xl font-bold">Two errors that are not the same error</h3>
+
+      <p>A wrong tool call has two completely different fates. Either it <strong>errors</strong> —
+      404, schema violation, permission denied, <code>NOT_FOUND</code> — in which case the agent can
+      see it happened and try again, excluding the tool that just failed. Or it
+      <strong>returns something plausible</strong> — an empty list, a default object, the right
+      shape with the wrong contents — in which case the agent proceeds on corrupted state and has no
+      idea. Call the second kind's share <code>silent</code>. It is not in your agent config, your
+      model card, or your eval harness. It is a property of how the people who wrote your tools
+      chose to signal absence.</p>
+
+      <div class="bg-slate-100 border-l-4 border-slate-400 p-4">
+        <p class="text-sm">A retry after a loud error is not a coin flip repeated — it is
+        <em>better</em> than the first attempt, because the failed tool is now excluded. With eight
+        tools at 96.5%, the second attempt succeeds <strong>97.0%</strong> of the time and the third
+        <strong>97.5%</strong>. That is why one retry per step is worth
+        <strong>12.7 points</strong> of end-to-end success (64.6% → 77.3%) and the second retry is
+        worth <strong>0.1</strong>. Retry budgets past one are theatre.</p>
+      </div>
+
+      <p>And it is why <em>escalating</em> a retry to the expensive model is nearly worthless here:
+      it buys <strong>0.3 points</strong> for 1.37 units of extra spend per task. The information
+      that makes a retry work is in the error message, not in the model.</p>
+
+      <h3 class="text-xl font-bold">Downstream calls are an accidental verifier</h3>
+
+      <p>Now the second tool-layer property. Once the state is corrupted, every later call is
+      operating on garbage — and a call that validates its inputs will <em>reject</em> that garbage.
+      A missing id, a mismatched schema, a total that does not reconcile. When that happens the agent
+      sees an error, retries the step in front of it, cannot fix the step behind it, and gives up. It
+      fails, but it fails <em>loudly</em>. Call that per-step probability <code>trip</code>.</p>
+
+      <p>Which gives the closed form the whole page turns on. With no retries and no verification:</p>
+
+      <pre>success = p^H
+wrong   = SUM over i of  p^i · (1−p) · silent · (1−trip)^(H−1−i)</pre>
+
+      <p>Read the second line. A silent error at step <code>i</code> has <code>H−1−i</code> later
+      calls to be caught by, so its chance of surviving to the user decays geometrically in how far
+      from the end it happened. At <code>trip</code> = 0.22 over twelve steps, corrupting step 1
+      survives 6.5% of the time and corrupting step 12 survives <strong>always</strong>. The last
+      step is the only one with nothing behind it.</p>
+
+      <div class="bg-emerald-50 border-l-4 border-emerald-500 p-4">
+        <p class="text-sm"><strong>A longer trajectory is more self-checking in its middle and
+        equally blind at its end.</strong> Which is why the wrong answers you ship are not spread
+        evenly across the plan: the last three of twelve steps are 25% of the steps and
+        <strong>52.7%</strong> of the confidently wrong answers.</p>
+      </div>
+
+      <p>The two dials do completely different jobs, and the simulation separates them cleanly.
+      <code>silent</code> moves <em>how often the agent is right</em> — 99.98% success at
+      <code>silent</code>=0 down to 64.6% at <code>silent</code>=1, because a loud error gets
+      retried and a silent one cannot be. <code>trip</code> moves success by
+      <strong>exactly nothing</strong> — 77.5% at every value from 0 to 0.5 — and moves only whether
+      a failure is visible: confidently wrong falls 22.5% → 3.3% while known failure rises
+      0% → 19.2%. Input validation does not make your agent smarter. It makes your agent's mistakes
+      <em>arrive as exceptions</em>, which is the only form in which you can do anything about
+      them.</p>
+
+      <div class="bg-red-50 border-l-4 border-red-500 p-4">
+        <p class="text-sm">Put both dials at the two ends of what a real tool layer plausibly does
+        and the same agent becomes two different products. Strict — typed errors, validated inputs
+        (<code>silent</code> 0.20, <code>trip</code> 0.35): <strong>91.5%</strong> success,
+        <strong>18</strong> confidently wrong answers per thousand tasks. Permissive — empty results
+        for missing data, no input validation (<code>silent</code> 0.85, <code>trip</code> 0.05):
+        <strong>68.6%</strong> success, <strong>240</strong> per thousand. Identical model, identical
+        prompt, identical retry policy, and the bills are 12.18 against 11.92. A
+        <strong>13.6&times;</strong> difference in the thing that reaches a customer, bought entirely
+        in the tool layer.</p>
+      </div>
+
+      <h3 class="text-xl font-bold">The recommendation I set out to make, and what happened to it</h3>
+
+      <p>The obvious move is to add a verifier: a cheap model that reads a step's output and says
+      whether it looks right. And the obvious way to spend it is uniformly — check every step, or
+      sample every third one if you cannot afford all of them. That is the advice this page was going
+      to give.</p>
+
+      <p>It is dominated. At an identical number of checks, placement moves the result more than the
+      budget does:</p>
+
+      <div class="bg-red-50 border-l-4 border-red-500 p-4">
+        <p class="text-sm"><strong>One</strong> check on the last step costs 12.32 and leaves
+        <strong>1.7%</strong> confidently wrong. <strong>Three</strong> checks sampled across the
+        trajectory cost 12.94 and leave <strong>2.6%</strong> — more money, worse answers.
+        <strong>Two</strong> at the tail cost 12.62 and leave <strong>0.7%</strong>, which is exactly
+        what checking all <strong>twelve</strong> steps achieves at 17.05. And three checks at the
+        <em>front</em> cost 13.29 to take confidently wrong from 7.7% to 7.6% — a
+        1.43-unit-per-task spend that is indistinguishable from having bought nothing.</p>
+      </div>
+
+      <p>The mechanism is the geometric term again. A check at step <code>j</code> is worth
+      <code>(1−trip)<sup>H−1−j</sup></code> relative to a check at the end, because everything after
+      <code>j</code> is already checking it for free. Over twelve steps at
+      <code>trip</code> = 0.22 that is a <strong>15.4&times;</strong> spread between the first
+      position and the last. Uniform verification pays the same price at both.</p>
+
+      <h3 class="text-xl font-bold">And the second thing that lost: verification has two jobs</h3>
+
+      <p>Having found that the tail is where the checks belong, the tempting conclusion is that
+      checking the middle is waste. It is not — it is waste <em>for one of the two objectives</em>,
+      and the page had to be rewritten to say so.</p>
+
+      <p>A verifier does exactly one mechanical thing: it converts a silent error into a loud one, so
+      the retry machinery can fire. That has two entirely separate effects. It stops a corrupted
+      answer reaching the user, which only matters near the end where nothing else would have caught
+      it. And it <em>repairs the step</em>, which matters everywhere, because a repaired step is a
+      step that still completes. So:</p>
+
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-4">
+        <p class="text-sm">Two checks at the tail and twelve checks everywhere both reach
+        <strong>0.7%</strong> confidently wrong — but success is <strong>80.0%</strong> against
+        <strong>93.9%</strong>. The extra ten checks buy nothing at all on the metric they are
+        usually sold on, and 13.9 points on a different one, for 35% more compute. If you are trying
+        not to <em>ship</em> a wrong answer, spend at the end. If you are trying to
+        <em>finish the task</em>, you have to spend everywhere. These are not the same purchase and a
+        single &ldquo;accuracy&rdquo; number hides which one you made.</p>
+      </div>
+
+      <p>Which also settles the model-tier question in an unexpected direction. Running every step on
+      a model that is 4&times; the price and errs at 1% instead of 3.5% costs <strong>47.86</strong>
+      per task for 93.0% success and 2.7% confidently wrong. The cheap model with a check on every
+      step costs <strong>17.05</strong> for 93.9% and 0.7%. The expensive model is beaten on all
+      three axes at 2.8&times; the price, and it would have to be priced at
+      <strong>1.43&times;</strong> the cheap one merely to <em>tie on cost</em>. Cutting per-step
+      error by 3.5&times; is worth less than converting the errors you already have from silent to
+      loud, because compounding punishes the error you cannot see far harder than the one you
+      can.</p>
+
+      <h3 class="text-xl font-bold">The false positives are the real bill</h3>
+
+      <p>A verifier that flags a correct step is not neutral. The agent does what you told it to do:
+      it distrusts the tool it just used and picks again — off a distribution that was already
+      pointing at the right answer. In this model a flag down-weights the tool the agent chose, so a
+      false positive turns a step that was right into a step that is only 91.7% likely to be right,
+      and can burn the retry budget outright.</p>
+
+      <div class="bg-slate-100 border-l-4 border-slate-400 p-4">
+        <p class="text-sm">Checking all twelve steps, as the false-positive rate goes
+        0% → 15%: success <strong>95.1% → 83.9%</strong>, with 1.92 flags fired on correct steps per
+        task and 5.1% of runs killed outright by one. The same verifier used only on the last four
+        steps loses 3.4 points over the same range instead of 11.2. A verifier's precision is priced
+        per <em>check</em>, so it is one more reason the budget wants to be small and
+        well aimed.</p>
+      </div>
+
+      <h3 class="text-xl font-bold">The planner picks <code>H</code>, and it is a real dial</h3>
+
+      <p>One parameter in all of this is chosen by a model at runtime and appears in no config file
+      at all: how many steps the plan has. Cut the same task into more, smaller steps and each step
+      gets easier — but there is an irreducible per-call selection error that does not shrink with
+      the step. Model per-step error as
+      <code>work/H + perCall</code> and the picture is not what the folklore says: going from 2 steps
+      to 30, success barely moves (82.7% → 76.4%, and the decline is entirely the per-call term)
+      while confidently wrong falls <strong>14.9% → 2.1%</strong>. Finer decomposition does not make
+      the agent more accurate. It converts wrong answers into known failures, because it adds
+      downstream calls to trip over the corruption — and it costs a linear amount of compute to do
+      it.</p>
+
+      <h3 class="text-xl font-bold">What to do on a real system</h3>
+
+      <ul class="list-disc pl-6 space-y-1">
+        <li><strong>Instrument the silent share before you touch the model.</strong> Take a sample of
+        wrong trajectories and ask, per step, whether a wrong call produced an exception or a
+        plausible value. That single fraction moves shipped wrong answers by more than a model
+        upgrade will.</li>
+        <li><strong>Make your tools rude.</strong> Return <code>NOT_FOUND</code>, not an empty list.
+        Return a typed error, not a default object. Validate inputs on every call even when the
+        caller is your own agent — that validation is the cheapest verifier you will ever deploy and
+        it runs on the path anyway.</li>
+        <li><strong>Spend the verification budget at the end of the trajectory,</strong> unless you
+        are optimising completion rather than correctness, in which case spend it everywhere and know
+        that is what you bought.</li>
+        <li><strong>One retry per step, and let the error message do the work.</strong> Excluding the
+        tool that just failed is most of the value; escalating the retry to a bigger model is nearly
+        none of it.</li>
+        <li><strong>Price your verifier's false positives per check, not per task.</strong> A 4% FPR
+        on twelve steps fires half a flag per task on work that was already correct.</li>
+        <li><strong>Report three outcomes, never two.</strong> Success / known failure / confidently
+        wrong. A dashboard that shows only a success rate cannot distinguish the two configurations
+        in the red box above, and they are not the same product.</li>
+        <li><strong>Count the steps in your plans.</strong> If per-step accuracy is 96.5% and your
+        planner is emitting twenty-step trajectories, no amount of prompt work will fix the
+        arithmetic.</li>
+      </ul>
+
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-50">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">🔨 How it is built</h2>
+
+      <h3 class="text-xl font-bold">1. Nothing here simulates language</h3>
+      <pre>// a step is a CHOICE AMONG K TOOLS, not a piece of text:
+//   correct mass  p
+//   wrong mass    (1-p), spread evenly over the K-1 wrong tools
+// and a wrong choice has a FATE, drawn separately:
+//   loud   -> the agent sees an error and may retry, EXCLUDING the tool that failed
+//   silent -> a plausible result comes back and the agent proceeds on corrupted state</pre>
+      <p>There is no text, no model and no classifier anywhere in the engine. What is simulated is
+      the only structure the question depends on: that tool calls are selections, that errors have
+      two fates, that a retry knows something the first attempt did not, and that later calls may
+      reject state the earlier ones broke.</p>
+
+      <h3 class="text-xl font-bold">2. A retry is arithmetic, not optimism</h3>
+      <pre>correctProb(p, K, triedWrong, dw) =
+  mc = p·dw                                  // dw = (1-trust)^(number of flags so far)
+  mw = ((1-p)/(K-1)) · (K-1-triedWrong)      // wrong tools not yet excluded
+  mc / (mc + mw)</pre>
+      <p>A loud error excludes a tool, so the retry's success probability genuinely rises: 96.5% →
+      97.0% → 97.5% at K=8. A verifier flag only down-weights, because the agent has no way to know
+      the flag was right — which is exactly why a false positive is expensive and not merely
+      wasteful.</p>
+
+      <h3 class="text-xl font-bold">3. Equal cost is enforced in check COUNT, not approximated</h3>
+      <pre>k = round(v·H)                       // the budget
+front   -> j &lt; k
+tail    -> j &gt;= H - k
+sampled -> the midpoints of k equal blocks: round((i+0.5)·H/k - 0.5)</pre>
+      <p>All three placements spend exactly <code>k</code> verifier calls, so the comparison between
+      them needs no matching step at all. The midpoint form matters: a naive
+      <code>every H/k-th step</code> stride puts its single check on the <em>last</em> step, which
+      quietly hands the sampled strategy the tail strategy's answer and makes the whole result
+      disappear.</p>
+
+      <h3 class="text-xl font-bold">4. Two closed forms, checked against the simulation</h3>
+      <pre>success = p^H
+wrong   = SUM_i  p^i · (1-p) · silent · (1-trip)^(H-1-i)
+value of a check at step j, relative to the last = (1-trip)^(H-1-j)</pre>
+      <p>Derived by hand and then tested rather than trusted: against a 20,000-task world the
+      simulation with retries disabled matches both lines to under half a point on every one of the
+      parameter combinations in the test file. The per-step term is also the chart on the MEASURE
+      tab, plotted against the measured distribution of where corruption actually happened.</p>
+
+      <h3 class="text-xl font-bold">5. One structural invariant worth more than a test</h3>
+      <pre>assert(success is IDENTICAL for trip = 0, 0.05, 0.1, 0.22, 0.35, 0.5)</pre>
+      <p>Not approximately identical — bit-identical, because <code>trip</code> is only consulted
+      once the state is already corrupted and a corrupted run can never be a success. That makes the
+      claim &ldquo;input validation changes the failure mode and not the success rate&rdquo; a
+      property of the construction rather than a finding, and the assertion is there so a later edit
+      that accidentally lets <code>trip</code> touch a clean step fails loudly.</p>
+
+      <h3 class="text-xl font-bold">6. Four degeneracies, declared</h3>
+      <p>Day 66 in this series lost its headline to a model that collapsed to exactly 0 and 1 at an
+      extreme setting, so every corner is checked here and the ones that are genuinely degenerate are
+      named on the page rather than quietly avoided:</p>
+      <pre>K = 2      -> after ONE loud error the retry is correct with probability exactly 1.0
+trust = 1  -> a false positive excludes the correct tool, so the redo is wrong with probability 1.0
+silent = 0 -> confidently wrong is exactly 0, so verification has no channel at all and
+              checking every step COSTS 0.9 points of success for 4.8 units of spend
+recall=1, fpr=0, check every step -> wrong exactly 0.0%, success 99.98%; not a verifier, an oracle</pre>
+      <p>The page defaults sit away from all four (K=8, trust 0.6, silent 0.55, recall 0.80,
+      fpr 0.04) and every headline number is reported with all three outcomes strictly between 0 and
+      1. One more that is not degeneracy but is worth not over-claiming: the retry slider is
+      <em>flat</em> past 2 — 77.5% at 2, 3 and 4 retries, identical to three decimal places — so the
+      page says one retry and stops.</p>
+
+      <h3 class="text-xl font-bold">7. What the tests pin</h3>
+      <pre>// the tool layer, not the model, decides what reaches a user
+assert(wrong(permissive) &gt; 8 × wrong(strict))            // measured 13.6x over 5 worlds
+assert(success is bit-identical across the whole trip sweep)
+assert(success strictly decreasing in the silent share)
+
+// the closed forms ARE the simulation
+assert(|sim - p^H| &lt; 0.005)                    on a 20,000-task world
+assert(|sim wrong - closed form| &lt; 0.005)      over 8 parameter combinations
+
+// the null results, kept because they are true
+assert(wrong(1 check at the tail) &lt; wrong(3 checks sampled)); // and it costs LESS
+assert(wrong(3 checks at the front) &gt; wrong(no checks) - 0.005);
+assert(wrong(2 at the tail) &lt;= wrong(all 12) + 0.003);
+assert(success(all 12) &gt; success(2 at the tail) + 0.10);     // the OTHER job
+assert(cost(strong tier) &gt; 2.5 × cost(cheap + verify all)
+       &amp;&amp; success(strong) &lt; success(cheap + verify all));
+assert(success(escalate retries) - success(plain) &lt; 0.01);
+
+// and nothing is collapsed or out of range
+assert(every one of 3,240 slider configurations returns three rates that sum to 1);
+assert(K=2 retry probability === 1  &amp;&amp;  default K=8 retry probability &lt; 0.98);</pre>
+      <p>The third block is the one worth having. It says that the thing this page was going to
+      recommend — spread your verification budget over the trajectory — is beaten at equal cost by
+      one check in the right place, and that the strategy which does win on the headline metric wins
+      nothing on the other one. Both halves sit in the test file so the inconvenient one cannot be
+      quietly deleted later.</p>
+
+      <h3 class="text-xl font-bold">🎉 AIFromZero Day 69 shipped.</h3>
+      <p class="text-slate-600">Multi-step agents do not fail because the model is not good enough.
+      They fail because 96.5% twelve times is 65%, and they fail <em>silently</em> because somebody
+      decided an empty list was a friendlier response than an error.</p>
+
+    </div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.addEventListener("click", () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+}));
+
+// ===== ENGINE:BEGIN =====
+// Agent step reliability. A multi-step agent fails end to end far more often than its per-step
+// accuracy suggests, and WHICH failure you get - an abort you can escalate to a human, or a
+// confident wrong answer you ship - is decided almost entirely by two properties of the TOOL LAYER
+// that appear in nobody's agent config: whether a wrong call fails LOUDLY, and whether a later call
+// REJECTS corrupted input.
+
+function mulberry32(seed){
+  let s = seed >>> 0;
+  return function(){
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1) >>> 0;
+    t = (t ^ (t + Math.imul(t ^ (t >>> 7), t | 61))) >>> 0;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const mean = a => a.reduce(function(s, v){ return s + v; }, 0) / a.length;
+const stdev = a => {
+  const m = mean(a);
+  return Math.sqrt(mean(a.map(function(v){ return (v - m) * (v - m); })));
+};
+
+const HMAX = 32;    // longest trajectory the world supports
+const AMAX = 5;     // attempts per step: 1 + up to 4 retries
+const NDRAW = 4;    // uniforms per (task, step, attempt): select / false-positive / recall / loud
+
+// A world is nothing but pre-drawn uniforms, so every slider is applied at EVALUATION time and the
+// world is built once and never rebuilt. Fixed draw order is what makes two configurations
+// comparable on the same tasks rather than on two different samples of luck.
+function buildWorld(cfg, seed){
+  const c = Object.assign({ tasks: 1000 }, cfg || {});
+  const rnd = mulberry32(seed);
+  const N = c.tasks;
+  const U = new Float64Array(N * HMAX * AMAX * NDRAW);
+  for (let i = 0; i < U.length; i++) U[i] = rnd();
+  const uTrip = new Float64Array(N * HMAX);   // does a later call reject corrupted state
+  for (let i = 0; i < uTrip.length; i++) uTrip[i] = rnd();
+  return { N: N, U: U, uTrip: uTrip, cfg: c };
+}
+const uAt = (w, r, j, a, k) => w.U[(((r * HMAX + j) * AMAX + a) * NDRAW) + k];
+
+const DEFAULTS = {
+  H: 12,            // steps in the trajectory - chosen by the PLANNER, priced by nobody
+  p: 0.965,         // per-step chance the cheap model picks the right tool with the right arguments
+  pStrong: 0.99,    // the same for the expensive model
+  K: 8,             // tools in the catalogue
+  silent: 0.55,     // share of wrong calls that return a PLAUSIBLE result instead of an error
+  trip: 0.22,       // chance a later call rejects corrupted state and fails loudly
+  maxRetry: 2,      // retries per step
+  v: 0,             // verification budget as a fraction of steps; k = round(v*H) checks per task
+  where: 'spread',  // 'spread' | 'late' | 'early' | 'final' - the SAME budget, placed differently
+  recall: 0.80,     // verifier's chance of catching a silent error
+  fpr: 0.04,        // verifier's chance of flagging a correct step
+  trust: 0.6,       // how hard a flag pushes the agent off the tool it just used
+  vCost: 0.35,      // one verification, priced in step-calls
+  costCheap: 1.0,
+  costStrong: 4.0,
+  tier: 'cheap',    // which model runs the steps
+  escalate: false   // send retries to the expensive model
+};
+
+// The agent picks from K tools: correct mass p, the remaining q spread evenly over the K-1 wrong
+// ones. A LOUD error excludes the tool that just failed, so a retry is genuinely better than the
+// first attempt - that is arithmetic, not optimism. A verifier FLAG only DOWN-WEIGHTS the tool,
+// because the agent cannot know the flag is right.
+function correctProb(p, K, triedWrong, dw){
+  const q = 1 - p;
+  const per = K > 1 ? q / (K - 1) : 0;
+  const wrongLeft = Math.max(0, K - 1 - triedWrong);
+  const mc = p * dw, mw = per * wrongLeft;
+  if (mc + mw <= 0) return 0;
+  return mc / (mc + mw);
+}
+
+// Where a verification budget of k = round(v*H) checks lands. All four placements spend EXACTLY the
+// same number of checks, which is what makes them comparable at all.
+function checkCount(o){ return Math.max(0, Math.min(o.H, Math.round(o.v * o.H))); }
+function verifies(j, o){
+  const H = o.H, k = checkCount(o);
+  if (k <= 0) return false;
+  if (o.where === 'final') return j === H - 1;
+  if (o.where === 'late')  return j >= H - k;
+  if (o.where === 'early') return j < k;
+  // evenly spaced at the MIDPOINTS of k equal blocks - exactly k of H, and what "verify every
+  // third step" really means: a sample of the trajectory rather than one end of it
+  const i = Math.floor((j + 0.5) * k / H);
+  return Math.round((i + 0.5) * H / k - 0.5) === j;
+}
+
+// One trajectory.
+//   'success' - every step landed correctly
+//   'known'   - the agent ran out of retries and stopped; this one you can escalate
+//   'wrong'   - a wrong call returned something plausible, nothing downstream objected, and the
+//               agent answered confidently on top of it
+function runTask(w, r, opts){
+  const o = Object.assign({}, DEFAULTS, opts || {});
+  const H = Math.min(HMAX, o.H), K = o.K;
+  const pBase = o.tier === 'strong' ? o.pStrong : o.p;
+  const cBase = o.tier === 'strong' ? o.costStrong : o.costCheap;
+  const pRetry = o.escalate ? o.pStrong : pBase;
+  const cRetry = o.escalate ? o.costStrong : cBase;
+  let cost = 0, calls = 0, checks = 0, retries = 0, fpEvents = 0, caught = 0;
+  let corruptedAt = -1, aborted = false, abortAt = -1, fpKill = false, trippedBy = -1;
+  const log = [];
+
+  for (let j = 0; j < H; j++){
+    const ver = verifies(j, o);
+    if (corruptedAt >= 0){
+      // the state is already garbage. This step still runs and still costs; the only question is
+      // whether anything OBJECTS - a schema mismatch, a missing id, a verifier reading the output.
+      // Either way the agent retries the step in front of it, so it cannot repair the one behind.
+      cost += cBase; calls++;
+      let objected = w.uTrip[r * HMAX + j] < o.trip;
+      let byVer = false;
+      if (ver){
+        checks++; cost += o.vCost;
+        if (uAt(w, r, j, 0, 2) < o.recall){ objected = true; byVer = true; }
+      }
+      if (objected){
+        cost += o.maxRetry * cRetry; calls += o.maxRetry; retries += o.maxRetry;
+        aborted = true; abortAt = j; trippedBy = j;
+        log.push({ j: j, ver: ver, attempts: 1, end: byVer ? 'flagged' : 'tripped' });
+        break;
+      }
+      log.push({ j: j, ver: ver, attempts: 1, end: 'onGarbage' });
+      continue;
+    }
+    let triedWrong = 0, dw = 1, a = 0, end = null, fps = 0;
+    for (;;){
+      const first = a === 0;
+      cost += first ? cBase : cRetry; calls++; if (!first) retries++;
+      const pc = correctProb(first ? pBase : pRetry, K, triedWrong, dw);
+      if (uAt(w, r, j, a, 0) < pc){
+        if (ver){                                     // the call was right; a verifier can still ruin it
+          checks++; cost += o.vCost;
+          if (uAt(w, r, j, a, 1) < o.fpr){
+            fpEvents++; fps++;
+            dw *= (1 - o.trust); a++;
+            if (a > o.maxRetry){ aborted = true; abortAt = j; fpKill = true; end = 'fpKill'; break; }
+            continue;
+          }
+        }
+        end = a === 0 ? 'ok' : 'repaired';
+        break;                                        // step done, state clean
+      }
+      let loud = uAt(w, r, j, a, 3) < (1 - o.silent);
+      let byVer = false;
+      if (!loud && ver){
+        checks++; cost += o.vCost;                    // a loud error needs no checker
+        if (uAt(w, r, j, a, 2) < o.recall){ loud = true; byVer = true; caught++; }
+      }
+      if (loud){
+        triedWrong++; a++;
+        if (a > o.maxRetry){ aborted = true; abortAt = j; end = byVer ? 'flagOut' : 'loudOut'; break; }
+        continue;
+      }
+      corruptedAt = j; end = 'corrupt';               // and the agent proceeds unaware
+      break;
+    }
+    log.push({ j: j, ver: ver, attempts: a + 1, fps: fps, end: end });
+    if (aborted) break;
+  }
+  return { outcome: aborted ? 'known' : (corruptedAt >= 0 ? 'wrong' : 'success'),
+           cost: cost, calls: calls, checks: checks, retries: retries,
+           corruptedAt: corruptedAt, abortAt: abortAt, trippedBy: trippedBy,
+           fpEvents: fpEvents, caught: caught, fpKill: fpKill, log: log };
+}
+
+function evaluate(w, opts){
+  const o = Object.assign({}, DEFAULTS, opts || {});
+  const H = Math.min(HMAX, o.H);
+  let succ = 0, known = 0, wrong = 0, cost = 0, calls = 0, checks = 0, retries = 0;
+  let fp = 0, caught = 0, fpKill = 0, corrupted = 0, wrongLate = 0, corrSum = 0;
+  const byStep = new Float64Array(H), wrongByStep = new Float64Array(H);
+  const lateFrom = H - 3;
+  for (let r = 0; r < w.N; r++){
+    const t = runTask(w, r, o);
+    if (t.outcome === 'success') succ++; else if (t.outcome === 'known') known++; else wrong++;
+    cost += t.cost; calls += t.calls; checks += t.checks; retries += t.retries;
+    fp += t.fpEvents; caught += t.caught; if (t.fpKill) fpKill++;
+    if (t.corruptedAt >= 0){ corrupted++; byStep[t.corruptedAt]++; }
+    if (t.outcome === 'wrong'){
+      corrSum += t.corruptedAt;
+      wrongByStep[t.corruptedAt]++;
+      if (t.corruptedAt >= lateFrom) wrongLate++;
+    }
+  }
+  const N = w.N;
+  return { success: succ / N, known: known / N, wrong: wrong / N,
+           cost: cost / N, calls: calls / N, checks: checks / N, retries: retries / N,
+           fpPerTask: fp / N, caughtPerTask: caught / N, fpKillRate: fpKill / N,
+           wrongPerK: 1000 * wrong / N, corruptRate: corrupted / N,
+           // of the trajectories that got corrupted, the share something downstream objected to
+           rescued: corrupted ? (corrupted - wrong) / corrupted : 0,
+           lateShare: wrong ? wrongLate / wrong : 0,
+           meanCorruptStep: wrong ? corrSum / wrong : 0,
+           byStep: Array.from(byStep, function(x){ return x / N; }),
+           wrongByStep: Array.from(wrongByStep, function(x){ return x / N; }) };
+}
+
+// ---- closed forms, derived by hand and then checked against the simulation -------------------
+// Strip retries and verification and the whole thing collapses to arithmetic:
+//   success = p^H
+//   wrong   = SUM over i of  p^i * (1-p) * silent * (1-trip)^(H-1-i)
+// The second line is the entire page: a silent error at step i has H-1-i later calls to be tripped
+// over by, so the LAST step is the only one with no safety net behind it at all.
+function closedForm(o){
+  const p = o.p, q = 1 - p, H = o.H, s = o.silent, t = o.trip;
+  let wrong = 0;
+  const perStep = [];
+  for (let i = 0; i < H; i++){
+    const term = Math.pow(p, i) * q * s * Math.pow(1 - t, H - 1 - i);
+    perStep.push(term);
+    wrong += term;
+  }
+  const success = Math.pow(p, H);
+  return { success: success, wrong: wrong, known: 1 - success - wrong, perStep: perStep };
+}
+// how long a chain can get before it is worse than some target
+const chainLimit = (p, target) => Math.floor(Math.log(target) / Math.log(p));
+// the value of one check at step j relative to one at the last step. Geometric in the distance from
+// the end, because every call after j is already an accidental verifier.
+const relativeValue = (j, o) => Math.pow(1 - o.trip, o.H - 1 - j);
+
+// ---- frontiers -------------------------------------------------------------------------------
+// Sweep the verification budget for one placement. Two placements can only be compared where they
+// spend the same, so the curve is the unit of comparison and a single number never is.
+function frontier(w, base, cfg, steps){
+  const H = Object.assign({}, DEFAULTS, base, cfg).H;
+  const n = steps || H, out = [];
+  for (let i = 0; i <= n; i++){
+    const v = i / n;
+    out.push(Object.assign({ v: v, k: checkCount(Object.assign({}, DEFAULTS, base, cfg, { v: v })) },
+                           evaluate(w, Object.assign({}, base, cfg, { v: v }))));
+  }
+  return out;
+}
+// the verification budget of one configuration that costs the same as a target
+function equalCostV(w, target, base, cfg){
+  let best = 0, err = Infinity;
+  const H = Object.assign({}, DEFAULTS, base, cfg).H;
+  for (let k = 0; k <= H; k++){
+    const v = k / H;
+    const e = Math.abs(evaluate(w, Object.assign({}, base, cfg, { v: v })).cost - target);
+    if (e < err){ err = e; best = v; }
+  }
+  return best;
+}
+// per-step accuracy as a function of how finely the planner cut the task up: the work-proportional
+// part of the error shrinks with the step, the per-call selection error does not.
+const granularityP = (H, workErr, callErr) => 1 - (workErr / H + callErr);
+function granularitySweep(w, base, workErr, callErr, hs){
+  return (hs || [2, 3, 4, 6, 8, 12, 16, 20, 24, 30]).map(function(H){
+    const p = granularityP(H, workErr, callErr);
+    return Object.assign({ H: H, p: p }, evaluate(w, Object.assign({}, base, { H: H, p: p })));
+  });
+}
+// ===== ENGINE:END =====
+
+// ---------------------------------------------------------------- UI
+const $ = id => document.getElementById(id);
+const SEEDS = [2026, 7, 99, 41, 512];
+const WORLDS = SEEDS.map(function(s){ return buildWorld({}, s); });
+const W = WORLDS[0];
+let where = 'spread';
+let tier = 'cheap';
+let exIdx = 0;
+
+const pct = x => (100 * x).toFixed(1) + "%";
+const p2 = x => x.toFixed(2);
+const perK = x => (1000 * x).toFixed(0);
+const A = (o, k) => mean(WORLDS.map(function(w){ return evaluate(w, o)[k]; }));
+
+function opts(extra){
+  const H = +$("sH").value;
+  const k = Math.min(H, +$("sV").value);
+  return Object.assign({
+    H: H,
+    p: +$("sP").value / 1000,
+    silent: +$("sS").value / 100,
+    trip: +$("sT").value / 100,
+    v: k / H,
+    recall: +$("sR").value / 100,
+    fpr: +$("sF").value / 100,
+    K: +$("sK").value,
+    maxRetry: +$("sM").value,
+    where: where,
+    tier: tier === 'strong' ? 'strong' : 'cheap',
+    escalate: tier === 'esc'
+  }, extra || {});
+}
+
+let memo = { key: null, val: null };
+function heavy(){
+  const o = opts();
+  const key = JSON.stringify(o);
+  if (memo.key === key) return memo.val;
+  const cur = { success: A(o, 'success'), known: A(o, 'known'), wrong: A(o, 'wrong'),
+                cost: A(o, 'cost'), checks: A(o, 'checks'), retries: A(o, 'retries'),
+                rescued: A(o, 'rescued'), lateShare: A(o, 'lateShare'),
+                fpPerTask: A(o, 'fpPerTask'), corruptRate: A(o, 'corruptRate') };
+  const curves = ['early', 'spread', 'late'].map(function(wh){
+    return frontier(W, o, { where: wh }, o.H);
+  });
+  memo = { key: key, val: { o: o, cur: cur, curves: curves } };
+  return memo.val;
+}
+
+// ---------------------------------------------------------------- charts
+function drawFrontier(id, curves, key, label, invert){
+  const c = $(id), g = c.getContext("2d");
+  const w = c.width, ht = c.height, L = 46, Rm = 14, T = 14, B = 28;
+  g.clearRect(0, 0, w, ht);
+  const all = curves[0].concat(curves[1], curves[2]);
+  const xs = all.map(function(p){ return p.cost; });
+  const ys = all.map(function(p){ return p[key]; });
+  const xMin = Math.min.apply(null, xs) * 0.98, xMax = Math.max.apply(null, xs) * 1.02;
+  const yMax = Math.max(0.01, Math.max.apply(null, ys)) * 1.08;
+  const yMin = invert ? Math.max(0, Math.min.apply(null, ys) - 0.02) : 0;
+  const X = v => L + ((v - xMin) / (xMax - xMin)) * (w - L - Rm);
+  const Y = v => T + (1 - (v - yMin) / (yMax - yMin)) * (ht - T - B);
+  g.strokeStyle = "#1e293b"; g.fillStyle = "#64748b"; g.font = "10px sans-serif";
+  for (let i = 0; i <= 5; i++){
+    const v = yMin + i * (yMax - yMin) / 5, y = Y(v);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(w - Rm, y); g.stroke();
+    g.fillText((100 * v).toFixed(yMax - yMin < 0.12 ? 1 : 0) + "%", 6, y + 3);
+  }
+  for (let i = 0; i <= 4; i++){
+    const v = xMin + i * (xMax - xMin) / 4;
+    g.fillText(v.toFixed(1), X(v) - 9, ht - 9);
+  }
+  g.fillStyle = "#94a3b8"; g.fillText(label, 6, 10);
+  g.fillText("cost per task, in cheap step-calls", w - 190, ht - 9);
+  const colours = ["#f87171", "#38bdf8", "#4ade80"];
+  curves.forEach(function(arr, ci){
+    g.strokeStyle = colours[ci]; g.fillStyle = colours[ci]; g.lineWidth = 2;
+    g.beginPath();
+    arr.forEach(function(p, i){ const x = X(p.cost), y = Y(p[key]); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+    g.stroke();
+    arr.forEach(function(p){ g.beginPath(); g.arc(X(p.cost), Y(p[key]), 2.2, 0, 7); g.fill(); });
+  });
+}
+
+function drawSteps(h){
+  const c = $("chartSteps"), g = c.getContext("2d");
+  const w = c.width, ht = c.height, L = 46, Rm = 46, T = 14, B = 30;
+  g.clearRect(0, 0, w, ht);
+  const H = h.o.H;
+  const byStep = WORLDS.map(function(ww){ return evaluate(ww, h.o).wrongByStep; });
+  const meas = [];
+  for (let j = 0; j < H; j++) meas.push(mean(byStep.map(function(b){ return b[j]; })));
+  const cf = closedForm(Object.assign({}, DEFAULTS, h.o)).perStep;
+  const yMax = Math.max(0.005, Math.max.apply(null, meas.concat(cf))) * 1.15;
+  const X = j => L + (j + 0.5) * (w - L - Rm) / H;
+  const Y = v => T + (1 - v / yMax) * (ht - T - B);
+  g.strokeStyle = "#1e293b"; g.fillStyle = "#64748b"; g.font = "10px sans-serif";
+  for (let i = 0; i <= 4; i++){
+    const y = Y(i * yMax / 4);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(w - Rm, y); g.stroke();
+    g.fillText((100 * i * yMax / 4).toFixed(2) + "%", 4, y + 3);
+  }
+  const bw = Math.max(4, (w - L - Rm) / H * 0.44);
+  for (let j = 0; j < H; j++){
+    g.fillStyle = "#f87171";
+    g.fillRect(X(j) - bw, Y(meas[j]), bw, Y(0) - Y(meas[j]));
+    g.fillStyle = "#fbbf24";
+    g.fillRect(X(j), Y(cf[j]), bw, Y(0) - Y(cf[j]));
+    g.fillStyle = "#64748b";
+    if (H <= 16 || j % 2 === 0) g.fillText(String(j + 1), X(j) - 3, ht - 10);
+  }
+  // relative value of a check, on its own 0..1 axis at the right
+  g.strokeStyle = "#4ade80"; g.lineWidth = 2; g.beginPath();
+  for (let j = 0; j < H; j++){
+    const rv = relativeValue(j, Object.assign({}, DEFAULTS, h.o));
+    const y = T + (1 - rv) * (ht - T - B);
+    j ? g.lineTo(X(j), y) : g.moveTo(X(j), y);
+  }
+  g.stroke();
+  g.fillStyle = "#4ade80";
+  g.fillText("1.0", w - Rm + 6, T + 4);
+  g.fillText("0", w - Rm + 6, ht - B + 2);
+  g.fillStyle = "#94a3b8";
+  g.fillText("share of all tasks", 4, 10);
+  g.fillText("step", w - Rm + 6, ht - 10);
+}
+
+// ---------------------------------------------------------------- tables
+const CONTRACTS = [
+  ['strict — typed errors, inputs validated', { silent: 0.20, trip: 0.35 }, '80%', '35%'],
+  ['the page default', { silent: 0.55, trip: 0.22 }, '45%', '22%'],
+  ['permissive — empty results, no validation', { silent: 0.85, trip: 0.05 }, '15%', '5%']
+];
+
+function render(){
+  const H = +$("sH").value;
+  if (+$("sV").value > H) $("sV").value = H;
+  $("sV").max = H;
+  $("vH").textContent = H;
+  $("vP").textContent = (+$("sP").value / 10).toFixed(1) + "%";
+  $("vS").textContent = $("sS").value + "%";
+  $("vT").textContent = $("sT").value + "%";
+  $("vV").textContent = $("sV").value + " check" + (+$("sV").value === 1 ? "" : "s");
+  $("vR").textContent = $("sR").value + "%";
+  $("vF").textContent = $("sF").value + "%";
+  $("vK").textContent = $("sK").value;
+  $("vM").textContent = $("sM").value;
+
+  const h = heavy(), o = h.o, cur = h.cur;
+  $("bigSucc").textContent = pct(cur.success);
+  $("bigKnown").textContent = pct(cur.known);
+  $("bigWrong").textContent = pct(cur.wrong);
+  $("noteSucc").textContent = "the ceiling with no retries and no checks is p^H = " +
+    pct(Math.pow(o.p, o.H)) + "; " + p2(cur.retries) + " retries per task and " +
+    p2(cur.checks) + " checks bring it here, for " + p2(cur.cost) + " step-calls.";
+  $("noteKnown").textContent = "the agent ran out of retries and stopped. " +
+    pct(cur.rescued) + " of the runs that got corrupted ended up here rather than in the red box, " +
+    "because something later objected to the garbage.";
+  $("noteWrong").textContent = perK(cur.wrong) + " per thousand tasks. " +
+    pct(cur.lateShare) + " of them were corrupted in the last three steps, which are " +
+    (100 * 3 / o.H).toFixed(0) + "% of the trajectory.";
+
+  drawFrontier("chartWrong", h.curves, "wrong", "confidently wrong", true);
+  drawFrontier("chartSucc", h.curves, "success", "task success", true);
+  drawSteps(h);
+
+  // ---- the tool contract
+  $("contract").innerHTML = CONTRACTS.map(function(row){
+    const oo = Object.assign({}, o, row[1], { v: 0 });
+    const s = A(oo, 'success'), kn = A(oo, 'known'), wr = A(oo, 'wrong');
+    return "<tr><td>" + row[0] + "</td><td>" + row[2] + "</td><td>" + row[3] + "</td><td>" +
+      p2(A(oo, 'cost')) + "</td><td class='" + (s > 0.9 ? 'ok' : '') + "'>" + pct(s) +
+      "</td><td class='warn'>" + pct(kn) + "</td><td class='" + (wr > 0.1 ? 'bad' : (wr > 0.03 ? 'warn' : 'ok')) +
+      "'>" + pct(wr) + "</td><td>" + perK(wr) + "</td><td>" + pct(A(oo, 'rescued')) + "</td></tr>";
+  }).join("");
+  const st = Object.assign({}, o, CONTRACTS[0][1], { v: 0 });
+  const pm = Object.assign({}, o, CONTRACTS[2][1], { v: 0 });
+  const wSt = A(st, 'wrong'), wPm = A(pm, 'wrong');
+  $("contractNote").textContent =
+    "Verification is off in this table — the only thing that changes between the rows is how the " +
+    "tools signal failure. Same model, same " + o.H + " steps, same " + o.maxRetry +
+    " retries, and the bills are " + p2(A(st, 'cost')) + " against " + p2(A(pm, 'cost')) + ". " +
+    "Confidently wrong answers: " + perK(wSt) + " per thousand against " + perK(wPm) + ", a " +
+    (wSt > 0 ? (wPm / wSt).toFixed(1) : "∞") + "x gap. Success " + pct(A(st, 'success')) +
+    " against " + pct(A(pm, 'success')) + ".";
+
+  // ---- equal cost
+  const k1 = 1 / o.H, k2 = 2 / o.H, k3 = 3 / o.H;
+  const rows = [
+    ['no verification', { v: 0 }],
+    ['1 check, last step', { v: k1, where: 'late' }],
+    ['1 check, sampled', { v: k1, where: 'spread' }],
+    ['1 check, first step', { v: k1, where: 'early' }],
+    ['2 checks, tail', { v: k2, where: 'late' }],
+    ['3 checks, sampled', { v: k3, where: 'spread' }],
+    ['3 checks, front', { v: k3, where: 'early' }],
+    ['every step checked', { v: 1, where: 'late' }],
+    ['big model everywhere, no checks', { v: 0, tier: 'strong', escalate: false }],
+    ['big model on retries only', { v: 0, tier: 'cheap', escalate: true }]
+  ];
+  $("equal").innerHTML = rows.map(function(r){
+    const oo = Object.assign({}, o, r[1]);
+    const s = A(oo, 'success'), kn = A(oo, 'known'), wr = A(oo, 'wrong');
+    return "<tr><td>" + r[0] + "</td><td>" + p2(A(oo, 'checks')) + "</td><td>" + p2(A(oo, 'cost')) +
+      "</td><td>" + pct(s) + "</td><td>" + pct(kn) + "</td><td class='" +
+      (wr > 0.05 ? 'bad' : (wr > 0.015 ? 'warn' : 'ok')) + "'>" + pct(wr) + "</td><td>" +
+      perK(wr) + "</td></tr>";
+  }).join("");
+  const oneLate = Object.assign({}, o, { v: k1, where: 'late' });
+  const threeSp = Object.assign({}, o, { v: k3, where: 'spread' });
+  const twoLate = Object.assign({}, o, { v: k2, where: 'late' });
+  const allV = Object.assign({}, o, { v: 1, where: 'late' });
+  const strongT = Object.assign({}, o, { v: 0, tier: 'strong', escalate: false });
+  $("equalNote").textContent =
+    "One check on the last step costs " + p2(A(oneLate, 'cost')) + " and leaves " +
+    pct(A(oneLate, 'wrong')) + " confidently wrong; three checks sampled across the trajectory " +
+    "cost " + p2(A(threeSp, 'cost')) + " and leave " + pct(A(threeSp, 'wrong')) +
+    " — more money, worse answers. Two at the tail (" + p2(A(twoLate, 'cost')) + ") match " +
+    "checking every step (" + p2(A(allV, 'cost')) + ") on wrong answers, " +
+    pct(A(twoLate, 'wrong')) + " against " + pct(A(allV, 'wrong')) +
+    " — but not on success, " + pct(A(twoLate, 'success')) + " against " +
+    pct(A(allV, 'success')) + ", because a check also REPAIRS the step. The big model costs " +
+    p2(A(strongT, 'cost')) + " for " + pct(A(strongT, 'success')) + " success and " +
+    pct(A(strongT, 'wrong')) + " wrong: beaten on every axis by the cheap model with a check " +
+    "on every step, at " + (A(strongT, 'cost') / A(allV, 'cost')).toFixed(1) + "x the price.";
+
+  const rv0 = relativeValue(0, Object.assign({}, DEFAULTS, o));
+  $("stepNote").textContent =
+    "Bars are the share of ALL tasks that shipped a wrong answer whose corruption happened at that " +
+    "step; the amber bar is the closed form with retries switched off, which is why it is flatter. " +
+    "The green line is (1-trip)^(H-1-j), the value of one check there relative to one on the last " +
+    "step: " + (rv0 > 0 ? (1 / rv0).toFixed(1) : "∞") + "x between the first position and the " +
+    "last. " + pct(cur.lateShare) + " of the wrong answers come from the final three steps.";
+
+  // ---- compounding
+  $("compound").innerHTML = [0.99, 0.98, 0.965, 0.95, 0.90].map(function(p){
+    const cls = p === Math.round(o.p * 1000) / 1000 ? " style='background:#fef3c7'" : "";
+    return "<tr" + cls + "><td>" + (100 * p).toFixed(1) + "%</td><td>" + pct(Math.pow(p, 4)) +
+      "</td><td>" + pct(Math.pow(p, 12)) + "</td><td>" + pct(Math.pow(p, 30)) + "</td><td>" +
+      chainLimit(p, 0.9) + "</td><td>" + chainLimit(p, 0.5) + "</td></tr>";
+  }).join("");
+
+  // ---- granularity
+  const gs = granularitySweep(W, Object.assign({}, o, { v: 0 }), 0.30, 0.006,
+                              [2, 3, 4, 6, 8, 12, 16, 20, 24, 30]);
+  $("gran").innerHTML = gs.map(function(r){
+    return "<tr><td>" + r.H + "</td><td>" + (100 * r.p).toFixed(2) + "%</td><td>" + p2(r.cost) +
+      "</td><td>" + pct(r.success) + "</td><td>" + pct(r.known) + "</td><td class='" +
+      (r.wrong > 0.1 ? 'bad' : (r.wrong > 0.04 ? 'warn' : 'ok')) + "'>" + pct(r.wrong) + "</td></tr>";
+  }).join("");
+  $("granNote").textContent =
+    "Per-step error modelled as 0.30/H + 0.006 — the work-proportional part shrinks with the step, " +
+    "the per-call selection error does not. Success moves from " + pct(gs[0].success) + " to " +
+    pct(gs[gs.length - 1].success) + " across a 15x range of plan lengths while confidently wrong " +
+    "falls " + pct(gs[0].wrong) + " to " + pct(gs[gs.length - 1].wrong) +
+    ". Finer decomposition does not buy accuracy; it converts wrong answers into known failures, " +
+    "at a linear cost in calls. One world, not five, because this table sweeps H.";
+
+  // ---- false positives
+  $("fptab").innerHTML = [0, 0.02, 0.04, 0.08, 0.15].map(function(f){
+    const a = Object.assign({}, o, { v: 1, where: 'late', fpr: f });
+    const b = Object.assign({}, o, { v: Math.min(1, 4 / o.H), where: 'late', fpr: f });
+    return "<tr><td>" + (100 * f).toFixed(0) + "%</td><td>" + p2(A(a, 'fpPerTask')) + "</td><td>" +
+      pct(A(a, 'success')) + "</td><td>" + pct(A(a, 'wrong')) + "</td><td>" +
+      pct(A(a, 'fpKillRate')) + "</td><td>" + pct(A(b, 'success')) + "</td><td>" +
+      pct(A(b, 'wrong')) + "</td></tr>";
+  }).join("");
+  const f0 = Object.assign({}, o, { v: 1, where: 'late', fpr: 0 });
+  const f15 = Object.assign({}, o, { v: 1, where: 'late', fpr: 0.15 });
+  const g0 = Object.assign({}, o, { v: Math.min(1, 4 / o.H), where: 'late', fpr: 0 });
+  const g15 = Object.assign({}, o, { v: Math.min(1, 4 / o.H), where: 'late', fpr: 0.15 });
+  $("fpNote").textContent =
+    "A flag on a correct step makes the agent distrust the tool it just used, so it picks again off " +
+    "a distribution that was already right. Checking every step loses " +
+    (100 * (A(f0, 'success') - A(f15, 'success'))).toFixed(1) +
+    " points of success between a 0% and a 15% false-positive rate; four checks at the tail lose " +
+    (100 * (A(g0, 'success') - A(g15, 'success'))).toFixed(1) +
+    ". Precision is priced per CHECK, which is one more reason the budget wants to be small.";
+
+  drawTape();
+}
+
+const TAPE = {
+  ok:        ['#166534', 'right', ''],
+  repaired:  ['#0369a1', 'right', 'after retry'],
+  corrupt:   ['#991b1b', 'SILENT', 'state corrupted'],
+  loudOut:   ['#b45309', 'error', 'retries gone'],
+  flagOut:   ['#b45309', 'flagged', 'retries gone'],
+  fpKill:    ['#7c2d12', 'FALSE', 'positive killed it'],
+  onGarbage: ['#475569', 'ran', 'on garbage'],
+  tripped:   ['#a16207', 'REJECTED', 'garbage input'],
+  flagged:   ['#a16207', 'FLAGGED', 'garbage seen']
+};
+function drawTape(){
+  const o = opts();
+  const t = runTask(W, exIdx, o);
+  $("tape").innerHTML = t.log.map(function(s){
+    const d = TAPE[s.end] || ['#334155', s.end, ''];
+    return "<div class='cell' style='background:" + d[0] + "'>" +
+      "<div style='opacity:.65'>" + (s.j + 1) + (s.ver ? " ✓" : "") + "</div>" +
+      "<div>" + d[1] + "</div>" +
+      "<div style='opacity:.7;font-weight:600'>" + (s.attempts > 1 ? s.attempts + " tries" : d[2]) +
+      "</div></div>";
+  }).join("");
+  const label = t.outcome === 'success' ? "SUCCESS" :
+                (t.outcome === 'known' ? "KNOWN FAILURE — the agent stopped at step " + (t.abortAt + 1)
+                                       : "CONFIDENTLY WRONG — corrupted at step " + (t.corruptedAt + 1));
+  $("tapeNote").textContent = "Task #" + exIdx + ": " + label + ". " + t.calls +
+    " model calls, " + t.checks + " checks, " + t.cost.toFixed(2) + " step-calls. A ✓ marks a " +
+    "verified step. Every step after a corruption still runs and still costs; the only question is " +
+    "whether anything objects.";
+}
+
+// ---------------------------------------------------------------- self-test
+function selfTest(){
+  let n = 0, bad = [];
+  const ok = (c, l) => { n++; if (!c) bad.push(l); };
+  const B = { H: 12, p: 0.965, silent: 0.55, trip: 0.22, K: 8, maxRetry: 2, v: 0 };
+  const E = (extra, key) => mean(WORLDS.map(function(w){ return evaluate(w, Object.assign({}, B, extra))[key]; }));
+
+  // 1. the three outcomes are a partition
+  let partitionBad = 0, rangeBad = 0, cfg = 0;
+  for (const H of [2, 12, 24]) for (const p of [0.90, 0.965, 0.998]) for (const s of [0, 0.55, 1])
+    for (const tp of [0, 0.22, 0.6]) for (const v of [0, 0.5, 1]) for (const wh of ['early', 'spread', 'late']){
+      const e = evaluate(W, Object.assign({}, B, { H: H, p: p, silent: s, trip: tp, v: v, where: wh }));
+      cfg++;
+      if (Math.abs(e.success + e.known + e.wrong - 1) > 1e-12) partitionBad++;
+      if (e.cost <= 0 || !isFinite(e.cost) || e.checks < 0) rangeBad++;
+    }
+  ok(partitionBad === 0 && rangeBad === 0,
+     partitionBad + " of " + cfg + " configurations did not partition into three outcomes");
+
+  // 2. the closed forms ARE the simulation
+  const noRetry = Object.assign({}, B, { maxRetry: 0 });
+  const cf = closedForm(Object.assign({}, DEFAULTS, noRetry));
+  const simS = mean(WORLDS.map(function(w){ return evaluate(w, noRetry).success; }));
+  const simW = mean(WORLDS.map(function(w){ return evaluate(w, noRetry).wrong; }));
+  ok(Math.abs(simS - cf.success) < 0.02, "p^H " + cf.success.toFixed(4) + " vs simulated " + simS.toFixed(4));
+  ok(Math.abs(simW - cf.wrong) < 0.02, "the wrong-answer closed form missed by " + Math.abs(simW - cf.wrong).toFixed(4));
+
+  // 3. the tool layer, not the model
+  const wStrict = E({ silent: 0.20, trip: 0.35 }, 'wrong');
+  const wLoose = E({ silent: 0.85, trip: 0.05 }, 'wrong');
+  ok(wLoose > 8 * wStrict, "the tool-contract gap collapsed to " + (wLoose / wStrict).toFixed(1) + "x");
+  // trip cannot touch a clean run, so success must be BIT-identical across the sweep
+  const succByTrip = [0, 0.05, 0.1, 0.22, 0.35, 0.5].map(function(t){ return E({ trip: t }, 'success'); });
+  ok(succByTrip.every(function(x){ return x === succByTrip[0]; }),
+     "trip moved the success rate, which it cannot legally do");
+  const wrongByTrip = [0, 0.05, 0.1, 0.22, 0.35, 0.5].map(function(t){ return E({ trip: t }, 'wrong'); });
+  let mono = true;
+  for (let i = 1; i < wrongByTrip.length; i++) if (wrongByTrip[i] >= wrongByTrip[i - 1]) mono = false;
+  ok(mono && wrongByTrip[0] > 5 * wrongByTrip[wrongByTrip.length - 1],
+     "input validation stopped monotonically reducing confidently-wrong answers");
+  const sSweep = [0, 0.25, 0.5, 0.75, 1].map(function(s){ return E({ silent: s }, 'success'); });
+  let dec = true;
+  for (let i = 1; i < sSweep.length; i++) if (sSweep[i] >= sSweep[i - 1]) dec = false;
+  ok(dec, "the silent share stopped hurting success");
+
+  // 4. the null results, kept because they are true
+  const oneLate = E({ v: 1 / 12, where: 'late' }, 'wrong');
+  const oneLateC = E({ v: 1 / 12, where: 'late' }, 'cost');
+  const threeSp = E({ v: 3 / 12, where: 'spread' }, 'wrong');
+  const threeSpC = E({ v: 3 / 12, where: 'spread' }, 'cost');
+  ok(oneLate < threeSp && oneLateC < threeSpC,
+     "one check at the tail no longer beats three sampled at a lower price");
+  const front3 = E({ v: 3 / 12, where: 'early' }, 'wrong');
+  const none = E({}, 'wrong');
+  ok(front3 > none - 0.005, "front-loaded verification suddenly started working");
+  const twoLate = E({ v: 2 / 12, where: 'late' }, 'wrong');
+  const allV = E({ v: 1 }, 'wrong');
+  ok(twoLate <= allV + 0.004, "two checks at the tail no longer match twelve on wrong answers");
+  ok(E({ v: 1 }, 'success') > E({ v: 2 / 12, where: 'late' }, 'success') + 0.10,
+     "checking every step stopped buying success, so the two-jobs claim is stale");
+  const strongC = E({ tier: 'strong' }, 'cost'), allC = E({ v: 1 }, 'cost');
+  ok(strongC > 2.5 * allC && E({ tier: 'strong' }, 'success') < E({ v: 1 }, 'success'),
+     "the big model is no longer dominated by cheap + verification");
+  ok(E({ escalate: true }, 'success') - E({}, 'success') < 0.01,
+     "escalating retries to the big model suddenly matters");
+  ok(E({ maxRetry: 1 }, 'success') - E({ maxRetry: 0 }, 'success') > 0.08 &&
+     Math.abs(E({ maxRetry: 3 }, 'success') - E({ maxRetry: 2 }, 'success')) < 0.005,
+     "the retry curve no longer saturates after the first retry");
+
+  // 5. declared degeneracies
+  ok(correctProb(0.965, 2, 1, 1) === 1, "K=2 no longer gives a guaranteed retry, so the warning is stale");
+  ok(correctProb(0.965, 8, 1, 1) < 0.98 && correctProb(0.965, 8, 1, 1) > 0.965,
+     "the retry lift at the default catalogue size is wrong");
+  ok(correctProb(0.965, 8, 0, 0) === 0, "full trust in a flag no longer excludes the correct tool");
+  ok(E({ silent: 0 }, 'wrong') === 0, "a tool layer with no silent failures still shipped a wrong answer");
+  ok(E({ silent: 0, v: 1 }, 'success') < E({ silent: 0 }, 'success'),
+     "verification is no longer strictly harmful when there is nothing to catch");
+  ok(E({ v: 1, recall: 1, fpr: 0 }, 'wrong') === 0 && E({ v: 1, recall: 1, fpr: 0 }, 'success') > 0.999,
+     "the oracle verifier is no longer degenerate");
+  const three = [E({}, 'success'), E({}, 'known'), E({}, 'wrong')];
+  ok(three.every(function(x){ return x > 0.01 && x < 0.99; }),
+     "a default outcome is pinned at an extreme: " + three.map(pct).join(" "));
+  const spread = WORLDS.map(function(w){ return evaluate(w, B).wrong; });
+  ok(Math.max.apply(null, spread) < 2 * Math.min.apply(null, spread),
+     "one world is a wild outlier, so the five-world mean is hiding something");
+  ok(JSON.stringify(Array.from(buildWorld({ tasks: 4 }, 9).uTrip)) ===
+     JSON.stringify(Array.from(buildWorld({ tasks: 4 }, 9).uTrip)), "the same seed gave two worlds");
+
+  const relFirst = relativeValue(0, Object.assign({}, DEFAULTS, B));
+  $("selftest").textContent = bad.length
+    ? "FAIL\n" + bad.join("\n") + "\n\n" + (n - bad.length) + " / " + n + " assertions pass"
+    : n + " / " + n + " assertions pass\n" +
+      "  compounding        p^H = " + pct(Math.pow(0.965, 12)) + " before anything is done about it; " +
+      "with retries " + pct(E({}, 'success')) + " success, " + pct(E({}, 'known')) + " known, " +
+      pct(E({}, 'wrong')) + " confidently wrong\n" +
+      "  the tool contract  strict " + perK(wStrict) + " wrong per thousand vs permissive " +
+      perK(wLoose) + " — " + (wLoose / wStrict).toFixed(1) + "x, same model and same bill\n" +
+      "  trip is a MODE dial success bit-identical at " + pct(succByTrip[0]) +
+      " across trip 0..0.5 while wrong goes " + pct(wrongByTrip[0]) + " -> " +
+      pct(wrongByTrip[wrongByTrip.length - 1]) + "\n" +
+      "  placement          1 check at the tail " + pct(oneLate) + " at cost " + p2(oneLateC) +
+      " vs 3 sampled " + pct(threeSp) + " at " + p2(threeSpC) + " vs 3 at the front " +
+      pct(front3) + " (no checks at all: " + pct(none) + ")\n" +
+      "  two jobs           2 at the tail " + pct(twoLate) + " wrong / " +
+      pct(E({ v: 2 / 12, where: 'late' }, 'success')) + " success vs every step " + pct(allV) +
+      " / " + pct(E({ v: 1 }, 'success')) + " at cost " + p2(allC) + "\n" +
+      "  a check at step 1  is worth " + (1 / relFirst).toFixed(1) +
+      "x LESS than one at step 12, because everything after it checks it for free\n" +
+      "  averaged over " + WORLDS.length + " worlds of " + W.N + " tasks; per-world wrong " +
+      spread.map(pct).join(" ");
+}
+
+let queued = null;
+function schedule(){
+  if (queued) cancelAnimationFrame(queued);
+  queued = requestAnimationFrame(function(){ queued = null; render(); });
+}
+["sH", "sP", "sS", "sT", "sV", "sR", "sF", "sK", "sM"].forEach(function(id){
+  $(id).addEventListener("input", schedule);
+});
+function group(sel, set){
+  document.querySelectorAll(sel + " button").forEach(function(b){
+    b.addEventListener("click", function(){
+      document.querySelectorAll(sel + " button").forEach(function(x){
+        x.classList.remove("tab-active"); x.classList.add("bg-slate-100");
+      });
+      b.classList.add("tab-active"); b.classList.remove("bg-slate-100");
+      set(b);
+      render();
+    });
+  });
+}
+group("#where", function(b){ where = b.dataset.w; });
+group("#tier", function(b){ tier = b.dataset.t; });
+$("nextEx").addEventListener("click", function(){
+  const o = opts();
+  for (let k = 1; k <= W.N; k++){
+    const i = (exIdx + k) % W.N;
+    if (runTask(W, i, o).outcome !== 'success'){ exIdx = i; break; }
+  }
+  drawTape();
+});
+for (let i = 0; i < W.N; i++) if (runTask(W, i, opts()).outcome === 'wrong'){ exIdx = i; break; }
+render();
+selfTest();
+</script>
+</body>
+</html>
