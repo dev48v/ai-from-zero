@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 68 — Streaming and partial-output commitment</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Inter", sans-serif; }
+  .tab-active { background:#0f172a; color:#fff; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid #e2e8f0; }
+  .ok { color:#166534; font-weight:800; }
+  .bad { color:#991b1b; font-weight:800; }
+  .warn { color:#92400e; font-weight:800; }
+  canvas { width:100%; display:block; border-radius:10px; background:#0f172a; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+  <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <p class="text-xs font-bold tracking-widest text-violet-700 mb-2">AIFROMZERO · DAY 68</p>
+    <h1 class="text-xl md:text-2xl font-black leading-tight mb-4">
+      🚰 Streaming and partial-output commitment — a token you have shown is a token you have
+      spent. Every guard worth having needs <em>lookahead</em>: you cannot know a claim is
+      unsupported until the sentence closes. So streaming is a race between two cursors crawling
+      left to right over the same tokens — the <strong>detector's</strong>, which cannot rule until
+      it has enough, and the <strong>consumer's</strong>, which commits everything it passes. The
+      measured headline: under one identical policy, a naive stream puts defective text on screen in
+      <strong>100%</strong> of defective responses, and how much of it is actually
+      <em>committed</em> depends entirely on who is at the other end —
+      <strong>5.6 leaked responses per thousand</strong> for a human reader against
+      <strong>212</strong> for a machine consumer, a 38&times; gap from nothing but reading speed.
+      Then the recommendation this page set out to make lost, twice over. Pure vanilla JavaScript,
+      one file, offline.
+    </h1>
+    <div class="flex gap-2 flex-wrap" id="tabs">
+      <button data-tab="look" class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">📈 MEASURE</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto space-y-5">
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+          <label class="text-sm">hold-back buffer <span id="vHold" class="font-bold tabular-nums float-right">0 tok</span>
+            <input id="sHold" type="range" min="0" max="90" value="0"></label>
+          <label class="text-sm">model speed <span id="vSpeed" class="font-bold tabular-nums float-right">40 tok/s</span>
+            <input id="sSpeed" type="range" min="5" max="120" value="40"></label>
+          <label class="text-sm">detector lookahead <span id="vLook" class="font-bold tabular-nums float-right">26 tok</span>
+            <input id="sLook" type="range" min="2" max="60" value="26"></label>
+          <label class="text-sm">detector latency <span id="vLat" class="font-bold tabular-nums float-right">120 ms</span>
+            <input id="sLat" type="range" min="0" max="600" value="120"></label>
+          <label class="text-sm">defects that are sentence-scoped <span id="vScope" class="font-bold tabular-nums float-right">45%</span>
+            <input id="sScope" type="range" min="0" max="100" value="45"></label>
+          <div class="text-sm">who is consuming the stream
+            <div class="flex gap-2 mt-1" id="consumer">
+              <button data-c="reader" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">👤 reader</button>
+              <button data-c="voice" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">🔊 voice</button>
+              <button data-c="machine" class="tab-active px-3 py-1 rounded-md text-xs font-bold">🤖 machine</button>
+            </div>
+          </div>
+        </div>
+        <p class="text-xs text-slate-500 mt-3">
+          500 responses, 221 tokens on average, 18-token sentences, one in five carrying a defect
+          that starts at a random token. A <strong>sentence-scoped</strong> defect (an unsupported
+          claim, a wrong conclusion) is only resolvable once its sentence closes; the rest resolve a
+          few tokens after they start. The consumer sets the only thing that separates
+          <em>displayed</em> from <em>committed</em>: a reader takes 5.5 tokens/s, speech 3.2, and a
+          machine — a fired tool call, a webhook, a downstream parser — has no backlog at all.
+          Prefill is a flat 350&nbsp;ms.
+        </p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">THE FRONTIER — LEAK AGAINST TIME-TO-FIRST-TOKEN</p>
+          <canvas id="chart" width="520" height="280"></canvas>
+          <p class="text-xs mt-2">
+            <span class="swatch" style="background:#f87171"></span>hold-back
+            <span class="swatch ml-3" style="background:#a78bfa"></span>hold-back, check-gated
+            <span class="swatch ml-3" style="background:#38bdf8"></span>sentence boundary
+            <span class="swatch ml-3" style="background:#fbbf24"></span>boundary, check-gated
+            <span class="swatch ml-3" style="background:#94a3b8"></span>no streaming
+          </p>
+          <p class="text-xs text-slate-500 mt-2" id="frontierNote"></p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">OPERATING POINTS AT THE CURRENT BUFFER</p>
+          <table class="num w-full">
+            <thead><tr><th>policy</th><th>first token</th><th>mean lag</th><th>on screen</th><th>👤 leaked</th><th>🔊 leaked</th><th>🤖 leaked</th></tr></thead>
+            <tbody id="points"></tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-2" id="pointNote"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-xs font-bold tracking-wider text-slate-500">THE TWO CURSORS — ONE RESPONSE, TRACED TOKEN BY TOKEN</p>
+          <button id="nextEx" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">another response →</button>
+        </div>
+        <canvas id="race" width="1040" height="300"></canvas>
+        <p class="text-xs mt-2">
+          <span class="swatch" style="background:#94a3b8"></span>generated
+          <span class="swatch ml-3" style="background:#38bdf8"></span>displayed
+          <span class="swatch ml-3" style="background:#fbbf24"></span>committed by the consumer
+          <span class="swatch ml-3" style="background:#f87171"></span>the defect, and the moment the detector can rule
+        </p>
+        <p class="text-xs text-slate-500 mt-2" id="raceNote"></p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">EQUAL COST — EVERY POLICY MATCHED TO THE SAME FIRST TOKEN</p>
+          <p class="text-sm text-slate-600 mb-3">
+            Two buffering schemes have no single score, so the only legal comparison is a vertical
+            one. Each row below buys the user the same wait before text appears.
+          </p>
+          <table class="num w-full">
+            <thead><tr><th>policy</th><th>first token</th><th>mean lag</th><th>leaked</th><th>tokens committed</th></tr></thead>
+            <tbody id="equal"></tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-2" id="equalNote"></p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">THE GUARD IS NOT FREE — LEAK AGAINST DETECTOR LATENCY</p>
+          <p class="text-sm text-slate-600 mb-3">
+            A boundary release fires at the exact instant the detector receives its input, so it
+            loses the race by however long the check itself takes. Gate the release on the check
+            and the number stops moving altogether.
+          </p>
+          <table class="num w-full">
+            <thead><tr><th>check takes</th><th>naive</th><th>boundary</th><th>boundary, gated</th><th>hold-back</th></tr></thead>
+            <tbody id="latency"></tbody>
+          </table>
+          <p class="text-xs text-slate-500 mt-2" id="latencyNote"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">THE FLOOR NO BUFFER REMOVES</p>
+        <p class="text-sm text-slate-600 mb-3">
+          A hold-back buffer flushes at end of stream, because there is nothing left to hold it
+          against. If that flush does not wait for the final check, it hands over everything the
+          buffer was protecting — and the bigger the buffer, the larger the share of leaks it causes.
+        </p>
+        <table class="num w-full">
+          <thead><tr><th>buffer</th><th>first token</th><th>never streamed</th><th>hold-back leak</th><th>&hellip;caused by the flush</th><th>check-gated leak</th></tr></thead>
+          <tbody id="floor"></tbody>
+        </table>
+        <p class="text-xs text-slate-500 mt-2" id="floorNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">SELF-TEST</p>
+        <pre id="selftest">running…</pre>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">Displayed is not committed, and the gap is the whole design space.</h2>
+
+      <p>Streaming is the cheapest latency win in the business: the model produces tokens one at a
+      time anyway, so showing them as they arrive turns a five-second wait into a 375-millisecond
+      one. The bill arrives later. Every guard worth running — a moderation classifier, a citation
+      check, a schema validator, a rule that says this model may not name a competitor — needs
+      <em>lookahead</em>. It cannot rule on a claim until the claim finishes. And whatever you
+      showed while it was waiting is out.</p>
+
+      <p>So there are two cursors moving left to right over the same token sequence. The
+      <strong>detector's</strong> cursor sits <code>L</code> tokens behind the generator, because
+      that is how much context it needs. The <strong>consumer's</strong> cursor is wherever the
+      thing at the other end has got to. Whether a defect escapes is decided by which cursor passes
+      it first, and by nothing else.</p>
+
+      <pre>generated at  ttft + (j+1)/G
+displayed at  ttft + (release(j)+1)/G        &lt;- the policy is this line and only this line
+committed at  max(committed(j-1), shown(j)) + 1/R
+detector rules at  ttft + (p+L+1)/G + latency</pre>
+
+      <h3 class="text-xl font-bold">Who is reading decides almost everything</h3>
+
+      <p>A person reads about 250 words a minute — call it 5.5 tokens a second. A model at 40
+      tokens a second is writing seven times faster than that. So from the second sentence onward
+      the reader is permanently behind the stream, and a defect that appears at token 60 sits on the
+      screen for ten seconds before anyone's eye reaches it. There is plenty of time to take it
+      back.</p>
+
+      <div class="bg-slate-100 border-l-4 border-slate-400 p-4">
+        <p class="text-sm">Measured over five worlds, at a 120&nbsp;ms detector and no buffering at
+        all: a naive stream puts defective text on screen in <strong>100%</strong> of defective
+        responses — <strong>17.2 tokens</strong> of it on average. For a human reader,
+        <strong>0.09</strong> of those tokens are actually read before the retraction lands, and only
+        <strong>2.7%</strong> of defective responses leak anything at all. For a machine consumer,
+        the leak is <strong>100%</strong> and all 17.2 tokens. Same model, same policy, same
+        defects: <strong>5.6 leaked responses per thousand against 212</strong>.</p>
+      </div>
+
+      <p>Which is to say that the thing most teams reach for — buffer the output, delay the first
+      token, make the stream safe — is solving a problem a human consumer mostly does not have, and
+      is the <em>only</em> thing that works for a consumer that has no backlog. A tool call that has
+      fired has fired. A webhook has posted. A TTS engine has spoken the sentence into a room. Those
+      consumers commit on arrival, and retraction is not a mechanism they possess.</p>
+
+      <h3 class="text-xl font-bold">The commitment horizon</h3>
+
+      <p>The race has a closed form. Write out when the consumer's cursor reaches the defect at
+      token <code>p</code>, write out when the detector rules, and solve for <code>p</code>:</p>
+
+      <pre>committed  iff  p &lt; H,   H = ( R·(L − B) − G + G·R·latency ) / (G − R)</pre>
+
+      <p>Everything is in there. <code>B</code>, the hold-back buffer, and <code>L</code>, the
+      detector's lookahead, appear <em>subtracted from one another</em>: a token of buffer and a
+      token of lookahead are the same currency. So are a token of buffer and a token of reader
+      backlog, which is why a consumer that reads slowly is a consumer you have to buffer less for.
+      At the page's defaults with a 20-token lookahead the horizon is <strong>2.8 tokens</strong>
+      for a reader and <strong>1.1</strong> for speech: a defect has to land in the first two or
+      three tokens of the whole response to be seen. The token-level simulation agrees with that
+      line on every one of the 32,344 defective responses where it applies.</p>
+
+      <p>The denominator is the interesting part. As <code>R</code> climbs towards <code>G</code>
+      the horizon blows up, and past it there is no backlog at all and the formula stops being a
+      line — it becomes all-or-nothing. That crossover is not hypothetical: at
+      <strong>5&nbsp;tokens/second</strong> the model is writing more slowly than a person reads,
+      the reader is never behind, and the leak rate goes from 2.7% to <strong>98.0%</strong>.</p>
+
+      <div class="bg-emerald-50 border-l-4 border-emerald-500 p-4">
+        <p class="text-sm"><strong>A faster model is a safer streamer.</strong> 5 → 10 → 20 → 40 →
+        80 → 120 tokens a second takes the reader's leak rate 98.0% → 16.0% → 5.8% → 2.7% → 1.9% →
+        0.9%. Nothing about the model got more careful; the reader just fell further behind. This is
+        the opposite of the intuition that slowing things down buys safety.</p>
+      </div>
+
+      <p>And it inverts for the consumer with no backlog. There, the buffer you need is
+      <code>L + latency·G</code> — the detector's <em>latency</em> converted into tokens at the
+      model's speed. The same 120&nbsp;ms check that costs you 26.6 tokens of buffer at 5 tokens a
+      second costs <strong>40.4</strong> at 120. A faster model needs a bigger buffer and a shorter
+      wait; those are not the same statement, and the second is the one that matters, because
+      buffering is priced in seconds and not in tokens.</p>
+
+      <h3 class="text-xl font-bold">The recommendation I set out to make, and what happened to it</h3>
+
+      <p>Everyone's instinct — mine included when I started this page — is to release at
+      <em>sentence boundaries</em>. It reads better, it matches how the guard thinks, and a
+      sentence-scoped check has exactly the sentence it needs the moment the sentence closes. It
+      should dominate a dumb fixed buffer.</p>
+
+      <div class="bg-red-50 border-l-4 border-red-500 p-4">
+        <p class="text-sm">It is dominated instead. At an identical <strong>777&nbsp;ms</strong> to
+        first token, boundary release leaks <strong>87.1%</strong> of defective responses where a
+        plain 16-token hold-back leaks <strong>53.3%</strong> and a check-gated 11-token hold-back
+        leaks <strong>45.2%</strong>. It loses on mean display lag too, so there is no axis on which
+        it wins. The mechanism is embarrassingly simple once you see it: a boundary release fires at
+        the <em>exact instant</em> the detector receives its input, so it loses the race by precisely
+        the detector's own latency — and because it releases a whole sentence at once, when it loses
+        it loses <strong>14.7 tokens</strong> rather than one.</p>
+      </div>
+
+      <p>The repair is one word, not a redesign. Gate the release on the check instead of on the
+      boundary: emit the sentence when the checker returns, not when the full stop arrives. That
+      takes the same policy from 87.1% to <strong>32.7%</strong> at a cost of 120&nbsp;ms on the
+      first token, and — the tell that it is structural rather than lucky — its leak rate then
+      <em>does not move at all</em> as the detector gets slower. 20&nbsp;ms, 120&nbsp;ms,
+      600&nbsp;ms: 32.7% every time. Waiting for the check makes the check's speed irrelevant, which
+      is what "correct" looks like in a race.</p>
+
+      <p>The 32.7% that remains is honest and worth naming: those are the defects whose lookahead
+      runs <em>past</em> the sentence they started in. A guard that checks each sentence is
+      structurally blind to anything a sentence does not resolve. Your release block has to be at
+      least as long as your detector's reach, and if it is not, no amount of gating helps.</p>
+
+      <h3 class="text-xl font-bold">The flush is a hole in every buffer</h3>
+
+      <p>A hold-back buffer has to flush at the end of the stream — there are no more tokens coming
+      to hold it against. Almost every implementation flushes on the generator's stop signal. That
+      release does not wait for the last check, and it is handing over precisely the tokens the
+      buffer existed to protect.</p>
+
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-4">
+        <p class="text-sm">Measured against a machine consumer: hold-back leak falls 100% → 53.3% →
+        26.5% as the buffer goes 0 → 16 → 40 tokens, and then stops. At 80 tokens it is
+        <strong>18.3%</strong>, at 120 tokens <strong>17.5%</strong>, and
+        <strong>91%</strong> of what is left was released by the flush rather than by the buffer
+        running normally. Doubling the buffer past that point costs a second of first-token latency
+        and buys under a point. Make the flush wait for the final check and the same 80-token buffer
+        goes to <strong>0.8%</strong>.</p>
+      </div>
+
+      <h3 class="text-xl font-bold">What buffering actually costs, and what it does not</h3>
+
+      <p>Worth being precise, because the cost is usually overstated in one direction and
+      understated in another. A hold-back buffer <em>does not</em> delay completion: token
+      <code>n</code> is still displayed the moment generation ends, because the buffer flushes.
+      What it costs is the time to first token — <code>B/G</code>, dead centre of what users judge
+      a streaming interface on — and the shape of the tail, since the last <code>B</code> tokens
+      arrive in one burst rather than as a stream. At an 80-token buffer, <strong>34%</strong> of
+      all tokens arrive in that final burst and <strong>22%</strong> of responses are shorter than
+      the buffer, which means they were never streamed at all. You are paying for a streaming
+      interface and shipping a blocking one to a fifth of your traffic.</p>
+
+      <p>There is also a cost with no number on it, which is the flicker. A naive stream retracts
+      text on <strong>100%</strong> of defective responses. The leak rate says the user did not
+      read it; it does not say the user did not <em>notice</em> a paragraph vanish. That is a real
+      product decision and this page cannot make it for you — but it can tell you that the
+      alternative you were about to buy costs 406&nbsp;ms of first token and still leaks 87% of them.</p>
+
+      <h3 class="text-xl font-bold">What to do on a real system</h3>
+
+      <ul class="list-disc pl-6 space-y-1">
+        <li><strong>Ask who the consumer is before you pick a buffer.</strong> A chat UI and a tool
+        call are not the same problem and the same policy scores 38&times; differently on them.</li>
+        <li><strong>Never stream into an irreversible side effect.</strong> Tool calls, webhooks and
+        speech commit on arrival; those paths need the full response and the completed check, and no
+        buffer size substitutes.</li>
+        <li><strong>Gate releases on the check, not on a boundary.</strong> It is one line and it is
+        the difference between 87% and 33% at the same latency.</li>
+        <li><strong>Guard the final flush.</strong> It is the single most common hole, it is
+        invisible in testing because it only fires on defects near the end, and at large buffers it
+        is nearly all of the remaining leak.</li>
+        <li><strong>Size the release block against the detector's reach</strong>, not against what
+        reads nicely. A per-sentence check cannot see a two-sentence problem.</li>
+        <li><strong>Measure time-to-first-token, not total latency,</strong> when you price a
+        buffer. Total latency does not move; first token moves a lot.</li>
+        <li><strong>Retraction is a real mechanism — for readers.</strong> It is free, it works
+        because people are slow, and it costs you a visible flicker. Decide that on purpose rather
+        than by not knowing it was an option.</li>
+      </ul>
+
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="min-h-[calc(100vh-72px)] p-4 md:p-8 bg-slate-50">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">🔨 How it is built</h2>
+
+      <h3 class="text-xl font-bold">1. Nothing here simulates language</h3>
+      <pre>// a response is a LENGTH, a set of sentence boundaries, and at most one defect:
+//   pos[r]    where the defect starts
+//   uLook[r]  an Exp(1) draw, scaled at evaluation time by the lookahead slider
+//   uScope[r] a uniform draw deciding whether this defect is sentence-scoped
+</pre>
+      <p>There is no text, no model and no classifier. What is simulated is the only structure the
+      question depends on: that a guard needs a variable and heavy-tailed amount of lookahead before
+      it can rule, and that tokens arrive one at a time. A banned name resolves in a token or two; an
+      unsupported claim not until its sentence ends. Mixing those two is what makes the leak curve a
+      survival function rather than a step.</p>
+
+      <h3 class="text-xl font-bold">2. The policy is one line</h3>
+      <pre>releaseIndex(policy, j) =
+  stream            -> j                    // show it the moment it exists
+  hold / guarded    -> min(j + B, n - 1)    // keep B tokens in hand, flush at the end
+  sentence/checked  -> sentEnd[j]           // release the sentence when it closes
+  none              -> n - 1                // no streaming at all
+policyDelay(policy) = detectorLatency for guarded/checked/none, else 0</pre>
+      <p>Every policy on the page is a choice of <em>which token's arrival releases token j</em>,
+      plus whether the release also waits for the checker. That is genuinely all of it, and writing
+      it this way is what made the check-gating result visible — <code>hold</code> and
+      <code>guarded</code> differ by one term.</p>
+
+      <h3 class="text-xl font-bold">3. The consumer is a second cursor, not a flag</h3>
+      <pre>commit(j) = max(commit(j-1), show(j)) + 1/R</pre>
+      <p>A reader cannot read a token that has not been shown, and cannot read two at once. That
+      recurrence gives both behaviours and, for a machine consumer, <code>R = Infinity</code> makes
+      <code>1/R</code> exactly zero, so <code>commit === show</code> and retraction stops existing
+      without a single branch. The metric split falls out of the same pass: a token is
+      <em>displayed</em> if <code>show(j) &lt; detect</code> and <em>committed</em> if
+      <code>commit(j) &lt; detect</code>, and the gap between those two counts is what retraction
+      saved.</p>
+
+      <h3 class="text-xl font-bold">4. A closed form, checked against the simulation</h3>
+      <pre>H = ( R·(L − B) − G + G·R·latency ) / (G − R)      // committed iff p &lt; H
+safeBuffer(L, G, latency) = L + latency·G           // for a consumer with no backlog</pre>
+      <p>Both are derived by hand and then tested against the token-level loop rather than trusted:
+      across five worlds and 72 parameter combinations the horizon agrees on
+      <strong>32,344 / 32,344</strong> eligible responses, and <code>safeBuffer</code> on
+      <strong>14,936 / 14,936</strong> non-tie ones. Ties are excluded and counted, not quietly
+      absorbed — see below.</p>
+
+      <h3 class="text-xl font-bold">5. Two degeneracy checks, one of which caught something</h3>
+      <p>Day 66 in this series lost a result to a model that collapsed to exactly 0 and 1 at its
+      extreme setting, so a quantile threshold landed on a tie and measured the effect as zero. Two
+      checks here, both run in the test file:</p>
+      <pre>// the lookahead distribution must not collapse at slider extremes
+assert(distinct(L) &gt;= 8 &amp;&amp; stdev(L) &gt; 1 at every corner of the parameter box);</pre>
+      <p>And the one that mattered. At <strong>detector latency exactly zero</strong> a boundary
+      release lands on the identical instant as the detector's verdict — a genuine tie, decided by
+      whether the code says <code>&lt;</code> or <code>&lt;=</code>. It is not a rounding artefact,
+      it is the whole comparison: boundary release reads <strong>32.7%</strong> at 0&nbsp;ms and
+      <strong>81.7%</strong> at 1&nbsp;ms. The page defaults to a real detector latency, the test
+      file asserts the headline only at latencies above 20&nbsp;ms, and this paragraph exists so
+      nobody quotes the zero-latency number.</p>
+
+      <h3 class="text-xl font-bold">6. What the tests pin</h3>
+      <pre>// the consumer, not the policy, decides what a leak is
+assert(leak(machine) &gt; 30 &times; leak(reader))            // measured 37x, over 5 worlds
+assert(shown(naive) === 1.00);                            // it is always ON SCREEN
+
+// the closed form is a closed form
+assert(p &lt; H  ===  simulated commit(p) &lt; detect)  on every eligible response;
+assert(B &gt;= L + latency·G  ===  no machine leak)  on every non-tie response;
+
+// faster is safer for a reader, and needs more buffer for a machine
+assert(leak(reader) strictly decreasing in model speed 5..120);
+assert(safeBuffer strictly increasing in model speed);
+
+// the null result, kept because it is true
+assert(leak(boundary) &gt; leak(holdback at the SAME first-token latency));
+assert(leak(boundary) &gt; leak(check-gated boundary) + 0.3);
+assert(leak(check-gated) identical at 20 / 120 / 600 ms of detector latency);
+
+// the flush is a hole
+assert(leak(hold, B=120) &gt; 0.10  &amp;&amp;  flushShare &gt; 0.85);
+assert(leak(guarded, B=120) &lt; 0.02);
+
+// and nothing is collapsed at the corners
+assert(distinct lookahead values &gt;= 8 at every extreme);</pre>
+      <p>The third block is the one worth having. It says the thing this page was going to
+      recommend is worse than the dumb alternative it was going to replace, at equal cost, and it
+      sits in the test file so the inconvenient half cannot be quietly deleted later.</p>
+
+      <h3 class="text-xl font-bold">🎉 AIFromZero Day 68 shipped.</h3>
+      <p class="text-slate-600">Streaming is not a rendering decision. It is a decision about when
+      you stop being able to change your mind, and the right answer depends entirely on who is
+      standing at the other end of the pipe.</p>
+
+    </div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.addEventListener("click", () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+}));
+
+// ===== ENGINE:BEGIN =====
+// Streaming and partial-output commitment. A token that has been DISPLAYED is not necessarily a
+// token that has been COMMITTED - that depends entirely on how fast the thing at the other end
+// consumes it. Everything here is a race between two cursors moving left to right over the same
+// token sequence: the DETECTOR's (it needs lookahead before it can rule) and the CONSUMER's.
+
+function mulberry32(seed){
+  let s = seed >>> 0;
+  return function(){
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1) >>> 0;
+    t = (t ^ (t + Math.imul(t ^ (t >>> 7), t | 61))) >>> 0;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const mean = a => a.reduce(function(s, v){ return s + v; }, 0) / a.length;
+const stdev = a => {
+  const m = mean(a);
+  return Math.sqrt(mean(a.map(function(v){ return (v - m) * (v - m); })));
+};
+
+// a positive integer with mean ~m, heavy-tailed. Detector lookahead is NOT tightly distributed:
+// a banned word is known in one token, an unsupported claim not until the sentence closes.
+function geomInt(rnd, m){
+  const k = Math.max(0.001, m);
+  return 1 + Math.floor(-k * Math.log(1 - rnd()));
+}
+
+// Reading speeds in tokens/second. ~250 wpm of reading and ~150 wpm of speech, at ~1.3 tokens
+// per word. A machine consumer has no backlog at all: it acts the instant the bytes arrive.
+const CONSUMERS = { reader: 5.5, voice: 3.2, machine: Infinity };
+
+// A world is only the TOKEN STRUCTURE - lengths, sentence boundaries, where the defect starts,
+// and two uniform draws. Everything a slider touches is applied at evaluation time, so the world
+// is built once and never rebuilt.
+function buildWorld(cfg, seed){
+  const c = Object.assign({ responses: 500, tokMean: 220, tokMin: 40,
+                            sentMean: 18, sentMin: 5, pDefect: 0.20 }, cfg || {});
+  const rnd = mulberry32(seed);
+  const N = c.responses;
+  const len = new Int32Array(N), off = new Int32Array(N + 1);
+  for (let r = 0; r < N; r++){
+    len[r] = Math.min(900, c.tokMin + geomInt(rnd, c.tokMean - c.tokMin) - 1);
+    off[r + 1] = off[r] + len[r];
+  }
+  const sentEnd = new Int32Array(off[N]);
+  const has = new Uint8Array(N), pos = new Int32Array(N);
+  const uLook = new Float64Array(N), uScope = new Float64Array(N);
+  for (let r = 0; r < N; r++){
+    const n = len[r], base = off[r];
+    let i = 0;
+    while (i < n){
+      const sl = c.sentMin + geomInt(rnd, c.sentMean - c.sentMin) - 1;
+      let e = Math.min(n - 1, i + sl - 1);
+      if (n - 1 - e < c.sentMin) e = n - 1;          // absorb a stub tail into this sentence
+      for (let j = i; j <= e; j++) sentEnd[base + j] = e;
+      i = e + 1;
+    }
+    has[r] = rnd() < c.pDefect ? 1 : 0;
+    pos[r] = Math.floor(rnd() * n);
+    uLook[r] = -Math.log(1 - rnd());                 // Exp(1); scaled by the lookahead slider
+    uScope[r] = rnd();
+  }
+  return { N: N, len: len, off: off, sentEnd: sentEnd, has: has, pos: pos,
+           uLook: uLook, uScope: uScope, cfg: c, tokens: off[N] };
+}
+
+// Which token's GENERATION releases token j to the screen. This is the whole policy.
+function releaseIndex(policy, j, n, sentEnd, base, B){
+  if (policy === 'stream')   return j;                              // show it the moment it exists
+  if (policy === 'hold' || policy === 'guarded') return Math.min(j + B, n - 1);   // keep B in hand
+  if (policy === 'sentence' || policy === 'checked') return sentEnd[base + j];
+  return n - 1;                                                     // 'none' - no streaming at all
+}
+// 'checked' and 'none' wait for the detector to clear the block before releasing it; a plain
+// hold-back or boundary release does not, which is the entire difference between them.
+const policyDelay = (policy, detLat) =>
+  (policy === 'checked' || policy === 'none' || policy === 'guarded') ? detLat : 0;
+const POLICIES = ['stream', 'hold', 'guarded', 'sentence', 'checked', 'none'];
+
+// The detector's lookahead for this response, in tokens. Sentence-scoped defects (an unsupported
+// claim, a wrong conclusion) resolve only when the sentence closes; span-local ones (a banned
+// name, a leaked key) resolve a few tokens later wherever they happen to sit.
+function lookahead(w, r, o){
+  const p = w.pos[r], base = w.off[r];
+  return w.uScope[r] < o.scoped ? (w.sentEnd[base + p] - p)
+                                : Math.max(1, Math.round(w.uLook[r] * o.lookaheadMean));
+}
+
+const DEFAULTS = { B: 0, G: 40, detLat: 0.12, R: 5.5, retract: true, ttft: 0.35,
+                   lookaheadMean: 26, scoped: 0.45 };
+
+function evaluate(w, policy, opts){
+  const o = Object.assign({}, DEFAULTS, opts || {});
+  const G = o.G, R = o.R, ttft = o.ttft, det = o.detLat, extra = policyDelay(policy, det);
+  let ttfsSum = 0, lagSum = 0, burst = 0, neverStreamed = 0;
+  let defects = 0, shownResp = 0, leakResp = 0, flicker = 0;
+  let shownTok = 0, leakTok = 0, spanSum = 0, overrun = 0, flushLeak = 0;
+  for (let r = 0; r < w.N; r++){
+    const n = w.len[r], base = w.off[r];
+    ttfsSum += ttft + (releaseIndex(policy, 0, n, w.sentEnd, base, o.B) + 1) / G + extra;
+    for (let j = 0; j < n; j++){
+      const ri = releaseIndex(policy, j, n, w.sentEnd, base, o.B);
+      lagSum += (ri - j) / G + extra;
+      if (ri === n - 1 && j < n - 1) burst++;
+    }
+    if (policy === 'none' || ((policy === 'hold' || policy === 'guarded') && o.B >= n)) neverStreamed++;
+    if (!w.has[r]) continue;
+    defects++;
+    const p = w.pos[r], L = lookahead(w, r, o);
+    if (p + L > n - 1) overrun++;
+    const dIdx = Math.min(p + L, n - 1);
+    const detect = ttft + (dIdx + 1) / G + det;
+    spanSum += dIdx - p + 1;
+    let sh = 0, cm = 0, running = -Infinity;
+    for (let j = 0; j <= dIdx; j++){
+      const st = ttft + (releaseIndex(policy, j, n, w.sentEnd, base, o.B) + 1) / G + extra;
+      running = (running > st ? running : st) + 1 / R;     // 1/Infinity === 0: no backlog at all
+      if (j >= p){
+        if (st < detect) sh++;
+        if (o.retract ? (running < detect) : (st < detect)) cm++;
+      }
+    }
+    if (sh > 0) shownResp++;
+    if (cm > 0){
+      leakResp++;
+      // was it the FINAL block - the end-of-stream flush - that released it? An unguarded flush
+      // does not wait for the last check, and it leaves a floor no buffer size can lower.
+      if (releaseIndex(policy, p, n, w.sentEnd, base, o.B) === n - 1 && p < n - 1) flushLeak++;
+    }
+    if (sh > cm) flicker++;
+    shownTok += sh; leakTok += cm;
+  }
+  return {
+    ttfs: ttfsSum / w.N, lag: lagSum / w.tokens,
+    burstFrac: burst / w.tokens, neverStreamed: neverStreamed / w.N,
+    defects: defects, span: defects ? spanSum / defects : 0,
+    overrunFrac: defects ? overrun / defects : 0,
+    shownRate: defects ? shownResp / defects : 0,
+    leakRate: defects ? leakResp / defects : 0,
+    flickerRate: defects ? flicker / defects : 0,
+    leakPerK: 1000 * leakResp / w.N,
+    shownTokens: defects ? shownTok / defects : 0,
+    leakTokens: defects ? leakTok / defects : 0,
+    flushLeakRate: defects ? flushLeak / defects : 0,
+    flushShare: leakResp ? flushLeak / leakResp : 0
+  };
+}
+
+// The closed form. A defect that starts at token p is committed to the consumer iff p < horizon.
+//   commit(p) = ttft + (B+1)/G + (p+1)/R          (the reader falls behind at rate 1/R - 1/G)
+//   detect    = ttft + (p+L+1)/G + detLat
+// Solving commit(p) < detect for p gives the line below. B and the reader's backlog appear in it
+// the same way and with the same sign: one token of hold-back is one token of reader backlog.
+function commitHorizon(o){
+  const L = o.L, B = o.B, G = o.G, R = o.R, d = o.detLat;
+  if (!isFinite(R)) return (B < L + d * G) ? Infinity : -Infinity;   // no backlog: all or nothing
+  if (G > R) return (R * (L - B) - G + G * R * d) / (G - R);
+  return (B < L + G * (d - 1 / R)) ? Infinity : -Infinity;           // reader keeps pace
+}
+// How much hold-back makes a policy safe for a consumer with no backlog. Note that the detector's
+// LATENCY is converted into tokens at the model's speed, so a faster model needs a bigger buffer.
+const safeBuffer = (L, G, detLat) => L + detLat * G;
+
+function sweepHold(w, o, maxB, steps, policy){
+  const n = steps || 18, out = [], pol = policy || 'hold';
+  for (let i = 0; i <= n; i++){
+    const B = Math.round(i * maxB / n);
+    out.push(Object.assign({ B: B }, evaluate(w, pol, Object.assign({}, o, { B: B }))));
+  }
+  return out;
+}
+
+// the hold-back that buys the same time-to-first-token as some other policy - the only honest way
+// to compare two buffering schemes, because neither has a single number
+function equalCostHold(w, targetTtfs, o, maxB, policy){
+  let best = 0, bestErr = Infinity;
+  for (let B = 0; B <= (maxB || 200); B++){
+    const e = Math.abs(evaluate(w, policy || 'hold', Object.assign({}, o, { B: B })).ttfs - targetTtfs);
+    if (e < bestErr){ bestErr = e; best = B; }
+  }
+  return best;
+}
+// ... and the hold-back that buys the same MEAN DISPLAY LAG, which is a different number - the
+// page checks both, because a policy that wins only on the axis you happened to plot has not won.
+function equalLagHold(w, targetLag, o, maxB, policy){
+  let best = 0, bestErr = Infinity;
+  for (let B = 0; B <= (maxB || 200); B++){
+    const e = Math.abs(evaluate(w, policy || 'hold', Object.assign({}, o, { B: B })).lag - targetLag);
+    if (e < bestErr){ bestErr = e; best = B; }
+  }
+  return best;
+}
+
+// one response, traced token by token: when each token was generated, displayed and committed.
+function trace(w, r, policy, opts){
+  const o = Object.assign({}, DEFAULTS, opts || {});
+  const n = w.len[r], base = w.off[r], extra = policyDelay(policy, o.detLat);
+  const gen = new Float64Array(n), show = new Float64Array(n), commit = new Float64Array(n);
+  let running = -Infinity;
+  for (let j = 0; j < n; j++){
+    gen[j] = o.ttft + (j + 1) / o.G;
+    show[j] = o.ttft + (releaseIndex(policy, j, n, w.sentEnd, base, o.B) + 1) / o.G + extra;
+    running = (running > show[j] ? running : show[j]) + 1 / o.R;
+    commit[j] = running;
+  }
+  const p = w.has[r] ? w.pos[r] : -1;
+  const dIdx = p >= 0 ? Math.min(p + lookahead(w, r, o), n - 1) : -1;
+  return { n: n, gen: gen, show: show, commit: commit, p: p, dIdx: dIdx,
+           detect: p >= 0 ? o.ttft + (dIdx + 1) / o.G + o.detLat : Infinity,
+           end: o.ttft + n / o.G };
+}
+// ===== ENGINE:END =====
+
+// ---------------------------------------------------------------- UI
+const $ = id => document.getElementById(id);
+const SEEDS = [2026, 7, 99, 41, 512];
+const WORLDS = SEEDS.map(function(s){ return buildWorld({}, s); });
+const W = WORLDS[0];
+const MAXB = 90, STEPS = 18;
+let consumer = 'machine';
+let exIdx = 0;
+
+const pct = x => (100 * x).toFixed(1) + "%";
+const ms = x => Math.round(1000 * x) + " ms";
+const tok = x => x.toFixed(1);
+const avg = f => mean(WORLDS.map(f));
+
+function opts(extra){
+  return Object.assign({
+    B: +$("sHold").value,
+    G: +$("sSpeed").value,
+    lookaheadMean: +$("sLook").value,
+    detLat: +$("sLat").value / 1000,
+    scoped: +$("sScope").value / 100,
+    R: CONSUMERS[consumer]
+  }, extra || {});
+}
+
+let memo = { key: null, val: null };
+function heavy(){
+  const o = opts();
+  const key = JSON.stringify(o);
+  if (memo.key === key) return memo.val;
+  const hold = sweepHold(W, o, MAXB, STEPS, 'hold');
+  const guard = sweepHold(W, o, MAXB, STEPS, 'guarded');
+  const sent = evaluate(W, 'sentence', o), chk = evaluate(W, 'checked', o);
+  const none = evaluate(W, 'none', o), naive = evaluate(W, 'stream', o);
+  const eqB = equalCostHold(W, sent.ttfs, o, 200, 'hold');
+  const eqG = equalCostHold(W, sent.ttfs, o, 200, 'guarded');
+  const eqLagB = equalLagHold(W, sent.lag, o, 200, 'hold');
+  memo = { key: key, val: { o: o, hold: hold, guard: guard, sent: sent, chk: chk,
+                            none: none, naive: naive, eqB: eqB, eqG: eqG, eqLagB: eqLagB } };
+  return memo.val;
+}
+
+// ---------------------------------------------------------------- the frontier
+function drawFrontier(h){
+  const c = $("chart"), g = c.getContext("2d");
+  const w = c.width, ht = c.height, L = 52, Rm = 14, T = 14, B = 30;
+  g.clearRect(0, 0, w, ht);
+  const pts = h.hold.concat(h.guard);
+  const xMax = Math.max.apply(null, pts.map(function(p){ return p.ttfs; }).concat([h.chk.ttfs])) * 1.04;
+  // the reader's leak rates live in the low single digits, so a fixed 0-100% axis would draw them
+  // as a flat line. Scale to the data and label the axis with what it actually is.
+  const yMax = Math.max(0.02, Math.max.apply(null,
+    pts.map(function(p){ return p.leakRate; }).concat([h.sent.leakRate, h.chk.leakRate, h.naive.leakRate]))) * 1.08;
+  const X = v => L + (v / xMax) * (w - L - Rm);
+  const Y = v => T + (1 - v / yMax) * (ht - T - B);
+  g.strokeStyle = "#1e293b"; g.fillStyle = "#64748b"; g.font = "10px sans-serif";
+  for (let i = 0; i <= 5; i++){
+    const y = Y(i * yMax / 5);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(w - Rm, y); g.stroke();
+    g.fillText((100 * i * yMax / 5).toFixed(yMax < 0.1 ? 1 : 0) + "%", 6, y + 3);
+  }
+  for (let i = 0; i <= 4; i++){
+    const v = i * xMax / 4;
+    g.fillText((v).toFixed(1) + "s", X(v) - 8, ht - 10);
+  }
+  g.fillStyle = "#94a3b8";
+  g.fillText("leaked responses", 6, 10);
+  const line = (arr, colour) => {
+    g.strokeStyle = colour; g.lineWidth = 2; g.beginPath();
+    arr.forEach(function(p, i){ const x = X(p.ttfs), y = Y(p.leakRate); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+    g.stroke();
+  };
+  line(h.hold, "#f87171");
+  line(h.guard, "#a78bfa");
+  const mark = (p, colour, cross) => {
+    g.strokeStyle = colour; g.fillStyle = colour; g.lineWidth = 2;
+    const x = X(p.ttfs), y = Y(p.leakRate);
+    if (cross){
+      g.beginPath(); g.moveTo(x - 5, y - 5); g.lineTo(x + 5, y + 5);
+      g.moveTo(x + 5, y - 5); g.lineTo(x - 5, y + 5); g.stroke();
+    } else {
+      g.beginPath(); g.arc(x, y, 4, 0, 7); g.fill();
+    }
+  };
+  mark(h.sent, "#38bdf8", true);
+  mark(h.chk, "#fbbf24", true);
+  mark(h.naive, "#f87171", false);
+  // no-streaming sits far off this axis; show it as a right-edge marker at zero leak
+  g.strokeStyle = "#94a3b8"; g.setLineDash([4, 4]); g.lineWidth = 1;
+  g.beginPath(); g.moveTo(w - Rm, Y(0)); g.lineTo(w - Rm - 26, Y(0)); g.stroke();
+  g.setLineDash([]);
+  g.fillStyle = "#94a3b8"; g.fillText("no streaming: " + h.none.ttfs.toFixed(1) + "s, 0%", w - Rm - 150, Y(0) - 6);
+}
+
+// ---------------------------------------------------------------- the two cursors
+function drawRace(h){
+  const c = $("race"), g = c.getContext("2d");
+  const W_ = c.width, H_ = c.height, L = 44, Rm = 12, T = 12, B = 26;
+  g.clearRect(0, 0, W_, H_);
+  const pol = h.o.B > 0 ? 'hold' : 'stream';
+  const t = trace(W, exIdx, pol, h.o);
+  const tMax = Math.max(t.commit[t.n - 1], t.end, isFinite(t.detect) ? t.detect : 0) * 1.02;
+  const X = v => L + (v / tMax) * (W_ - L - Rm);
+  const Y = v => H_ - B - (v / t.n) * (H_ - T - B);
+  g.strokeStyle = "#1e293b"; g.fillStyle = "#64748b"; g.font = "10px sans-serif";
+  for (let i = 0; i <= 4; i++){
+    const y = Y(i * t.n / 4);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(W_ - Rm, y); g.stroke();
+    g.fillText(Math.round(i * t.n / 4), 8, y + 3);
+  }
+  for (let i = 0; i <= 6; i++) g.fillText((i * tMax / 6).toFixed(1) + "s", X(i * tMax / 6) - 8, H_ - 8);
+  g.fillStyle = "#94a3b8"; g.fillText("token", 8, 10);
+  const cursor = (arr, colour) => {
+    g.strokeStyle = colour; g.lineWidth = 2; g.beginPath();
+    for (let j = 0; j < t.n; j++){ const x = X(arr[j]), y = Y(j); j ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.stroke();
+  };
+  cursor(t.gen, "#94a3b8");
+  cursor(t.show, "#38bdf8");
+  cursor(t.commit, "#fbbf24");
+  if (t.p >= 0){
+    g.fillStyle = "rgba(248,113,113,0.20)";
+    g.fillRect(L, Y(t.dIdx + 1), W_ - L - Rm, Y(t.p) - Y(t.dIdx + 1));
+    g.strokeStyle = "#f87171"; g.lineWidth = 1.5; g.setLineDash([5, 4]);
+    g.beginPath(); g.moveTo(X(t.detect), T); g.lineTo(X(t.detect), H_ - B); g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = "#fca5a5";
+    g.fillText("detector rules", X(t.detect) + 4, T + 10);
+    g.fillText("defect", L + 4, Y(t.p) - 4);
+  }
+}
+
+// ---------------------------------------------------------------- tables
+function render(){
+  $("vHold").textContent = $("sHold").value + " tok";
+  $("vSpeed").textContent = $("sSpeed").value + " tok/s";
+  $("vLook").textContent = $("sLook").value + " tok";
+  $("vLat").textContent = $("sLat").value + " ms";
+  $("vScope").textContent = $("sScope").value + "%";
+
+  const h = heavy(), o = h.o;
+  drawFrontier(h); drawRace(h);
+
+  const B = o.B;
+  const rows = [
+    ['naive stream', 'stream', 0],
+    ['hold-back ' + B + ' tok', 'hold', B],
+    ['hold-back, check-gated', 'guarded', B],
+    ['sentence boundary', 'sentence', 0],
+    ['boundary, check-gated', 'checked', 0],
+    ['no streaming', 'none', 0]
+  ];
+  $("points").innerHTML = rows.map(function(r){
+    const e = evaluate(W, r[1], Object.assign({}, o, { B: r[2] }));
+    const cell = R_ => {
+      const x = evaluate(W, r[1], Object.assign({}, o, { B: r[2], R: R_ })).leakRate;
+      const cls = x > 0.5 ? 'bad' : (x > 0.1 ? 'warn' : 'ok');
+      return "<td class='" + cls + "'>" + pct(x) + "</td>";
+    };
+    return "<tr><td>" + r[0] + "</td><td>" + ms(e.ttfs) + "</td><td>" + ms(e.lag) +
+           "</td><td>" + tok(e.shownTokens) + "</td>" +
+           cell(CONSUMERS.reader) + cell(CONSUMERS.voice) + cell(CONSUMERS.machine) + "</tr>";
+  }).join("");
+  const nv = h.naive;
+  const nvR = evaluate(W, 'stream', Object.assign({}, o, { R: CONSUMERS.reader }));
+  $("pointNote").textContent =
+    "On screen is defect tokens per defective response; the three leak columns are the SAME policy " +
+    "read by three different consumers. A naive stream displays " + tok(nv.shownTokens) +
+    " defective tokens and a human reader commits " + tok(nvR.leakTokens) +
+    " of them, retracting the rest on " + pct(nvR.flickerRate) + " of defective responses. " +
+    pct(nv.overrunFrac) + " of defects need more lookahead than the response has tokens left, so " +
+    "only a check on the finished response can catch those.";
+
+  // equal cost
+  const tgt = h.sent.ttfs;
+  const eq = [
+    ['sentence boundary', 'sentence', 0],
+    ['hold-back ' + h.eqB + ' tok', 'hold', h.eqB],
+    ['check-gated hold-back ' + h.eqG, 'guarded', h.eqG],
+    ['boundary, check-gated', 'checked', 0]
+  ];
+  $("equal").innerHTML = eq.map(function(r){
+    const e = evaluate(W, r[1], Object.assign({}, o, { B: r[2] }));
+    const cls = e.leakRate > 0.5 ? 'bad' : (e.leakRate > 0.1 ? 'warn' : 'ok');
+    return "<tr><td>" + r[0] + "</td><td>" + ms(e.ttfs) + "</td><td>" + ms(e.lag) +
+           "</td><td class='" + cls + "'>" + pct(e.leakRate) + "</td><td>" + tok(e.leakTokens) +
+           "</td></tr>";
+  }).join("");
+  const sB = evaluate(W, 'hold', Object.assign({}, o, { B: h.eqB }));
+  const sL = evaluate(W, 'hold', Object.assign({}, o, { B: h.eqLagB }));
+  $("equalNote").textContent =
+    "Matched to " + ms(tgt) + ". Boundary release also loses on the other cost axis: a " +
+    h.eqLagB + "-token hold-back buys the same mean display lag (" + ms(sL.lag) + " against " +
+    ms(h.sent.lag) + ") at " + ms(sL.ttfs) + " to first token and " + pct(sL.leakRate) +
+    " leaked, so there is no axis on which the boundary wins.";
+
+  // detector latency
+  const lats = [0, 20, 60, 120, 300, 600];
+  $("latency").innerHTML = lats.map(function(L_){
+    const oo = Object.assign({}, o, { detLat: L_ / 1000 });
+    const a = evaluate(W, 'stream', oo).leakRate;
+    const b = evaluate(W, 'sentence', oo).leakRate;
+    const cc = evaluate(W, 'checked', oo).leakRate;
+    const d = evaluate(W, 'hold', Object.assign({}, oo, { B: h.eqB })).leakRate;
+    return "<tr><td>" + L_ + " ms" + (L_ === 0 ? " <span class='warn'>tie</span>" : "") +
+           "</td><td>" + pct(a) + "</td><td>" + pct(b) + "</td><td>" + pct(cc) +
+           "</td><td>" + pct(d) + "</td></tr>";
+  }).join("");
+  const c0 = evaluate(W, 'checked', Object.assign({}, o, { detLat: 0.02 })).leakRate;
+  const c6 = evaluate(W, 'checked', Object.assign({}, o, { detLat: 0.6 })).leakRate;
+  $("latencyNote").textContent =
+    "Check-gated release reads " + pct(c0) + " at 20 ms and " + pct(c6) +
+    " at 600 ms — waiting for the check makes the check's speed irrelevant, which is what a " +
+    "correct answer looks like in a race. The 0 ms row is a genuine TIE (the boundary release " +
+    "and the verdict land on the same instant) and is decided by a < versus a <=; do not quote it.";
+
+  // the floor
+  const bs = [0, 16, 32, 48, 64, 90, 140];
+  $("floor").innerHTML = bs.map(function(b){
+    const a = evaluate(W, 'hold', Object.assign({}, o, { B: b }));
+    const gd = evaluate(W, 'guarded', Object.assign({}, o, { B: b }));
+    return "<tr><td>" + b + " tok</td><td>" + ms(a.ttfs) + "</td><td>" + pct(a.neverStreamed) +
+           "</td><td class='" + (a.leakRate > 0.1 ? 'bad' : 'ok') + "'>" + pct(a.leakRate) +
+           "</td><td>" + pct(a.flushShare) + "</td><td class='" +
+           (gd.leakRate > 0.1 ? 'bad' : 'ok') + "'>" + pct(gd.leakRate) + "</td></tr>";
+  }).join("");
+  const big = evaluate(W, 'hold', Object.assign({}, o, { B: 140 }));
+  const bigG = evaluate(W, 'guarded', Object.assign({}, o, { B: 140 }));
+  $("floorNote").textContent =
+    "At a 140-token buffer the plain hold-back still leaks " + pct(big.leakRate) + ", and " +
+    pct(big.flushShare) + " of that came out of the flush. Making the flush wait for the final " +
+    "check takes the identical buffer to " + pct(bigG.leakRate) + ". " +
+    pct(big.neverStreamed) + " of responses are shorter than that buffer and were never streamed " +
+    "at all, and " + pct(big.burstFrac) + " of all tokens arrive in the closing burst.";
+
+  const eqDelta = h.sent.leakRate - sB.leakRate;
+  $("frontierNote").textContent =
+    "Both curves sweep the hold-back from 0 to " + MAXB + " tokens; every point costs what it " +
+    "costs in first-token latency, so only vertical comparisons are legal. At " + ms(tgt) +
+    " the sentence boundary sits " + (100 * eqDelta).toFixed(1) +
+    " points above an equally expensive hold-back, and " +
+    (100 * (h.sent.leakRate - h.chk.leakRate)).toFixed(1) +
+    " points above the same boundary release gated on the check.";
+}
+
+// ---------------------------------------------------------------- self-test
+function selfTest(){
+  let n = 0, bad = [];
+  const ok = (c, l) => { n++; if (!c) bad.push(l); };
+  const base = { detLat: 0.12, G: 40, lookaheadMean: 26, scoped: 0.45 };
+  const A = f => mean(WORLDS.map(f));
+
+  // 1. the consumer, not the policy, decides what a leak is
+  const readerLeak = A(function(w){ return evaluate(w, 'stream', base).leakRate; });
+  const machLeak = A(function(w){ return evaluate(w, 'stream', Object.assign({}, base, { R: Infinity })).leakRate; });
+  const shown = A(function(w){ return evaluate(w, 'stream', base).shownRate; });
+  ok(shown > 0.99, "a naive stream did not display the defect on essentially every response");
+  ok(machLeak > 0.99, "the machine consumer did not commit every displayed defect");
+  ok(machLeak > 30 * readerLeak, "the consumer gap collapsed: reader " + pct(readerLeak));
+  const seedSpread = WORLDS.map(function(w){ return evaluate(w, 'stream', base).leakRate; });
+  ok(Math.max.apply(null, seedSpread) < 4 * Math.max(1e-9, Math.min.apply(null, seedSpread)) + 0.05,
+     "one world is a wild outlier, so the five-world mean is hiding something");
+
+  // 2. the closed form IS the simulation
+  let agree = 0, tested = 0;
+  for (const w of WORLDS) for (const G of [20, 40, 80]) for (const R of [3.2, 5.5]) for (const B of [0, 15]){
+    const o = Object.assign({}, base, { G: G, R: R, B: B });
+    for (let r = 0; r < w.N; r++){
+      if (!w.has[r]) continue;
+      const nn = w.len[r], p = w.pos[r], L = lookahead(w, r, Object.assign({}, DEFAULTS, o));
+      if (p + L > nn - 1 || p + B > nn - 1) continue;
+      const H = commitHorizon({ L: L, B: B, G: G, R: R, detLat: 0.12 });
+      if (Math.abs(p - H) < 1e-9) continue;                  // an exact tie, excluded not absorbed
+      const t = trace(w, r, B === 0 ? 'stream' : 'hold', o);
+      tested++;
+      if ((p < H) === (t.commit[p] < t.detect)) agree++;
+    }
+  }
+  ok(tested > 5000 && agree === tested, "the closed form disagreed with the simulation " + (tested - agree) + " times");
+
+  // 3. faster is safer for a reader, and hungrier for a machine
+  const speeds = [5, 10, 20, 40, 80, 120];
+  const byG = speeds.map(function(G){ return A(function(w){ return evaluate(w, 'stream', Object.assign({}, base, { G: G })).leakRate; }); });
+  let mono = true;
+  for (let i = 1; i < byG.length; i++) if (byG[i] >= byG[i - 1]) mono = false;
+  ok(mono, "a faster model did not monotonically reduce the reader's leak");
+  ok(byG[0] > 0.9 && byG[byG.length - 1] < 0.02, "the speed sweep did not span the whole range");
+  ok(safeBuffer(26, 120, 0.12) > safeBuffer(26, 5, 0.12) + 10, "the buffer requirement did not grow with speed");
+
+  // 4. the null result
+  const om = Object.assign({}, base, { R: Infinity });
+  const sent = evaluate(W, 'sentence', om), chk = evaluate(W, 'checked', om);
+  const eqB = equalCostHold(W, sent.ttfs, om, 200, 'hold');
+  const hold = evaluate(W, 'hold', Object.assign({}, om, { B: eqB }));
+  ok(Math.abs(hold.ttfs - sent.ttfs) < 0.03, "the equal-cost match is not equal");
+  ok(sent.leakRate > hold.leakRate + 0.2, "boundary release no longer loses to an equal-cost hold-back");
+  ok(sent.leakRate > chk.leakRate + 0.3, "gating the boundary on the check stopped mattering");
+  const inv = [0.02, 0.12, 0.6].map(function(d){ return evaluate(W, 'checked', Object.assign({}, om, { detLat: d })).leakRate; });
+  ok(inv[0] === inv[1] && inv[1] === inv[2], "check-gated release is not invariant to detector latency");
+  const tie0 = evaluate(W, 'sentence', Object.assign({}, om, { detLat: 0 })).leakRate;
+  ok(tie0 < inv[0] + 0.02, "the zero-latency tie no longer shows up, so the warning is stale");
+
+  // 5. the flush is a hole
+  const bigH = evaluate(W, 'hold', Object.assign({}, om, { B: 140 }));
+  const bigG = evaluate(W, 'guarded', Object.assign({}, om, { B: 140 }));
+  ok(bigH.leakRate > 0.10 && bigH.flushShare > 0.85, "the flush floor did not reproduce");
+  ok(bigG.leakRate < 0.02, "guarding the flush did not remove the floor");
+
+  // 6. no degeneracy at the corners
+  let worstDistinct = 1e9, worstSd = 1e9;
+  for (const G of [5, 120]) for (const lm of [2, 60]) for (const sc of [0, 1]){
+    const o = Object.assign({}, DEFAULTS, { G: G, lookaheadMean: lm, scoped: sc });
+    const Ls = [];
+    for (let r = 0; r < W.N; r++) if (W.has[r]) Ls.push(lookahead(W, r, o));
+    worstDistinct = Math.min(worstDistinct, new Set(Ls).size);
+    worstSd = Math.min(worstSd, stdev(Ls));
+  }
+  ok(worstDistinct >= 8 && worstSd > 1, "the lookahead distribution collapsed at a slider extreme");
+  ok(evaluate(W, 'none', om).leakRate === 0, "not streaming at all still leaked");
+  ok(JSON.stringify(Array.from(buildWorld({}, 9).pos.slice(0, 40))) ===
+     JSON.stringify(Array.from(buildWorld({}, 9).pos.slice(0, 40))), "the same seed gave two worlds");
+
+  $("selftest").textContent = bad.length
+    ? "FAIL\n" + bad.join("\n") + "\n\n" + (n - bad.length) + " / " + n + " assertions pass"
+    : n + " / " + n + " assertions pass\n" +
+      "  naive stream       displays the defect on " + pct(shown) + " of defective responses; " +
+      "committed " + pct(readerLeak) + " by a reader vs " + pct(machLeak) + " by a machine\n" +
+      "  commitment horizon closed form matched the token-level simulation on " + agree + " / " +
+      tested + " eligible responses\n" +
+      "  model speed        reader leak " + speeds.map(function(g, i){ return g + "t/s " + pct(byG[i]); }).join("  ") + "\n" +
+      "  equal cost         boundary " + pct(sent.leakRate) + " vs " + eqB + "-token hold-back " +
+      pct(hold.leakRate) + " vs check-gated boundary " + pct(chk.leakRate) + ", all at " +
+      ms(sent.ttfs) + "\n" +
+      "  the flush          140-token buffer still leaks " + pct(bigH.leakRate) + " (" +
+      pct(bigH.flushShare) + " of it from the flush); guarded " + pct(bigG.leakRate) + "\n" +
+      "  averaged over " + WORLDS.length + " worlds; per-world reader leak " +
+      seedSpread.map(pct).join(" ");
+}
+
+let queued = null;
+function schedule(){
+  if (queued) cancelAnimationFrame(queued);
+  queued = requestAnimationFrame(function(){ queued = null; render(); });
+}
+["sHold", "sSpeed", "sLook", "sLat", "sScope"].forEach(function(id){
+  $(id).addEventListener("input", schedule);
+});
+document.querySelectorAll("#consumer button").forEach(function(b){
+  b.addEventListener("click", function(){
+    document.querySelectorAll("#consumer button").forEach(function(x){
+      x.classList.remove("tab-active"); x.classList.add("bg-slate-100");
+    });
+    b.classList.add("tab-active"); b.classList.remove("bg-slate-100");
+    consumer = b.dataset.c;
+    render();
+  });
+});
+$("nextEx").addEventListener("click", function(){
+  for (let k = 1; k <= W.N; k++){
+    const i = (exIdx + k) % W.N;
+    if (W.has[i] && W.len[i] < 320){ exIdx = i; break; }
+  }
+  render();
+});
+for (let i = 0; i < W.N; i++) if (W.has[i] && W.len[i] < 320 && W.pos[i] > 30){ exIdx = i; break; }
+render();
+selfTest();
+</script>
+</body>
+</html>

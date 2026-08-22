@@ -69,6 +69,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 65 — Chain-of-thought faithfulness](https://dev48.infy.uk/ai/days/day65-cot-faithfulness.html) — `day65-cot-faithfulness.html`
 - [AIFromZero · Day 66 — Model cascades](https://dev48.infy.uk/ai/days/day66-model-cascades.html) — `day66-model-cascades.html`
 - [AIFromZero · Day 67 — Embedding model migration](https://dev48.infy.uk/ai/days/day67-embedding-migration.html) — `day67-embedding-migration.html`
+- [AIFromZero · Day 68 — Streaming and partial-output commitment](https://dev48.infy.uk/ai/days/day68-streaming-commitment.html) — `day68-streaming-commitment.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
