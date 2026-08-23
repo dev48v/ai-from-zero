@@ -1,0 +1,1757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero · Day 70 — RAG index freshness and the invalidation nobody configures</title>
+<style>
+  /* the whole stylesheet is here: no CDN, no build step, no network request of any kind */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin:0; font-family: -apple-system, "Inter", "Segoe UI", sans-serif; line-height:1.55;
+         background:#f8fafc; color:#0f172a; }
+  h1, h2, h3, p, ul, table { margin:0; }
+  button { font-family:inherit; border:0; cursor:pointer; }
+  input[type=range] { width:100%; margin:2px 0 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size:.92em;
+         background:#e2e8f0; padding:1px 4px; border-radius:4px; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px;
+        overflow:auto; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        line-height:1.5; }
+  pre code { background:none; padding:0; color:inherit; }
+  table.num { border-collapse:collapse; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid #e2e8f0; }
+  .ok { color:#166534; font-weight:800; }
+  .bad { color:#991b1b; font-weight:800; }
+  .warn { color:#92400e; font-weight:800; }
+  .win { background:#dcfce7; }
+  .lose { background:#fee2e2; }
+  canvas { width:100%; display:block; border-radius:10px; background:#0f172a; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; }
+  .cell { border-radius:6px; padding:5px 0; font-size:10px; font-weight:800; text-align:center;
+          color:#fff; line-height:1.35; }
+  .tab-active { background:#0f172a; color:#fff; }
+  .scrollx { overflow-x:auto; }
+
+  /* --- the utility layer this page's markup uses, written out ------------------------------- */
+  .hidden { display:none; }
+  .sticky { position:sticky; } .top-0 { top:0; } .z-20 { z-index:20; }
+  .mx-auto { margin-left:auto; margin-right:auto; }
+  .max-w-6xl { max-width:72rem; } .max-w-3xl { max-width:48rem; }
+  .w-full { width:100%; }
+  .minh { min-height:calc(100vh - 96px); }
+  .p-4 { padding:1rem; } .p-5 { padding:1.25rem; }
+  .px-3 { padding-left:.75rem; padding-right:.75rem; }
+  .px-5 { padding-left:1.25rem; padding-right:1.25rem; }
+  .py-1 { padding-top:.25rem; padding-bottom:.25rem; }
+  .py-2 { padding-top:.5rem; padding-bottom:.5rem; }
+  .pl-6 { padding-left:1.5rem; }
+  .mb-1 { margin-bottom:.25rem; } .mb-2 { margin-bottom:.5rem; }
+  .mb-3 { margin-bottom:.75rem; } .mb-4 { margin-bottom:1rem; }
+  .mt-1 { margin-top:.25rem; } .mt-2 { margin-top:.5rem; } .mt-3 { margin-top:.75rem; }
+  .ml-3 { margin-left:.75rem; }
+  .text-xs { font-size:.75rem; line-height:1.45; } .text-sm { font-size:.875rem; }
+  .text-lg { font-size:1.125rem; } .text-xl { font-size:1.25rem; }
+  .text-2xl { font-size:1.5rem; } .text-4xl { font-size:2.25rem; line-height:1.1; }
+  .font-semibold { font-weight:600; } .font-bold { font-weight:700; } .font-black { font-weight:900; }
+  .tracking-wider { letter-spacing:.05em; } .tracking-widest { letter-spacing:.12em; }
+  .leading-tight { line-height:1.3; }
+  .tabular-nums { font-variant-numeric:tabular-nums; }
+  .float-right { float:right; }
+  .list-disc { list-style:disc; }
+  .text-slate-500 { color:#64748b; } .text-slate-600 { color:#475569; } .text-slate-900 { color:#0f172a; }
+  .text-violet-700 { color:#6d28d9; } .text-amber-700 { color:#b45309; } .text-red-700 { color:#b91c1c; }
+  .text-emerald-700 { color:#047857; }
+  .bg-white { background:#fff; } .bg-slate-50 { background:#f8fafc; } .bg-slate-100 { background:#f1f5f9; }
+  .bg-emerald-50 { background:#ecfdf5; } .bg-red-50 { background:#fef2f2; }
+  .bg-amber-50 { background:#fffbeb; } .bg-sky-50 { background:#f0f9ff; }
+  .border-b { border-bottom:1px solid #e2e8f0; }
+  .border-slate-200 { border-color:#e2e8f0; }
+  .border-l-4 { border-left:4px solid #94a3b8; }
+  .border-slate-400 { border-left-color:#94a3b8; } .border-emerald-500 { border-left-color:#10b981; }
+  .border-red-500 { border-left-color:#ef4444; } .border-amber-500 { border-left-color:#f59e0b; }
+  .border-sky-500 { border-left-color:#0ea5e9; }
+  .rounded-md { border-radius:6px; } .rounded-lg { border-radius:8px; } .rounded-2xl { border-radius:16px; }
+  .shadow { box-shadow:0 1px 3px rgba(15,23,42,.10), 0 1px 2px rgba(15,23,42,.06); }
+  .flex { display:flex; } .flex-wrap { flex-wrap:wrap; }
+  .items-center { align-items:center; } .justify-between { justify-content:space-between; }
+  .gap-1 { gap:.25rem; } .gap-2 { gap:.5rem; } .gap-5 { gap:1.25rem; }
+  .grid { display:grid; } .gap-x-6 { column-gap:1.5rem; } .gap-y-3 { row-gap:.75rem; }
+  .space-y-1 > * + * { margin-top:.25rem; }
+  .space-y-5 > * + * { margin-top:1.25rem; }
+  .space-y-6 > * + * { margin-top:1.5rem; }
+  @media (min-width:768px){
+    .md\:p-6 { padding:1.5rem; } .md\:p-8 { padding:2rem; }
+    .md\:text-2xl { font-size:1.5rem; }
+    .md\:grid-cols-2 { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  }
+  @media (min-width:1024px){
+    .lg\:grid-cols-2 { grid-template-columns:repeat(2, minmax(0,1fr)); }
+    .lg\:grid-cols-3 { grid-template-columns:repeat(3, minmax(0,1fr)); }
+  }
+</style>
+</head>
+<body>
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+  <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <p class="text-xs font-bold tracking-widest text-violet-700 mb-2">AIFROMZERO · DAY 70</p>
+    <h1 class="text-xl md:text-2xl font-black leading-tight mb-4">
+      ♻️ RAG index freshness — an index is a cache, and nobody wrote its invalidation protocol.
+      The dashboard reports <strong>98.8% of documents fresh</strong>; users get
+      <strong>3.0% of answers stale</strong>, and the two numbers move in
+      <em>opposite directions</em>. Same corpus, same edit rate, same refresh budget, same bill:
+      <strong>9.1 stale answers per thousand</strong> against <strong>57.3</strong>, a
+      <strong>6.3&times;</strong> gap decided only by whether the documents that get edited are the
+      documents people ask about — while the document-weighted freshness on the dashboard
+      <em>improves</em> from 1.25% to 0.92%. Then a <strong>perfect</strong>, instant, never-missed
+      invalidation webhook still ships <strong>35.5 per thousand</strong>, and the provably optimal
+      refresh allocation loses to a one-line square-root rule.
+      Pure vanilla JavaScript, one file, no build step.
+    </h1>
+    <div class="flex gap-2 flex-wrap" id="tabs">
+      <button data-tab="look" class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">📈 MEASURE</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🧠 UNDERSTAND</button>
+      <button data-tab="build" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">🔨 BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="minh p-4 md:p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto space-y-5">
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+          <label class="text-sm">query popularity skew (Zipf) <span id="vZ" class="font-bold tabular-nums float-right">1.00</span>
+            <input id="sZ" type="range" min="40" max="150" value="100"></label>
+          <label class="text-sm">edits follow popularity <span id="vR" class="font-bold tabular-nums float-right">0.55</span>
+            <input id="sR" type="range" min="0" max="100" value="55"></label>
+          <label class="text-sm">corpus edits per hour <span id="vE" class="font-bold tabular-nums float-right">6</span>
+            <input id="sE" type="range" min="1" max="24" value="6"></label>
+          <label class="text-sm">edits that change an answer <span id="vM" class="font-bold tabular-nums float-right">45%</span>
+            <input id="sM" type="range" min="0" max="100" value="45"></label>
+          <label class="text-sm">edits small enough to stay retrievable <span id="vS" class="font-bold tabular-nums float-right">65%</span>
+            <input id="sS" type="range" min="0" max="100" value="65"></label>
+          <label class="text-sm">facts with a second copy elsewhere <span id="vD" class="font-bold tabular-nums float-right">30%</span>
+            <input id="sD" type="range" min="0" max="100" value="30"></label>
+          <label class="text-sm">P(stale copy outranks the fresh one) <span id="vB" class="font-bold tabular-nums float-right">50%</span>
+            <input id="sB" type="range" min="0" max="100" value="50"></label>
+          <label class="text-sm">edits that fire an invalidation event <span id="vT" class="font-bold tabular-nums float-right">97.0%</span>
+            <input id="sT" type="range" min="800" max="1000" value="970"></label>
+          <label class="text-sm">event &rarr; re-embedded, hours <span id="vL" class="font-bold tabular-nums float-right">0.5</span>
+            <input id="sL" type="range" min="0" max="120" value="5"></label>
+          <label class="text-sm">refresh budget, units/hour <span id="vG" class="font-bold tabular-nums float-right">8.0</span>
+            <input id="sG" type="range" min="20" max="640" value="80"></label>
+          <div class="text-sm">refresh policy
+            <div class="flex gap-1 flex-wrap mt-1" id="pol">
+              <button data-p="uniform" class="tab-active px-3 py-1 rounded-md text-xs font-bold">every doc, same cadence</button>
+              <button data-p="change" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">&prop; change rate</button>
+              <button data-p="query" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">&prop; queries</button>
+              <button data-p="sqrt" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">&radic;(queries &times; change)</button>
+              <button data-p="sweepOnly" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">optimal, sweeps only</button>
+              <button data-p="optimal" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">optimal, all four modes</button>
+              <button data-p="event" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">webhook (no dial)</button>
+              <button data-p="hybrid" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">webhook + sweep</button>
+            </div>
+          </div>
+        </div>
+        <p class="text-xs text-slate-500 mt-3">
+          300 documents, 3,000 queries per world, five worlds, one number per configuration averaged
+          over all of them. Nothing here simulates language or embeddings: a query hits a document,
+          the index holds that document as of its <em>last refresh</em>, and the only questions are
+          whether an answer-changing edit happened in between, whether the stale chunk is still
+          <strong>retrievable</strong>, and whether the fact has a second copy in some document
+          nobody edited. Money is in embedding-units per hour: one re-embed 1.00, one
+          look-and-hash 0.02, one live fetch at query time 0.15 — so fetching the whole corpus live
+          on every query costs <strong>75.0</strong> and ships zero stale answers, which is the
+          ceiling on what any refresh policy can be worth.
+        </p>
+      </div>
+
+      <div class="grid lg:grid-cols-3 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">CORRECT</p>
+          <p class="text-4xl font-black tabular-nums" id="bigOk">—</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteOk"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">MISS — the stale chunk fell out of the top k</p>
+          <p class="text-4xl font-black tabular-nums text-amber-700" id="bigMiss">—</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteMiss"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">STALE ANSWER — you ship this</p>
+          <p class="text-4xl font-black tabular-nums text-red-700" id="bigStale">—</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteStale"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE DASHBOARD AND THE USER — THE SAME INDEX, MEASURED TWO WAYS</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>what is being counted</th><th>how it is drawn</th><th>stale</th>
+            <th>per 1,000</th></tr></thead>
+          <tbody id="dash"></tbody>
+        </table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="dashNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE PARAMETER IN NOBODY'S CONFIG — IDENTICAL CORPUS, EDITS, BUDGET AND BILL</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>edits follow popularity</th><th>total edits/hour</th><th>cost</th>
+            <th>stale copies, per document</th><th>stale copies, per query</th>
+            <th>stale answers</th><th>per 1,000</th></tr></thead>
+          <tbody id="rho"></tbody>
+        </table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="rhoNote"></p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">FRONTIER — STALE ANSWERS AGAINST SPEND</p>
+          <canvas id="chartFront" width="520" height="280"></canvas>
+          <p class="text-xs mt-2" id="legend1"></p>
+          <p class="text-xs text-slate-500 mt-2" id="frontNote"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">THE OTHER AXIS — 99th PERCENTILE AGE OF A STALE ANSWER</p>
+          <canvas id="chartTail" width="520" height="280"></canvas>
+          <p class="text-xs mt-2" id="legend2"></p>
+          <p class="text-xs text-slate-500 mt-2" id="tailNote"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          EQUAL COST — EVERY SCALABLE ROW IS BISECTED ONTO THE SAME BILL</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>policy</th><th>cost</th><th>stale answers</th><th>per 1,000</th>
+            <th>miss</th><th>p99 age of the error, h</th><th>closed-form stale copies</th>
+            <th>share of stale answers from a duplicate</th></tr></thead>
+          <tbody id="equal"></tbody>
+        </table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="equalNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE RANKING INVERTS — STALE ANSWERS PER THOUSAND, EVERY CELL AT THE SAME BUDGET</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr id="matHead"></tr></thead>
+          <tbody id="matrix"></tbody>
+        </table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="matNote"></p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+            THE MODE MAP — WHAT THE OPTIMISER DOES WITH EACH DOCUMENT</p>
+          <canvas id="chartMap" width="520" height="300"></canvas>
+          <p class="text-xs mt-2">
+            <span class="swatch" style="background:#38bdf8"></span>sweep at rate r
+            <span class="swatch ml-3" style="background:#c084fc"></span>webhook
+            <span class="swatch ml-3" style="background:#4ade80"></span>fetch live, not indexed
+            <span class="swatch ml-3" style="background:#f87171"></span>abandoned
+          </p>
+          <p class="text-xs text-slate-500 mt-2" id="mapNote"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <div class="flex items-center justify-between mb-3">
+            <p class="text-xs font-bold tracking-wider text-slate-500">ONE DOCUMENT, THREE DAYS</p>
+            <button id="nextDoc" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">another document →</button>
+          </div>
+          <canvas id="chartTime" width="520" height="300"></canvas>
+          <p class="text-xs mt-2">
+            <span class="swatch" style="background:#f87171"></span>answer-changing edit
+            <span class="swatch ml-3" style="background:#64748b"></span>cosmetic edit
+            <span class="swatch ml-3" style="background:#38bdf8"></span>scan
+            <span class="swatch ml-3" style="background:#c084fc"></span>event re-embed
+            <span class="swatch ml-3" style="background:#b91c1c"></span>index is wrong
+          </p>
+          <p class="text-xs text-slate-500 mt-2" id="timeNote"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE WEBHOOK'S FLOOR — AND THE THING UNDERNEATH IT</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>events that fire</th><th>lag, h</th><th>closed-form floor</th><th>cost</th>
+            <th>stale answers</th><th>per 1,000</th><th>p99 age, h</th>
+            <th>&hellip;with one copy of every fact</th><th>&hellip;with a recency tiebreak</th></tr></thead>
+          <tbody id="floor"></tbody>
+        </table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="floorNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE RETRIEVER DECIDES THE CONTRADICTIONS — DUPLICATED FACTS</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>facts with a second copy</th><th>&radic;(q&times;&lambda;) sweep</th>
+            <th>&hellip;with a recency tiebreak</th><th>webhook</th><th>&hellip;with a recency tiebreak</th>
+            <th>share of the webhook's stale answers that are duplicates</th></tr></thead>
+          <tbody id="dup"></tbody>
+        </table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="dupNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">SELF-TEST</p>
+        <pre id="selftest">running…</pre>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="minh p-4 md:p-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">An index is a cache, and nobody wrote its invalidation protocol.</h2>
+
+      <p>Every other cache in your stack has one. HTTP has <code>ETag</code> and
+      <code>max-age</code>; your CDN has a purge API; your ORM's second-level cache has a write
+      hook. A retrieval index has a cron job and a hope. It is a copy of a corpus that keeps
+      changing, and the entire question of how wrong it is comes down to two numbers per document:
+      how often that document's answers change, <code>&lambda;</code>, and how often you look at
+      it, <code>r</code>.</p>
+
+      <p>Those two give one closed form, and it is not the one people guess. A document scanned
+      every <code>1/r</code> hours whose answers change as a Poisson process of rate
+      <code>&mu;</code> is materially stale, averaged over the cycle, with probability</p>
+
+      <pre>S(x) = 1 - (1 - e^-x) / x ,   x = &mu;/r</pre>
+
+      <p>Not "half the refresh period" — that is the answer to a different question. <code>S</code>
+      is the average of a <em>saturating</em> exponential over the period: at <code>x</code> = 1 it
+      is 0.368, at <code>x</code> = 2 it is 0.568, and it approaches 1 from below rather than
+      crossing it. Small <code>x</code> gives <code>x/2</code>, which is where the folklore comes
+      from, and the folklore is only right when you are already refreshing far faster than the
+      document changes.</p>
+
+      <h3 class="text-xl font-bold">The dashboard is measuring the wrong average</h3>
+
+      <p>Now sum that over a corpus, and notice that there are two completely different ways to
+      average it. Your indexing dashboard averages <em>per document</em>: 300 documents, count how
+      many hold a stale copy, report a percentage. Your users average <em>per query</em>, and
+      queries are not uniform over documents — they are Zipf. At the page defaults the two numbers
+      are <strong>1.21%</strong> and <strong>4.87%</strong>: a 4&times; gap, from nothing but the
+      weighting.</p>
+
+      <p>The multiplier between them has a name and a one-line SQL query. It is the inverse
+      participation ratio of your query distribution, <code>D &middot; &Sigma; w&sup2;</code>,
+      where <code>w</code> is each document's share of queries. At Zipf 1.0 over 300 documents it
+      is <strong>12.5</strong>. At Zipf 0.6 it is 2.4 and at Zipf 1.4 it is 46.0 — and across that
+      range the stale-answer rate goes 12.8 → 79.3 per thousand while the document-weighted number
+      on the dashboard <em>falls</em>, 1.35% → 1.03%. Skew makes your index look fresher and your
+      product worse, at the same time, for the same money.</p>
+
+      <div class="bg-red-50 border-l-4 border-red-500 p-4">
+        <p class="text-sm">And the second averaging trap is the one worth the whole page. Hold the
+        corpus fixed, hold the <em>total</em> edits per hour fixed, hold the refresh budget and the
+        bill fixed, and change only <strong>which documents get edited</strong>. When edits are
+        independent of popularity the same system ships <strong>9.1</strong> stale answers per
+        thousand queries. When edits follow popularity it ships <strong>57.3</strong> — a
+        <strong>6.3&times;</strong> difference. Meanwhile the document-weighted freshness the
+        dashboard reports goes from 1.25% stale to <strong>0.92%</strong>. It improves. The number
+        you watch moves the wrong way while the number you sell gets six times worse, and the
+        correlation that caused it appears in no indexing config, no vector-store setting and no
+        eval harness.</p>
+      </div>
+
+      <p>It is not mysterious once stated: popular documents are popular because they are about
+      live things — prices, availability, policy, status — and live things are what people edit.
+      The corpus property is real, it is measurable from two columns of your own logs, and nothing
+      in the stack asks you for it.</p>
+
+      <h3 class="text-xl font-bold">A stale chunk has two fates, and only one is visible</h3>
+
+      <p>When a document's answer changes, the index still holds the old text. What happens next
+      depends on something no freshness metric records: <em>how big the edit was</em>. A small edit
+      — a number, a date, a clause — leaves the chunk's embedding essentially where it was, so the
+      stale chunk is still retrieved for the same query and the model answers confidently from it.
+      A large edit moves the chunk, the query no longer matches it, and it drops out of the top
+      <code>k</code> — so you get a <strong>miss</strong>: an abstention, a worse-but-honest answer
+      from somewhere else, a support ticket instead of a wrong number.</p>
+
+      <div class="bg-slate-100 border-l-4 border-slate-400 p-4">
+        <p class="text-sm">With one copy of every fact this is a pure <em>mode</em> dial and the
+        simulation proves it: as the small-edit share goes 0 → 1, the correct-answer rate is
+        <strong>bit-identical</strong> at 95.13% while stale answers go 0 → 48.7 per thousand and
+        misses go 4.87% → 0. Editing style does not change how often you are right. It changes
+        whether being wrong looks like an error or like an answer.</p>
+      </div>
+
+      <p>Turn duplication on and the invariant breaks by exactly the amount it should: 0.45 points
+      across the same sweep, because a retrievability change is what lets a <em>fresh duplicate
+      outrank a stale original</em>. That is the whole mechanism of the last third of this page.</p>
+
+      <h3 class="text-xl font-bold">The policy ranking inverts, so the argument was never about the policy</h3>
+
+      <p>Give the refresh budget a shape. Uniform cadence, proportional to change rate,
+      proportional to query volume, or proportional to <code>&radic;(w &middot; &lambda;)</code>.
+      All four spend exactly the same money, bisected onto the same bill, so the comparison is
+      legal. Now read the table on the MEASURE tab twice.</p>
+
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-4">
+        <p class="text-sm">When edits are independent of popularity, proportional-to-change-rate is
+        the <strong>worst</strong> policy on offer — 12.7 per thousand against 9.1 for a flat
+        cadence and 3.8 for the square-root rule. When edits follow popularity it is the
+        <strong>best</strong>, 16.7 against 57.3 for the flat cadence that just beat it. Same
+        budget, same bill, same code: the ordering of your options is decided by a corpus property,
+        not by the policy.</p>
+      </div>
+
+      <p>The first half of that is not new — it is Cho and Garcia-Molina's crawler result from 2000,
+      that a uniform refresh policy beats one proportional to change rate, reproduced here on a
+      retrieval index rather than a web crawl. Proportional-to-change pours money into documents
+      that will be stale again before you finish, and the money comes out of documents that would
+      have stayed fresh. What is new is the inversion: correlate the edits with the queries and
+      proportional-to-change stops being a waste and becomes, accidentally,
+      proportional-to-queries. At perfect correlation the three shapes are algebraically the same
+      vector — the simulation checks it, they agree to 3&times;10<sup>-16</sup> — so the whole
+      policy debate collapses into a single row.</p>
+
+      <h3 class="text-xl font-bold">The recommendation this page set out to make</h3>
+
+      <p>If the allocation is what matters, solve it. Minimise
+      <code>&Sigma; w<sub>d</sub> S(&mu;<sub>d</sub>/r<sub>d</sub>)</code> subject to a budget, per
+      document, with a Lagrange multiplier and four options: abandon the document, sweep it at some
+      rate, wire an invalidation event to it, or take it out of the index altogether and fetch it
+      live at query time. Water-fill the price until the bill lands on the budget. This is a
+      textbook problem, it takes forty lines, and it produces a genuinely interesting artefact —
+      a <em>mode map</em> over the (popularity, volatility) plane, with a live-fetch region, a sweep
+      region, and an abandonment region whose boundaries are prices rather than opinions.</p>
+
+      <p>It loses.</p>
+
+      <div class="bg-red-50 border-l-4 border-red-500 p-4">
+        <p class="text-sm">At an identical bill the optimum ships <strong>17.7</strong> stale
+        answers per thousand and the one-line square-root rule ships <strong>10.5</strong> —
+        <strong>69% worse</strong> — while <em>winning</em> on the objective it was given, 8.0
+        against 9.9 per thousand of predicted stale copies. Its 99th-percentile error is
+        <strong>199.6 hours</strong> old against 5.6. And the tell is in the mode map: it put
+        <strong>201 of 300 documents</strong> on webhook-only, because per document a webhook is
+        cheap and clean, and <strong>66.2%</strong> of the stale answers it ships come from
+        duplicated facts.</p>
+      </div>
+
+      <p>The objective is separable per document. The failure is not. A fact with a copy in a
+      second document is a coupling between two documents, and no per-document value function can
+      represent it — so the optimiser buys the mode whose weakness its own arithmetic cannot see.
+      This is not a bug in the solver. It is the solver being exactly as good as its objective.</p>
+
+      <p>And the damage is itself correlation-dependent, which is what would make this hard to
+      catch in production. At &rho; = 0 the optimum all but <em>ties</em> the heuristic — 3.9
+      against 3.8 — because at that end the documents it puts on a webhook are documents almost
+      nobody queries. Move the edits onto the popular ones and the same solver, same objective,
+      same budget, goes from a tie to 69% worse. A solver that behaves on your staging corpus is
+      not evidence about your production one.</p>
+
+      <h3 class="text-xl font-bold">And then the correction lost as well</h3>
+
+      <p>The obvious repair: never leave a document on events alone, always put a floor sweep
+      underneath. Re-run the same water-fill with "webhook + sweep" as the only event-bearing
+      option. It predicts the best number on the page — 5.8 per thousand of stale copies, better
+      than every heuristic — and ships <strong>32.7</strong>, worse than the naive optimum it was
+      supposed to fix and three times the heuristic it was supposed to beat. The floor sweep is
+      bought out of the same budget, so it starves the sweeps that were doing the work.</p>
+
+      <div class="bg-emerald-50 border-l-4 border-emerald-500 p-4">
+        <p class="text-sm">What actually works is deleting the option. The same water-fill,
+        restricted to sweep rates, ships <strong>8.3</strong> per thousand — the best number on
+        the page — and <code>&radic;(w&middot;&lambda;)</code>, which is two columns of SQL and no
+        solver at all, ships <strong>10.5</strong>. Across the whole correlation range those two
+        stay within 2.2 stale answers per thousand of each other and trade places twice
+        (3.8 vs 4.7 at &rho; = 0, 10.5 vs 8.3 at 0.55, 16.7 vs 16.7 at 1.0) — so the rule of thumb
+        is not merely close to the constrained optimum, it sometimes ships fewer wrong answers than
+        it. The freedom was the bug: every extra mode the optimiser could choose was a mode whose
+        failure its objective could not price.</p>
+      </div>
+
+      <h3 class="text-xl font-bold">The webhook has a floor, and something worse under it</h3>
+
+      <p>Event-driven invalidation is the answer everyone reaches for, and it has a hard floor that
+      no budget removes. If an edit's event never fires, the copy stays stale until some
+      <em>later</em> edit of the same document happens to fire one. Walking backwards through the
+      edit stream, the copy is stale exactly when the most recent answer-changing edit was not
+      followed by any detected edit, which is</p>
+
+      <pre>floor = m(1-detect) / (detect + m(1-detect))</pre>
+
+      <p>— <strong>1.37%</strong> of answers at a 97% detection rate, and note what is missing from
+      that expression: the edit rate. The floor is a property of your webhook, not of your corpus.
+      At 90% detection it is 4.76%, and no amount of reindexing money touches it, because there is
+      no reindexing in this policy to spend money on.</p>
+
+      <div class="bg-red-50 border-l-4 border-red-500 p-4">
+        <p class="text-sm">Then set the webhook to <strong>perfect</strong>. Every edit detected,
+        zero lag, instant re-embedding. It still ships <strong>35.5 stale answers per
+        thousand</strong>. The event fires for the document that <em>changed</em>, and the stale
+        copy is sitting in a document that <em>did not</em> — a duplicated paragraph, a summary
+        table, an FAQ entry, a quickstart that repeats the reference. Nothing will ever invalidate
+        it except an edit of its own. Perfect invalidation is perfect only over the set of
+        documents your writers touched, and that set is not the set of chunks that contain the
+        fact.</p>
+      </div>
+
+      <p>At equal spend the picture is Pareto-messy in a way worth knowing about. The webhook ships
+      54.5 per thousand with a 99th-percentile error age of <strong>191.7 hours</strong>; a flat
+      sweep at the same 5.82 units an hour ships 80.3 with a p99 of <strong>6.5 hours</strong>. One
+      is better on the mean and eight days worse on the tail. The square-root sweep, at that same
+      price, ships 33.8 with a p99 of 27.7 and dominates the webhook on both axes — which is not
+      an argument against events so much as an argument that "we invalidate on write" is not by
+      itself a freshness strategy.</p>
+
+      <h3 class="text-xl font-bold">The cheapest fix on the page is in the reranker</h3>
+
+      <p>When one copy of a fact is current and the other is stale, both are retrievable, and the
+      retriever has no idea which chunk is newer. It ranks on similarity. So the answer is decided
+      by a coin flip that your indexing budget cannot influence — unless you break the tie on the
+      chunk's own timestamp.</p>
+
+      <div class="bg-emerald-50 border-l-4 border-emerald-500 p-4">
+        <p class="text-sm">Preferring the newer chunk when two retrieved chunks cover the same fact
+        takes the webhook from <strong>54.5</strong> stale answers per thousand to
+        <strong>20.7</strong>, and takes the <em>perfect</em> webhook to <strong>0.0</strong>. It
+        takes the square-root sweep from 10.5 to 6.9. For comparison, moving the sweep budget from
+        6.0 to 8.0 units an hour — a 33% larger indexing bill — buys 19 per thousand. A tiebreak on
+        a timestamp you already store buys 33.8, and it is the only lever on this page that costs
+        nothing per hour.</p>
+      </div>
+
+      <h3 class="text-xl font-bold">What you are actually buying</h3>
+
+      <p>One last piece of arithmetic that reframes the budget argument. A scan does not have to
+      re-embed: hash the source, compare, and pay for the model only when the content moved. So of
+      the default 8.00 units an hour, <strong>5.63</strong> are embeddings and <strong>2.37</strong>
+      are looking. The corpus generates 6.0 edits an hour, so <strong>94%</strong> of the embedding
+      bill is fixed by your writers and not by your policy; a sweep only coalesces bursts, which at
+      these rates saves 6%. You are not buying freshness with a bigger budget. You are buying
+      <em>news</em> — how soon you find out — and that is the cheap 30% of the bill.</p>
+
+      <p>Which sets a ceiling on the whole discussion. Skipping the index and fetching every
+      document live at query time costs 75.0 units an hour here and ships zero stale answers, so no
+      refresh policy can ever be worth more than that, and the default 8.00 is buying 11% of the
+      ceiling. Turn the budget up to 200 and the optimiser moves all 300 documents to live fetch
+      and stops indexing entirely — the model's declared saturation point, and also the correct
+      engineering answer for a document whose answers change hourly and whose queries are rare.</p>
+
+      <h3 class="text-xl font-bold">What to do on a real system</h3>
+
+      <ul class="list-disc pl-6 space-y-1">
+        <li><strong>Compute <code>D &middot; &Sigma;w&sup2;</code> from a week of query logs</strong>
+        before you touch the cadence. That single number is the multiplier between your dashboard
+        and your users, and it is 12.5 on a normal Zipf query mix.</li>
+        <li><strong>Correlate your edit log against your query log.</strong> If the documents people
+        ask about are the documents your writers keep editing, your stale-answer rate is six times
+        what a document-weighted freshness metric implies, and no cadence change fixes the
+        measurement.</li>
+        <li><strong>Weight the refresh by <code>&radic;(queries &times; change)</code>.</strong> Two
+        columns of SQL, within one stale answer per thousand of a numeric optimum, and it beats
+        every uniform, every ∝change and every ∝query allocation at the same bill.</li>
+        <li><strong>Do not let an optimiser put a document on webhook-only.</strong> The objective
+        is separable and duplicated content is not, so that is precisely the mode it will
+        over-buy.</li>
+        <li><strong>Add a recency tiebreak to the reranker before you add budget.</strong> It is the
+        only fix here that costs nothing per hour, and it is worth more than perfect
+        invalidation.</li>
+        <li><strong>Report stale answers per thousand and the p99 error age, never index
+        freshness.</strong> A webhook and a sweep can tie on the mean and differ by eight days on
+        the tail.</li>
+        <li><strong>Decide which documents should not be in the index at all.</strong> High
+        volatility with low query volume is a live-fetch document, and the boundary is a price you
+        can compute, not a taste.</li>
+      </ul>
+
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="minh p-4 md:p-8 bg-slate-50">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">🔨 How it is built</h2>
+
+      <h3 class="text-xl font-bold">1. Nothing here simulates language, embeddings or a model</h3>
+      <pre>// a query is: a DOCUMENT drawn from a Zipf popularity law, at a TIME.
+// the index holds that document as of its last refresh. Three questions, in order:
+//   1. has an answer-changing edit happened since that refresh?          -> Poisson, rate m*lambda
+//   2. is the stale chunk still RETRIEVABLE for this query?              -> small edit vs large
+//   3. does the fact have a second copy in some other document?          -> and is THAT copy stale?</pre>
+      <p>There is no text, no vector and no similarity score anywhere in the engine. What is
+      simulated is the only structure the question depends on: that an index is a stale copy, that
+      staleness is a race between an edit process and a scan process, that a chunk can be wrong
+      <em>and</em> still be the best lexical match, and that the same fact can sit in two documents
+      with two different refresh histories.</p>
+
+      <h3 class="text-xl font-bold">2. The backward construction, so a world survives every slider</h3>
+      <pre>A = -ln(u) / (m * lambda_d)      // age of the last answer-changing edit, exactly Exp(m*lambda)
+e = t - A                        // when the index went wrong
+if (e &lt;= 0) correct              // nothing material since the index was built at t = 0</pre>
+      <p>Rather than generate a per-document edit history over 720 hours — which at the hot end
+      would be thousands of arrivals and would be re-generated every time a slider moved — each
+      query samples the <em>backward age</em> of the last relevant edit. For a Poisson process that
+      is exact and stationary, it costs one uniform, and it makes every configuration read the same
+      pre-drawn numbers. The forward stream is generated in exactly one place: the single-document
+      timeline on the MEASURE tab, which is display-only and labelled as such.</p>
+
+      <h3 class="text-xl font-bold">3. The three exact probabilities the engine needs</h3>
+      <pre>stale copy, scanned at rate r:   S(m*lambda/r),  S(x) = 1 - (1-e^-x)/x
+embeddings per hour at rate r:   r * (1 - e^-(lambda/r))     // a hash check, not a re-embed
+webhook floor:                   m(1-detect) / (detect + m(1-detect))</pre>
+      <p>All three are derived rather than fitted, and all three are checked against the simulation
+      rather than trusted. The third is the one worth deriving out loud: walk backwards through the
+      edit stream, and each arrival is independently <em>detected</em> (stop, the copy is current)
+      or <em>material and undetected</em> (stop, the copy is stale) or neither (keep walking). The
+      ratio of those two stopping probabilities is the floor, and <code>lambda</code> cancels — a
+      webhook's floor is a property of the webhook.</p>
+
+      <h3 class="text-xl font-bold">4. Equal cost is bisected, not estimated</h3>
+      <pre>scaleToBudget(shape) -> geometric bisection on a scalar until cost(shape * g) == budget
+optimalAlloc(budget) -> geometric bisection on the Lagrange price mu until the bill fits,
+                        then spendRest() scales the whole rate vector until it is EXACT</pre>
+      <p>Every comparison on the page is vertical. A shape (uniform, ∝change, ∝query,
+      <code>&radic;(w&lambda;)</code>) is a normalised vector that gets scaled until its bill equals
+      the target, and the water-fill picks per-document modes at a price that is bisected to the
+      same target. A Lagrangian relaxation over a discrete option set lands <em>under</em> the
+      budget, which would quietly hand the optimum a discount, so the leftover is spent by scaling
+      the whole rate vector — at a high budget that buys nothing measurable, which is the flat tail
+      on the frontier chart. The tables print the achieved cost in their own column so that a claim
+      of equal cost can be audited by reading the page rather than by trusting it.</p>
+
+      <h3 class="text-xl font-bold">5. Cost has two currencies, because that is the real asymmetry</h3>
+      <pre>sweep   : 0.02 per look  + 1.00 per look that finds a change
+webhook : 1.00 per EDIT that fires an event   (including the cosmetic ones)
+live    : 0.15 per QUERY   (no index, no staleness)</pre>
+      <p>This is what makes the event-versus-cadence question a real trade rather than a slogan. A
+      webhook pays per edit and cannot coalesce a burst; a sweep pays per look and coalesces
+      everything inside a period; a live fetch is priced in queries and so gets <em>cheaper</em>
+      relative to the alternatives exactly on the documents that change fastest. All three land on
+      the same frontier axis, which is the only reason the mode map has boundaries.</p>
+
+      <h3 class="text-xl font-bold">6. Degeneracies, declared</h3>
+      <p>Day 66 in this series lost a headline to a model that collapsed at an extreme setting, so
+      every corner here is checked and the genuinely degenerate ones are named on the page instead
+      of avoided:</p>
+      <pre>material = 0        -> zero stale answers; there is nothing to be stale about
+small = 0           -> zero stale answers, all misses; the wrong-answer channel is shut
+small = 1, dup = 0  -> zero misses; every stale copy is retrieved and answered from
+budget = 200        -> the optimiser puts all 300 documents on live fetch and stops indexing
+rho = 1             -> the change, query and sqrt shapes become the SAME vector (3e-16 apart)
+detect = 1, lag = 0 -> a perfect webhook. NOT degenerate: 35.5 stale answers per thousand,
+                       and 0.0 only once a recency tiebreak is added on top</pre>
+      <p>The last line is the page's best result and the reason the corner was worth checking at
+      all. The defaults sit away from all of them: 45% material, 65% small, 30% duplicated, 97%
+      detected, 0.5 h lag, 8.00 units an hour against a 75.0 ceiling, and every headline is
+      reported with all three outcomes strictly between 0 and 1.</p>
+
+      <h3 class="text-xl font-bold">7. What the tests pin</h3>
+      <pre>// the closed forms ARE the simulation
+assert(|measured stale copies - SUM w_d S(m lambda_d / r_d)| &lt; 0.004)   // over 7 budgets
+assert(|S(x) - a from-scratch numeric integral of (1 - e^-mu*u) over the cycle| &lt; 1e-9)
+assert(webhook floor is INDEPENDENT of the edit rate)                   // 1x to 24x
+
+// the parameter in nobody's config
+assert(stale(rho=1) &gt; 5 x stale(rho=0)  at an identical bill)
+assert(document-weighted staleness FALLS as rho rises)                  // the dashboard inverts
+assert(the query-weighted / document-weighted ratio tracks D*SUM w^2)
+
+// the mode dial, and where it stops being one
+assert(correct is BIT-IDENTICAL across small = 0, .35, .65, 1  when dup = 0)
+assert(it moves once dup &gt; 0, and by less than a point)
+
+// the inversion, and the null results kept because they are true
+assert(stale(prop-to-change) &gt; stale(uniform)   at rho = 0)   // Cho + Garcia-Molina, 2000
+assert(stale(prop-to-change) &lt; stale(uniform)/3 at rho = 1)   // the SAME policy, inverted
+assert(shape(change) == shape(query) == shape(sqrt) at rho = 1)
+assert(stale(optimal) &gt; 1.5 x stale(sqrt)  &amp;&amp;  predicted(optimal) &lt; predicted(sqrt))
+assert(stale(optimalPlus) &gt; stale(optimal)  &amp;&amp;  predicted(optimalPlus) is the lowest of all)
+assert(stale(sweepOnly) &lt; stale(optimal)  &amp;&amp;  stale(sweepOnly) &lt; 1.1 x stale(sqrt))
+assert(|stale(sqrt) - stale(sweepOnly)| &lt; 0.002 at every rho)   // the rule of thumb tracks it
+assert(no fixed shape beats the water-fill on the water-fill's OWN objective, at 3 budgets)
+assert(stale(perfect webhook) &gt; 0.03  &amp;&amp;  stale(perfect webhook, tiebreak) == 0)
+assert(p99age(webhook) &gt; 20 x p99age(uniform at the webhook's price))</pre>
+      <p>The third and fourth blocks are the ones worth having. They say that the thing this page
+      set out to recommend — solve the allocation properly — is beaten at equal cost by two columns
+      of SQL, that the obvious repair is beaten by both, and that the optimiser wins the whole time
+      on the objective it was handed. All three sit in the test file so the inconvenient ones cannot
+      be quietly deleted later.</p>
+
+      <h3 class="text-xl font-bold">🎉 AIFromZero Day 70 shipped.</h3>
+      <p class="text-slate-600">A RAG system does not go stale because the cron job is too slow. It
+      goes stale because the documents people ask about are the documents people edit, because a
+      small edit leaves a wrong chunk perfectly retrievable, and because the webhook fires for the
+      document that changed rather than for the one holding the copy.</p>
+
+    </div>
+  </div>
+</section>
+
+<script>
+const tabs = document.querySelectorAll("#tabs button");
+const panels = document.querySelectorAll(".tab-panel");
+tabs.forEach(t => t.addEventListener("click", () => {
+  tabs.forEach(x => { x.classList.remove("tab-active"); x.classList.add("bg-slate-100"); });
+  t.classList.add("tab-active"); t.classList.remove("bg-slate-100");
+  panels.forEach(p => p.classList.add("hidden"));
+  document.getElementById(t.dataset.tab).classList.remove("hidden");
+}));
+
+// ===== ENGINE:BEGIN =====
+// RAG index freshness. A retrieval index is a CACHE of a corpus that keeps changing, and every
+// freshness knob a team actually has - "reindex nightly", "invalidate on webhook" - is a GLOBAL
+// cadence. What decides how many stale answers reach a user is none of those: it is whether the
+// documents that get EDITED are the documents that get QUERIED, and whether a fact has a second
+// copy in a document that nobody edited. Neither appears in any indexing config.
+
+function mulberry32(seed){
+  let s = seed >>> 0;
+  return function(){
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1) >>> 0;
+    t = (t ^ (t + Math.imul(t ^ (t >>> 7), t | 61))) >>> 0;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const mean = a => a.reduce(function(s, v){ return s + v; }, 0) / a.length;
+const stdev = a => {
+  const m = mean(a);
+  return Math.sqrt(mean(a.map(function(v){ return (v - m) * (v - m); })));
+};
+
+const NDRAW = 12;   // uniforms per query, drawn once and reused for every configuration
+
+const DEFAULTS = {
+  D: 300,             // documents in the corpus
+  zipf: 1.0,          // query popularity exponent: w_d proportional to 1/rank^zipf
+  sigma: 1.2,         // spread of the per-document CHANGE propensity (lognormal), rank-independent
+  rho: 0.55,          // how much editing follows popularity. 0 = independent, 1 = proportional
+  edits: 6,           // TOTAL document edits per hour across the whole corpus - held fixed
+  material: 0.45,     // share of edits that change an answer rather than a typo or a timestamp
+  small: 0.65,        // share of material edits SMALL enough that the stale chunk still retrieves
+  dup: 0.30,          // share of facts that also live in a second document
+  rankBias: 0.5,      // when a stale copy and a current copy are both retrieved, P(stale ranks first)
+  detect: 0.97,       // share of edits that fire an invalidation event at all
+  lag: 0.5,           // hours from event to re-embedded chunk
+  H: 720,             // simulated window, hours
+  burn: 360,          // queries are sampled from the second half, so schedules are in steady state
+  queries: 3000,
+  budget: 8.0,        // refresh spend, in embedding-units per hour
+  scanCost: 0.02,     // cost of LOOKING at one document (fetch + hash), in embedding units
+  embedCost: 1.0,     // cost of re-embedding one changed document
+  liveCost: 0.15,     // cost of skipping the index and fetching the document at query time
+  Q: 500,             // queries per hour, used only to price the live-fetch mode
+  policy: 'uniform'
+};
+
+// ---- the corpus. w and lambda are recomputed from the sliders every time, so a world is only ever
+// a bag of fixed uniforms and two configurations are always compared on the SAME documents.
+function buildWorld(o, seed){
+  const c = Object.assign({}, DEFAULTS, o || {});
+  const rnd = mulberry32(seed);
+  const D = c.D, N = c.queries;
+  const a = new Float64Array(D);      // change propensity, INDEPENDENT of rank
+  const phase = new Float64Array(D);  // where in its own sweep cycle each document sits
+  for (let d = 0; d < D; d++){
+    const u1 = Math.max(1e-12, rnd()), u2 = rnd();
+    const g = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);   // Box-Muller
+    a[d] = Math.exp(c.sigma * g);
+    phase[d] = rnd();
+  }
+  const U = new Float64Array(N * NDRAW);
+  for (let i = 0; i < U.length; i++) U[i] = rnd();
+  return { D: D, N: N, a: a, phase: phase, U: U, seed: seed };
+}
+const qAt = (w, i, k) => w.U[i * NDRAW + k];
+
+// popularity and change rate. Total edits are held CONSTANT as rho moves, so a sweep of rho is a
+// sweep of correlation and not of workload.
+function corpus(world, o){
+  const D = world.D, w = new Float64Array(D), lam = new Float64Array(D), cdf = new Float64Array(D);
+  let sw = 0;
+  for (let d = 0; d < D; d++){ w[d] = Math.pow(d + 1, -o.zipf); sw += w[d]; }
+  for (let d = 0; d < D; d++) w[d] /= sw;
+  let sl = 0;
+  for (let d = 0; d < D; d++){
+    lam[d] = Math.pow(world.a[d], 1 - o.rho) * Math.pow(w[d] * D, o.rho);
+    sl += lam[d];
+  }
+  for (let d = 0; d < D; d++) lam[d] = o.edits * lam[d] / sl;
+  let acc = 0;
+  for (let d = 0; d < D; d++){ acc += w[d]; cdf[d] = acc; }
+  // the inverse participation ratio of the query distribution: the multiplier between the
+  // freshness a dashboard measures per DOCUMENT and the freshness a user meets per ANSWER
+  let sq = 0;
+  for (let d = 0; d < D; d++) sq += w[d] * w[d];
+  return { w: w, lam: lam, cdf: cdf, ipr: D * sq };
+}
+function pickDoc(c, u){
+  let lo = 0, hi = c.cdf.length - 1;
+  while (lo < hi){ const mid = (lo + hi) >> 1; if (u <= c.cdf[mid]) hi = mid; else lo = mid + 1; }
+  return lo;
+}
+
+// ---- the one closed form the page turns on -------------------------------------------------
+// A document scanned every 1/r hours whose answers change as a Poisson process of rate mu is
+// materially stale, averaged over the cycle, with probability
+//        S(x) = 1 - (1 - e^-x)/x ,      x = mu/r
+// Not "half the period" - the average of a saturating exponential over the period.
+function staleShare(x){
+  if (x <= 0) return 0;
+  if (x < 1e-7) return x / 2 - x * x / 6;
+  if (x > 700) return 1;
+  return 1 - (1 - Math.exp(-x)) / x;
+}
+// Event-driven invalidation has a FLOOR that no budget removes: an edit whose webhook never fired
+// stays stale until some LATER edit of the same document happens to fire one. Walking backwards
+// through the edit stream, each arrival is detected (current), or material-and-undetected (stale),
+// or neither (keep walking) - so the floor is the ratio of two stopping probabilities, and the edit
+// rate cancels out of it entirely.
+function eventFloor(o){
+  const m = o.material, dt = o.detect;
+  return m * (1 - dt) / (dt + m * (1 - dt));
+}
+// ...plus the window between the edit and the re-embedding, for the events that DO fire.
+function eventStale(lamD, o){
+  return Math.min(1, eventFloor(o) + o.material * o.detect * Math.min(1, lamD * o.lag));
+}
+// expected embeddings per hour for a document scanned at rate r: a scan pays only when the content
+// hash moved, so the bill is set by the EDIT rate and the scan rate only buys you the news sooner.
+const embedsPerHour = (r, lamD) => r <= 0 ? 0 : r * (1 - Math.exp(-lamD / r));
+function modeCost(mode, r, d, c, o){
+  if (mode === 'live') return o.liveCost * c.w[d] * o.Q;
+  if (mode === 'event') return o.embedCost * c.lam[d] * o.detect;
+  if (mode === 'off') return 0;
+  const sweep = o.scanCost * r + o.embedCost * embedsPerHour(r, c.lam[d]);
+  if (mode === 'hybrid') return sweep + o.embedCost * c.lam[d] * o.detect;
+  return sweep;
+}
+function modeStale(mode, r, d, c, o){
+  if (mode === 'live') return 0;
+  if (mode === 'off') return 1;
+  if (mode === 'event') return eventStale(c.lam[d], o);
+  const sweep = staleShare(o.material * c.lam[d] / r);
+  if (mode === 'hybrid') return sweep * eventStale(c.lam[d], o);
+  return sweep;
+}
+
+// ---- allocation. Every policy is a vector of per-document modes and scan rates, and every policy
+// is SCALED so that it spends the same budget - which is the only way two of them can be compared.
+function shapeOf(kind, c, o){
+  const D = c.w.length, s = new Float64Array(D);
+  for (let d = 0; d < D; d++){
+    if (kind === 'uniform') s[d] = 1;
+    else if (kind === 'change') s[d] = c.lam[d];
+    else if (kind === 'query') s[d] = c.w[d];
+    else s[d] = Math.sqrt(c.w[d] * c.lam[d]);      // the square-root rule
+  }
+  let sum = 0;
+  for (let d = 0; d < D; d++) sum += s[d];
+  for (let d = 0; d < D; d++) s[d] /= sum;
+  return s;
+}
+function costOf(alloc, c, o){
+  let total = 0;
+  for (let d = 0; d < alloc.mode.length; d++) total += modeCost(alloc.mode[d], alloc.r[d], d, c, o);
+  return total;
+}
+function predictedStale(alloc, c, o){
+  let total = 0;
+  for (let d = 0; d < alloc.mode.length; d++) total += c.w[d] * modeStale(alloc.mode[d], alloc.r[d], d, c, o);
+  return total;
+}
+// bisect the scale of a shape until the bill is exactly the budget
+function scaleToBudget(kind, c, o, budget, baseMode){
+  const D = c.w.length, s = shapeOf(kind, c, o);
+  const mode = new Array(D).fill(baseMode || 'sweep');
+  const mk = g => ({ mode: mode, r: Float64Array.from(s, function(x){ return x * g; }) });
+  let lo = 1e-6, hi = 1e6;
+  if (costOf(mk(lo), c, o) > budget) return mk(lo);
+  for (let it = 0; it < 60; it++){
+    const mid = Math.sqrt(lo * hi);
+    if (costOf(mk(mid), c, o) > budget) hi = mid; else lo = mid;
+  }
+  return mk(lo);
+}
+// the numeric optimum: per document, pick the option that minimises stale + mu*cost, then bisect
+// the price mu until the bill lands on the budget. Four options per document - abandon it, sweep it
+// at some rate, wire an invalidation event to it, or stop indexing it and fetch it live at query
+// time - so the optimum is a MODE MAP, not a cadence.
+const RATES = (function(){ const g = []; for (let j = -14; j <= 18; j++) g.push(Math.pow(2, j / 2)); return g; })();
+const ABSRATES = [0.004, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 4];
+// The rate grid LOCATES each document's optimum; a bounded ternary search at the final price
+// polishes it, guarded so it can never return something worse than the grid point it started from.
+function refineRates(alloc, mu, c, o){
+  for (let d = 0; d < alloc.mode.length; d++){
+    const kind = alloc.mode[d];
+    if (kind !== 'sweep' && kind !== 'hybrid') continue;
+    const f = r => c.w[d] * modeStale(kind, r, d, c, o) + mu * modeCost(kind, r, d, c, o);
+    let lo = alloc.r[d] / 2, hi = alloc.r[d] * 2;
+    for (let it = 0; it < 26; it++){
+      const a = lo + (hi - lo) / 3, b = hi - (hi - lo) / 3;
+      if (f(a) <= f(b)) hi = b; else lo = a;
+    }
+    const r = (lo + hi) / 2;
+    if (r > 0 && f(r) < f(alloc.r[d])) alloc.r[d] = r;
+  }
+  return alloc;
+}
+// A Lagrangian relaxation over a DISCRETE option set lands UNDER the budget rather than on it, so
+// the leftover is spent by scaling every scan rate by one factor until the bill is exact. Scanning
+// more often is never harmful here, so this can only help - and at a high budget it buys nothing
+// measurable, which is the flat tail on the frontier chart rather than a bug.
+function spendRest(alloc, c, o, budget){
+  const base = Float64Array.from(alloc.r);
+  const scaled = g => ({ mode: alloc.mode, r: Float64Array.from(base, function(x){ return x * g; }) });
+  let lo = 1, hi = 1;
+  if (costOf(alloc, c, o) > budget){                       // the polish overshot: scale back down
+    for (let i = 0; i < 80 && costOf(scaled(lo), c, o) > budget; i++){ hi = lo; lo /= 2; }
+    if (costOf(scaled(lo), c, o) > budget) return scaled(lo);
+  } else {
+    for (let i = 0; i < 80 && costOf(scaled(hi), c, o) < budget; i++){ lo = hi; hi *= 2; }
+    if (costOf(scaled(hi), c, o) < budget) return scaled(hi);
+  }
+  for (let it = 0; it < 46; it++){
+    const mid = Math.sqrt(lo * hi);
+    if (costOf(scaled(mid), c, o) > budget) hi = mid; else lo = mid;
+  }
+  return scaled(lo);
+}
+function optimalAlloc(c, o, budget, allow){
+  const D = c.w.length;
+  const use = allow || { sweep: true, event: true, live: true, off: true };
+  const build = mu => {
+    const mode = new Array(D), r = new Float64Array(D);
+    for (let d = 0; d < D; d++){
+      let bm = 'off', br = 0, best = Infinity;
+      if (use.off) best = c.w[d] * 1 + mu * 0;
+      if (use.live){
+        const v = mu * modeCost('live', 0, d, c, o);
+        if (v < best){ best = v; bm = 'live'; br = 0; }
+      }
+      if (use.event){
+        const v = c.w[d] * eventStale(c.lam[d], o) + mu * modeCost('event', 0, d, c, o);
+        if (v < best){ best = v; bm = 'event'; br = 0; }
+      }
+      if (use.sweep || use.hybrid){
+        const kind = use.hybrid ? 'hybrid' : 'sweep';
+        for (let i = 0; i < RATES.length + ABSRATES.length; i++){
+          const rr = i < RATES.length ? Math.max(1e-6, c.lam[d] * RATES[i]) : ABSRATES[i - RATES.length];
+          const v = c.w[d] * modeStale(kind, rr, d, c, o) + mu * modeCost(kind, rr, d, c, o);
+          if (v < best){ best = v; bm = kind; br = rr; }
+        }
+      }
+      mode[d] = bm; r[d] = br;
+    }
+    return { mode: mode, r: r };
+  };
+  let lo = 1e-6, hi = 1e7;                  // mu small = spend everything, mu large = spend nothing
+  if (costOf(build(hi), c, o) > budget) return build(hi);
+  for (let it = 0; it < 46; it++){
+    const mid = Math.sqrt(lo * hi);
+    if (costOf(build(mid), c, o) > budget) lo = mid; else hi = mid;
+  }
+  return spendRest(refineRates(build(hi), hi, c, o), c, o, budget);
+}
+function allocate(c, o, policyIn, budgetIn){
+  const policy = policyIn || o.policy, budget = budgetIn === undefined ? o.budget : budgetIn;
+  const D = c.w.length;
+  if (policy === 'event'){
+    // events have NO dial: the bill is the edit rate times the detection rate, take it or leave it
+    return { mode: new Array(D).fill('event'), r: new Float64Array(D), fixed: true };
+  }
+  if (policy === 'hybrid'){
+    let evCost = 0;
+    for (let d = 0; d < D; d++) evCost += modeCost('event', 0, d, c, o);
+    const a = scaleToBudget('uniform', c, o, Math.max(0, budget - evCost), 'sweep');
+    return { mode: new Array(D).fill('hybrid'), r: a.r, evCost: evCost };
+  }
+  if (policy === 'optimal') return optimalAlloc(c, o, budget);
+  // the SAME water-fill, except the event option always carries a floor sweep underneath it. The
+  // naive optimum above is allowed to leave a document on events alone, which is the one thing a
+  // duplicated fact cannot survive - and its objective, being per-document, cannot see that.
+  if (policy === 'optimalPlus') return optimalAlloc(c, o, budget, { hybrid: true, live: true, off: true });
+  if (policy === 'sweepOnly') return optimalAlloc(c, o, budget, { sweep: true, off: true });
+  return scaleToBudget(policy, c, o, budget, 'sweep');   // uniform | change | query | sqrt
+}
+
+// ---- one query. No text, no model, no embedding vectors: a query hits a document, the index holds
+// that document as of its last refresh, and the only questions are whether a material edit happened
+// in between, whether the stale chunk is still RETRIEVABLE, and whether a second copy of the fact
+// exists in some other document.
+function lastSweep(t, r, phase){
+  if (!(r > 0)) return 0;
+  const tau = 1 / r;
+  const k = Math.floor(t / tau - phase);
+  const s = tau * (k + phase);
+  return s > 0 ? s : 0;                      // the index was built at t = 0
+}
+function isCurrent(d, e, t, alloc, c, o, world, uSelf, uWin, primary){
+  const mode = alloc.mode[d];
+  if (mode === 'live') return true;
+  if (mode === 'off') return false;          // only the build at t=0, and e > 0
+  if (mode === 'sweep' || mode === 'hybrid'){
+    if (lastSweep(t, alloc.r[d], world.phase[d]) >= e) return true;
+  }
+  if (mode === 'event' || mode === 'hybrid'){
+    const win = t - o.lag - e;
+    if (primary){
+      // the edit that changed the answer was an edit of THIS document, so it fires its own event
+      if (uSelf < o.detect && win >= 0) return true;
+      // failing that, any LATER non-material edit of the same document re-embeds it by accident
+      const rate = c.lam[d] * (1 - o.material) * o.detect;
+      if (win > 0 && uWin < 1 - Math.exp(-rate * win)) return true;
+    } else {
+      // a DUPLICATED fact is the blind spot: the fact changed in another document, so no event
+      // ever fires for this one. Only an edit of its own can drag it back to current.
+      const rate = c.lam[d] * o.detect;
+      if (win > 0 && uWin < 1 - Math.exp(-rate * win)) return true;
+    }
+  }
+  return false;
+}
+
+function evaluate(world, o, alloc, c, weight){
+  const cc = c || corpus(world, o);
+  const al = alloc || allocate(cc, o);
+  const N = world.N;
+  let correct = 0, miss = 0, stale = 0, staleDup = 0, both = 0, mixed = 0;
+  let ageSum = 0; const ages = [];
+  let copyStale = 0;
+  const uniform = weight === 'doc';
+  for (let i = 0; i < N; i++){
+    const d = uniform ? Math.min(world.D - 1, Math.floor(qAt(world, i, 0) * world.D))
+                      : pickDoc(cc, qAt(world, i, 0));
+    const t = o.burn + qAt(world, i, 1) * (o.H - o.burn);
+    const mu = o.material * cc.lam[d];
+    if (mu <= 0){ correct++; continue; }
+    const A = -Math.log(1 - qAt(world, i, 2) * 0.999999999) / mu;
+    const e = t - A;
+    if (e <= 0){ correct++; continue; }             // nothing material since the index was built
+    const visible = qAt(world, i, 3) >= o.small;    // a big edit moves the chunk out of the top k
+    const cur1 = isCurrent(d, e, t, al, cc, o, world, qAt(world, i, 4), qAt(world, i, 5), true);
+    if (!cur1) copyStale++;
+    const hasDup = qAt(world, i, 6) < o.dup;
+    let cur2 = true, d2 = -1;
+    if (hasDup){
+      d2 = pickDoc(cc, qAt(world, i, 7));
+      if (d2 === d) d2 = (d + 1) % world.D;
+      cur2 = isCurrent(d2, e, t, al, cc, o, world, qAt(world, i, 8), qAt(world, i, 9), false);
+    }
+    let out;
+    if (!hasDup){
+      out = cur1 ? 'correct' : (visible ? 'miss' : 'stale');
+    } else if (cur1 && cur2){
+      out = 'correct';
+    } else if (!cur1 && !cur2){
+      both++;
+      out = visible ? 'miss' : 'stale';
+    } else {
+      mixed++;
+      // one copy current, one stale. A big edit costs the stale copy its rank; a small one leaves
+      // the retriever to pick, and the retriever has no idea which chunk is newer.
+      out = visible ? 'correct' : (qAt(world, i, 10) < o.rankBias ? 'stale' : 'correct');
+    }
+    if (out === 'correct') correct++;
+    else if (out === 'miss') miss++;
+    else {
+      stale++; ageSum += A; ages.push(A);
+      if (hasDup && cur1) staleDup++;
+    }
+  }
+  ages.sort(function(x, y){ return x - y; });
+  const p = q => ages.length ? ages[Math.min(ages.length - 1, Math.floor(q * ages.length))] : 0;
+  return { correct: correct / N, miss: miss / N, stale: stale / N, stalePerK: 1000 * stale / N,
+           copyStaleRate: copyStale / N, meanAge: ages.length ? ageSum / ages.length : 0,
+           p50Age: p(0.5), p99Age: p(0.99), maxAge: ages.length ? ages[ages.length - 1] : 0,
+           staleFromDup: stale ? staleDup / stale : 0, mixedRate: mixed / N, bothRate: both / N,
+           cost: costOf(al, cc, o), predictedCopy: predictedStale(al, cc, o) };
+}
+
+// a policy's whole frontier, so nothing is ever compared at two different prices
+function frontier(world, o, policy, budgets){
+  const c = corpus(world, o);
+  return budgets.map(function(b){
+    const al = allocate(c, o, policy, b);
+    const e = evaluate(world, o, al, c);
+    return { budget: b, cost: e.cost, stale: e.stale, stalePerK: e.stalePerK, correct: e.correct,
+             miss: e.miss, p99Age: e.p99Age };
+  });
+}
+// what the mode map looks like: how many documents, and how much QUERY WEIGHT, in each mode
+function modeMap(alloc, c){
+  const count = { sweep: 0, event: 0, live: 0, off: 0, hybrid: 0 };
+  const weight = { sweep: 0, event: 0, live: 0, off: 0, hybrid: 0 };
+  for (let d = 0; d < alloc.mode.length; d++){ count[alloc.mode[d]]++; weight[alloc.mode[d]] += c.w[d]; }
+  return { count: count, weight: weight };
+}
+// display only: one document's actual timeline, forward-generated
+function timeline(world, o, d, span, seed){
+  const c = corpus(world, o), al = allocate(c, o);
+  const rnd = mulberry32(seed || (1000 + d));
+  const t0 = Math.max(0, o.H - span), ev = [];
+  let t = 0;
+  while (t < o.H){
+    t += -Math.log(1 - rnd()) / c.lam[d];
+    if (t >= o.H) break;
+    const material = rnd() < o.material, detected = rnd() < o.detect;
+    if (t >= t0) ev.push({ t: t, material: material, detected: detected });
+  }
+  const sweeps = [];
+  if (al.r[d] > 0 && (al.mode[d] === 'sweep' || al.mode[d] === 'hybrid')){
+    const tau = 1 / al.r[d];
+    for (let k = Math.ceil((t0 / tau) - world.phase[d]); ; k++){
+      const s = tau * (k + world.phase[d]);
+      if (s > o.H) break;
+      if (s >= t0) sweeps.push(s);
+      if (sweeps.length > 4000) break;
+    }
+  }
+  return { edits: ev, sweeps: sweeps, mode: al.mode[d], r: al.r[d], lam: c.lam[d],
+           t0: t0, t1: o.H, w: c.w[d] };
+}
+// ===== ENGINE:END =====
+
+// ---------------------------------------------------------------- UI
+const $ = id => document.getElementById(id);
+const SEEDS = [2026, 7, 99, 41, 512];
+const WORLDS = SEEDS.map(function(s){ return buildWorld({}, s); });
+const W = WORLDS[0];
+let policy = 'uniform';   // what everybody actually runs, so the page opens on it
+let docIdx = 0;
+
+const pct = x => (100 * x).toFixed(2) + "%";
+const pct1 = x => (100 * x).toFixed(1) + "%";
+const p2 = x => x.toFixed(2);
+const perK = x => (1000 * x).toFixed(1);
+
+// EVERY engine entry point takes a COMPLETE options object - the sliders are an overlay on
+// DEFAULTS, never a replacement for it. Dropping the merge here leaves o.scanCost undefined, which
+// does not throw: it quietly turns every cost into NaN, every bisection into a no-op, and every
+// number on the page into garbage. The self-test checks for it.
+function opts(extra){
+  return Object.assign({}, DEFAULTS, {
+    zipf: +$("sZ").value / 100,
+    rho: +$("sR").value / 100,
+    edits: +$("sE").value,
+    material: +$("sM").value / 100,
+    small: +$("sS").value / 100,
+    dup: +$("sD").value / 100,
+    rankBias: +$("sB").value / 100,
+    detect: +$("sT").value / 1000,
+    lag: +$("sL").value / 10,
+    budget: +$("sG").value / 10,
+    policy: policy
+  }, extra || {});
+}
+// average over every world: one number per configuration, five worlds of 3,000 queries. Every
+// metric of a configuration comes out of ONE pass, cached, because a water-filled allocation is
+// expensive and a table reads six columns off the same run.
+const KEYS = ['correct', 'miss', 'stale', 'stalePerK', 'copyStaleRate', 'meanAge', 'p50Age',
+              'p99Age', 'staleFromDup', 'mixedRate', 'bothRate', 'cost', 'predictedCopy'];
+const statCache = new Map();
+function stats(o, pol, budget, weight, worlds){
+  const ws = worlds || WORLDS;
+  const b = budget === undefined ? o.budget : budget;
+  const key = (pol || o.policy) + '|' + b + '|' + (weight || '') + '|' + ws.length + '|' +
+              JSON.stringify(o);
+  const hit = statCache.get(key);
+  if (hit) return hit;
+  const acc = {};
+  for (let i = 0; i < KEYS.length; i++) acc[KEYS[i]] = 0;
+  for (let j = 0; j < ws.length; j++){
+    const c = corpus(ws[j], o);
+    const e = evaluate(ws[j], o, allocate(c, o, pol || o.policy, b), c, weight);
+    for (let i = 0; i < KEYS.length; i++) acc[KEYS[i]] += e[KEYS[i]] / ws.length;
+  }
+  if (statCache.size > 3000) statCache.clear();
+  statCache.set(key, acc);
+  return acc;
+}
+const A = (o, key, pol, budget, weight) => stats(o, pol, budget, weight)[key];
+// one world, used where a table sweeps a corpus parameter and would otherwise cost five water-fills
+const A1 = (o, key, pol, budget) => stats(o, pol, budget, undefined, [W])[key];
+function eventPrice(o){
+  return mean(WORLDS.map(function(w){
+    const c = corpus(w, o);
+    return costOf(allocate(c, o, 'event'), c, o);
+  }));
+}
+
+const POLICIES = [
+  ['every doc, same cadence', 'uniform'],
+  ['&prop; change rate', 'change'],
+  ['&prop; queries', 'query'],
+  ['&radic;(queries &times; change)', 'sqrt'],
+  ['optimal, sweeps only', 'sweepOnly'],
+  ['optimal, all four modes', 'optimal'],
+  ['optimal, webhook + floor sweep', 'optimalPlus'],
+  ['webhook (no dial)', 'event'],
+  ['webhook + sweep', 'hybrid']
+];
+const CURVES = [['uniform', '#f87171'], ['change', '#fbbf24'], ['query', '#38bdf8'],
+                ['sqrt', '#4ade80'], ['sweepOnly', '#c084fc']];
+
+let memo = { key: null, val: null };
+function heavy(){
+  const o = opts();
+  const key = JSON.stringify(o);
+  if (memo.key === key) return memo.val;
+  const budgets = [];
+  for (let i = 0; i <= 8; i++) budgets.push(o.budget * Math.pow(2, (i - 4) / 2.2));
+  const curves = CURVES.map(function(cv){ return frontier(W, o, cv[0], budgets); });
+  const evPrice = eventPrice(o);
+  const evPoint = { cost: evPrice, stalePerK: 1000 * A(o, 'stale', 'event'),
+                    p99Age: A(o, 'p99Age', 'event') };
+  const c0 = corpus(W, o);
+  memo = { key: key, val: { o: o, curves: curves, evPrice: evPrice, evPoint: evPoint, ipr: c0.ipr,
+                            cur: { correct: A(o, 'correct'), miss: A(o, 'miss'),
+                                   stale: A(o, 'stale'), cost: A(o, 'cost'),
+                                   copy: A(o, 'copyStaleRate'), pred: A(o, 'predictedCopy'),
+                                   docCopy: A(o, 'copyStaleRate', null, undefined, 'doc'),
+                                   p99: A(o, 'p99Age'), dupShare: A(o, 'staleFromDup') } } };
+  return memo.val;
+}
+
+// ---------------------------------------------------------------- charts
+function drawFrontier(id, h, key, label, evY, fmt){
+  const c = $(id), g = c.getContext("2d");
+  const w = c.width, ht = c.height, L = 48, Rm = 14, T = 14, B = 30;
+  g.clearRect(0, 0, w, ht);
+  const all = [].concat.apply([], h.curves);
+  const xs = all.map(function(p){ return p.cost; }).concat([h.evPoint.cost]);
+  const ys = all.map(function(p){ return p[key]; }).concat([evY]);
+  const xMin = Math.min.apply(null, xs) * 0.96, xMax = Math.max.apply(null, xs) * 1.04;
+  const yMax = Math.max(1e-6, Math.max.apply(null, ys)) * 1.10;
+  const X = v => L + ((v - xMin) / (xMax - xMin)) * (w - L - Rm);
+  const Y = v => T + (1 - v / yMax) * (ht - T - B);
+  g.strokeStyle = "#1e293b"; g.fillStyle = "#64748b"; g.font = "10px sans-serif";
+  for (let i = 0; i <= 5; i++){
+    const v = i * yMax / 5, y = Y(v);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(w - Rm, y); g.stroke();
+    g.fillText(fmt(v), 4, y + 3);
+  }
+  for (let i = 0; i <= 4; i++){
+    const v = xMin + i * (xMax - xMin) / 4;
+    g.fillText(v.toFixed(1), X(v) - 9, ht - 10);
+  }
+  g.fillStyle = "#94a3b8"; g.fillText(label, 4, 10);
+  g.fillText("spend, units per hour →", w - 132, 10);
+  h.curves.forEach(function(arr, ci){
+    g.strokeStyle = CURVES[ci][1]; g.fillStyle = CURVES[ci][1]; g.lineWidth = 2;
+    g.beginPath();
+    arr.forEach(function(p, i){ const x = X(p.cost), y = Y(p[key]); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+    g.stroke();
+    arr.forEach(function(p){ g.beginPath(); g.arc(X(p.cost), Y(p[key]), 2.1, 0, 7); g.fill(); });
+  });
+  // the webhook is a single point, because it has no dial to sweep
+  g.fillStyle = "#f472b6";
+  g.beginPath(); g.arc(X(h.evPoint.cost), Y(evY), 5, 0, 7); g.fill();
+  g.fillText("webhook", X(h.evPoint.cost) - 22, Y(evY) - 9);
+}
+
+function drawMap(h){
+  const c = $("chartMap"), g = c.getContext("2d");
+  const w = c.width, ht = c.height, L = 46, Rm = 12, T = 14, B = 30;
+  g.clearRect(0, 0, w, ht);
+  const o = h.o, cc = corpus(W, o), al = allocate(cc, o, 'optimal', o.budget);
+  const lx = v => Math.log10(Math.max(1e-6, v));
+  const xs = [], ys = [];
+  for (let d = 0; d < cc.w.length; d++){ xs.push(lx(cc.w[d])); ys.push(lx(cc.lam[d])); }
+  const xMin = Math.min.apply(null, xs), xMax = Math.max.apply(null, xs);
+  const yMin = Math.min.apply(null, ys), yMax = Math.max.apply(null, ys);
+  const X = v => L + ((v - xMin) / (xMax - xMin + 1e-9)) * (w - L - Rm);
+  const Y = v => T + (1 - (v - yMin) / (yMax - yMin + 1e-9)) * (ht - T - B);
+  g.strokeStyle = "#1e293b"; g.fillStyle = "#64748b"; g.font = "10px sans-serif";
+  for (let i = 0; i <= 4; i++){
+    const y = T + i * (ht - T - B) / 4;
+    g.beginPath(); g.moveTo(L, y); g.lineTo(w - Rm, y); g.stroke();
+    const v = yMax - i * (yMax - yMin) / 4;
+    g.fillText(Math.pow(10, v).toFixed(v < -2 ? 4 : 3), 3, y + 3);
+  }
+  g.fillStyle = "#94a3b8";
+  g.fillText("↑ edits per hour", 3, 10);
+  g.fillText("share of queries →", w - 118, 10);
+  const COL = { sweep: "#38bdf8", event: "#c084fc", live: "#4ade80", off: "#f87171", hybrid: "#38bdf8" };
+  for (let d = 0; d < cc.w.length; d++){
+    g.fillStyle = COL[al.mode[d]] || "#94a3b8";
+    g.beginPath(); g.arc(X(lx(cc.w[d])), Y(lx(cc.lam[d])), 3, 0, 7); g.fill();
+  }
+  for (let i = 0; i <= 3; i++){
+    const v = xMin + i * (xMax - xMin) / 3;
+    g.fillStyle = "#64748b";
+    g.fillText((100 * Math.pow(10, v)).toFixed(2) + "%", X(v) - 12, ht - 10);
+  }
+}
+
+function drawTime(h){
+  const c = $("chartTime"), g = c.getContext("2d");
+  const w = c.width, ht = c.height, L = 10, Rm = 10, T = 26, B = 26;
+  g.clearRect(0, 0, w, ht);
+  const o = h.o, tl = timeline(W, o, docIdx, 72, 4242 + docIdx);
+  const X = t => L + ((t - tl.t0) / (tl.t1 - tl.t0)) * (w - L - Rm);
+  const midY = T + (ht - T - B) * 0.55;
+  // the refresh set, and the stale intervals it leaves behind
+  const refresh = tl.sweeps.slice();
+  if (tl.mode === 'event' || tl.mode === 'hybrid')
+    tl.edits.forEach(function(e){ if (e.detected) refresh.push(e.t + o.lag); });
+  refresh.sort(function(a, b){ return a - b; });
+  const bad = [];
+  tl.edits.forEach(function(e){
+    if (!e.material) return;
+    let end = tl.t1;
+    for (let i = 0; i < refresh.length; i++) if (refresh[i] >= e.t){ end = Math.min(end, refresh[i]); break; }
+    bad.push([e.t, end]);
+  });
+  g.fillStyle = "#7f1d1d";
+  bad.forEach(function(b){ g.fillRect(X(b[0]), midY - 16, Math.max(1.5, X(b[1]) - X(b[0])), 32); });
+  g.strokeStyle = "#475569"; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(L, midY); g.lineTo(w - Rm, midY); g.stroke();
+  g.strokeStyle = "#38bdf8";
+  tl.sweeps.forEach(function(s){
+    g.beginPath(); g.moveTo(X(s), midY + 4); g.lineTo(X(s), midY + 20); g.stroke();
+  });
+  tl.edits.forEach(function(e){
+    g.strokeStyle = e.material ? "#f87171" : "#64748b"; g.lineWidth = e.material ? 2 : 1;
+    g.beginPath(); g.moveTo(X(e.t), midY - 20); g.lineTo(X(e.t), midY - 4); g.stroke();
+    if (e.detected && (tl.mode === 'event' || tl.mode === 'hybrid')){
+      g.fillStyle = "#c084fc";
+      g.beginPath(); g.arc(X(Math.min(tl.t1, e.t + o.lag)), midY + 24, 2.6, 0, 7); g.fill();
+    }
+  });
+  g.fillStyle = "#94a3b8"; g.font = "10px sans-serif";
+  g.fillText("edits ↑", 4, T - 12);
+  g.fillText("scans ↓", 4, ht - 8);
+  for (let hh = 12; hh <= 72; hh += 12){
+    const t = tl.t0 + hh;
+    g.fillStyle = "#64748b";
+    g.fillText("-" + (72 - hh) + "h", X(t) - 8, T - 12);
+  }
+  let badHours = 0;
+  bad.forEach(function(b){ badHours += Math.min(tl.t1, b[1]) - b[0]; });
+  $("timeNote").textContent =
+    "Document #" + (docIdx + 1) + " of 300: " + (100 * tl.w).toFixed(2) + "% of queries, " +
+    tl.lam.toFixed(3) + " edits per hour, mode " + tl.mode +
+    (tl.r > 0 ? " every " + (1 / tl.r).toFixed(1) + " h" : "") + ". Over these 72 hours it took " +
+    tl.edits.length + " edits, " + tl.edits.filter(function(e){ return e.material; }).length +
+    " of which changed an answer, and the index held something wrong for " + badHours.toFixed(1) +
+    " h — " + pct1(badHours / 72) + " of the window. Forward-generated for display only; every " +
+    "number elsewhere on the page comes from the backward construction.";
+}
+
+// ---------------------------------------------------------------- tables
+function render(){
+  $("vZ").textContent = (+$("sZ").value / 100).toFixed(2);
+  $("vR").textContent = (+$("sR").value / 100).toFixed(2);
+  $("vE").textContent = $("sE").value;
+  $("vM").textContent = $("sM").value + "%";
+  $("vS").textContent = $("sS").value + "%";
+  $("vD").textContent = $("sD").value + "%";
+  $("vB").textContent = $("sB").value + "%";
+  $("vT").textContent = (+$("sT").value / 10).toFixed(1) + "%";
+  $("vL").textContent = (+$("sL").value / 10).toFixed(1);
+  $("vG").textContent = (+$("sG").value / 10).toFixed(1);
+
+  const h = heavy(), o = h.o, cur = h.cur;
+  $("bigOk").textContent = pct(cur.correct);
+  $("bigMiss").textContent = pct(cur.miss);
+  $("bigStale").textContent = perK(cur.stale) + " / 1k";
+  $("noteOk").textContent = "the index held the current answer, or the fact had not changed since " +
+    "its last refresh. Bill: " + p2(cur.cost) + " units per hour, against " +
+    p2(o.liveCost === undefined ? 75 : 75) + " to fetch every document live and never be stale.";
+  $("noteMiss").textContent = "the edit was large enough to move the chunk, so the stale copy no " +
+    "longer matched the query and dropped out of the top k. A miss is a bad answer you can see.";
+  $("noteStale").textContent = pct(cur.stale) + " of queries. " + pct1(cur.dupShare) +
+    " of them came from a second copy of the fact in a document nobody edited. 99th percentile " +
+    "age of the error: " + cur.p99.toFixed(1) + " h.";
+
+  // ---- the dashboard and the user
+  $("dash").innerHTML = [
+    ['documents holding a stale copy', 'uniformly over documents', cur.docCopy],
+    ['retrieved copies that are stale', 'over queries (Zipf)', cur.copy],
+    ['answers that are stale', 'over queries (Zipf)', cur.stale]
+  ].map(function(r){
+    return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td><td class='" +
+      (r[2] > 0.03 ? 'bad' : (r[2] > 0.01 ? 'warn' : 'ok')) + "'>" + pct(r[2]) + "</td><td>" +
+      perK(r[2]) + "</td></tr>";
+  }).join("");
+  $("dashNote").textContent =
+    "The first row is what an indexing dashboard reports; the third is what a user meets. The " +
+    "multiplier between them is the inverse participation ratio of the query distribution, " +
+    "D·Σw² = " + h.ipr.toFixed(2) + " here, which is one SQL query over a week of logs. " +
+    "Measured ratio of stale copies per query to stale copies per document: " +
+    (cur.docCopy > 0 ? (cur.copy / cur.docCopy).toFixed(2) : "∞") + "×.";
+
+  // ---- rho: identical everything, one correlation
+  const rhos = [0, 0.25, 0.5, 0.75, 1];
+  $("rho").innerHTML = rhos.map(function(r){
+    const oo = Object.assign({}, o, { rho: r });
+    const st = A(oo, 'stale'), dc = A(oo, 'copyStaleRate', null, undefined, 'doc');
+    const qc = A(oo, 'copyStaleRate'), co = A(oo, 'cost');
+    const mark = Math.abs(r - o.rho) < 0.06 ? " style='background:#fef3c7'" : "";
+    return "<tr" + mark + "><td>" + r.toFixed(2) + "</td><td>" + o.edits + "</td><td>" + p2(co) +
+      "</td><td class='ok'>" + pct(dc) + "</td><td>" + pct(qc) + "</td><td class='" +
+      (st > 0.03 ? 'bad' : 'warn') + "'>" + pct(st) + "</td><td>" + perK(st) + "</td></tr>";
+  }).join("");
+  const r0 = A(Object.assign({}, o, { rho: 0 }), 'stale');
+  const r1 = A(Object.assign({}, o, { rho: 1 }), 'stale');
+  const d0 = A(Object.assign({}, o, { rho: 0 }), 'copyStaleRate', null, undefined, 'doc');
+  const d1 = A(Object.assign({}, o, { rho: 1 }), 'copyStaleRate', null, undefined, 'doc');
+  $("rhoNote").textContent =
+    "Total edits per hour, refresh budget, policy and bill are identical in every row — the only " +
+    "thing that changes is WHICH documents get edited. Stale answers go " + perK(r0) + " to " +
+    perK(r1) + " per thousand, " + (r0 > 0 ? (r1 / r0).toFixed(1) : "∞") +
+    "×, while the document-weighted number a dashboard reports goes " + pct(d0) + " to " +
+    pct(d1) + " — it " + (d1 < d0 ? "IMPROVES" : "worsens") +
+    ". No indexing config has a field for this.";
+
+  // ---- equal cost
+  const target = o.budget;
+  $("equal").innerHTML = POLICIES.map(function(p){
+    const fixed = p[1] === 'event';
+    const st = A(o, 'stale', p[1], target), co = A(o, 'cost', p[1], target);
+    const cls = st < 0.011 ? 'ok' : (st > 0.025 ? 'bad' : 'warn');
+    return "<tr" + (p[1] === policy ? " style='background:#fef3c7'" : "") + "><td>" + p[0] +
+      (fixed ? " *" : "") + "</td><td>" + p2(co) + "</td><td class='" + cls + "'>" + pct(st) +
+      "</td><td>" + perK(st) + "</td><td>" + pct(A(o, 'miss', p[1], target)) + "</td><td>" +
+      A(o, 'p99Age', p[1], target).toFixed(1) + "</td><td>" +
+      perK(A(o, 'predictedCopy', p[1], target)) + "</td><td>" +
+      pct1(A(o, 'staleFromDup', p[1], target)) + "</td></tr>";
+  }).join("");
+  const sq = A(o, 'stale', 'sqrt', target), op = A(o, 'stale', 'optimal', target);
+  const opp = A(o, 'stale', 'optimalPlus', target), so = A(o, 'stale', 'sweepOnly', target);
+  const evAt = A(o, 'stale', 'event'), sqAtEv = A(o, 'stale', 'sqrt', h.evPrice);
+  const uniAtEv = A(o, 'stale', 'uniform', h.evPrice);
+  $("equalNote").textContent =
+    "* the webhook has no dial: its bill is the edit rate times the detection rate, so it appears " +
+    "at its own price of " + p2(h.evPrice) + " and the fair comparison is √(q×λ) " +
+    "bisected onto the same money, which ships " + perK(sqAtEv) + " per thousand against the " +
+    "webhook's " + perK(evAt) + " with a p99 error age of " +
+    A(o, 'p99Age', 'sqrt', h.evPrice).toFixed(1) + " h against " + A(o, 'p99Age', 'event').toFixed(1) +
+    " h. A flat cadence at that price ships " + perK(uniAtEv) +
+    " — worse on the mean, far better on the tail. The optimiser wins the predicted column (" +
+    perK(A(o, 'predictedCopy', 'optimal', target)) + " against √'s " +
+    perK(A(o, 'predictedCopy', 'sqrt', target)) + ") and loses the measured one (" + perK(op) +
+    " against " + perK(sq) + "); adding a floor sweep under every webhook predicts " +
+    perK(A(o, 'predictedCopy', 'optimalPlus', target)) + " and ships " + perK(opp) +
+    ". Deleting the webhook option instead gives " + perK(so) + ".";
+
+  // ---- the inversion matrix
+  const cols = [0, 0.25, 0.55, 0.8, 1];
+  $("matHead").innerHTML = "<th>policy</th>" +
+    cols.map(function(r){ return "<th>&rho; = " + r.toFixed(2) + "</th>"; }).join("") +
+    "<th>worst / best</th>";
+  const grid = POLICIES.filter(function(p){ return p[1] !== 'event' && p[1] !== 'hybrid' &&
+                                                   p[1] !== 'optimalPlus'; })
+    .map(function(p){
+      return { name: p[0], key: p[1],
+               vals: cols.map(function(r){ return A1(Object.assign({}, o, { rho: r }), 'stale', p[1], o.budget); }) };
+    });
+  const bestPer = cols.map(function(_, i){ return Math.min.apply(null, grid.map(function(g){ return g.vals[i]; })); });
+  const worstPer = cols.map(function(_, i){ return Math.max.apply(null, grid.map(function(g){ return g.vals[i]; })); });
+  $("matrix").innerHTML = grid.map(function(g){
+    const cells = g.vals.map(function(v, i){
+      const cls = Math.abs(v - bestPer[i]) < 1e-12 ? "win" : (Math.abs(v - worstPer[i]) < 1e-12 ? "lose" : "");
+      return "<td class='" + cls + "'>" + perK(v) + "</td>";
+    }).join("");
+    const sp = Math.min.apply(null, g.vals) > 0
+      ? (Math.max.apply(null, g.vals) / Math.min.apply(null, g.vals)).toFixed(1) + "×" : "—";
+    return "<tr><td>" + g.name + "</td>" + cells + "<td>" + sp + "</td></tr>";
+  }).join("");
+  const chg = grid.filter(function(g){ return g.key === 'change'; })[0];
+  const uni = grid.filter(function(g){ return g.key === 'uniform'; })[0];
+  $("matNote").textContent =
+    "Green is the best policy in that column, red the worst; every cell spends " + p2(o.budget) +
+    " units an hour. Proportional-to-change-rate goes from " + perK(chg.vals[0]) + " per thousand " +
+    "at ρ = 0, where it is the worst option on offer, to " + perK(chg.vals[4]) +
+    " at ρ = 1, where a flat cadence ships " + perK(uni.vals[4]) +
+    ". That first half is Cho and Garcia-Molina's 2000 crawler result reproduced on a retrieval " +
+    "index: uniform beats proportional-to-change. The second half is the inversion — at ρ = 1 " +
+    "the change, query and √ shapes are algebraically the same vector, which is why three " +
+    "rows agree exactly. One world of " + W.N + " queries in this table, not five, because it " +
+    "sweeps a corpus parameter and every cell is a fresh allocation.";
+
+  drawFrontier("chartFront", h, "stalePerK", "stale answers per 1,000", h.evPoint.stalePerK,
+               function(v){ return v.toFixed(0); });
+  drawFrontier("chartTail", h, "p99Age", "p99 age of the error, hours", h.evPoint.p99Age,
+               function(v){ return v.toFixed(0); });
+  $("legend1").innerHTML = $("legend2").innerHTML = CURVES.map(function(cv, i){
+    return "<span class='swatch" + (i ? " ml-3" : "") + "' style='background:" + cv[1] + "'></span>" +
+      POLICIES.filter(function(p){ return p[1] === cv[0]; })[0][0];
+  }).join("");
+  $("frontNote").textContent =
+    "Every point is a bill, so the vertical distance between two curves at the same x is the only " +
+    "legal comparison. One world of " + W.N + " queries for the curves, five for every number in " +
+    "the tables. The webhook is a single dot because it has no dial.";
+  $("tailNote").textContent =
+    "The same runs, scored on the 99th percentile age of the answers that were wrong. A webhook " +
+    "and a sweep can tie on the mean and differ by days here: an undetected event leaves a " +
+    "document stale until its next edit, while a sweep's error can never be older than one period.";
+
+  drawMap(h);
+  const mm = modeMap(allocate(corpus(W, o), o, 'optimal', o.budget), corpus(W, o));
+  $("mapNote").textContent =
+    "The numeric optimum at " + p2(o.budget) + " units an hour, over one world: " +
+    mm.count.sweep + " documents swept, " + mm.count.event + " on a webhook, " + mm.count.live +
+    " taken out of the index and fetched live, " + mm.count.off + " abandoned — carrying " +
+    pct1(mm.weight.sweep) + " / " + pct1(mm.weight.event) + " / " + pct1(mm.weight.live) + " / " +
+    pct1(mm.weight.off) + " of the queries. The boundaries are prices, not opinions: high " +
+    "volatility with low query volume is a live-fetch document, and abandonment is what the " +
+    "arithmetic does with a document it cannot afford to keep up with.";
+
+  // ---- the webhook's floor
+  const rows = [[1, 0], [1, o.lag], [0.995, o.lag], [o.detect, o.lag], [0.90, o.lag]];
+  $("floor").innerHTML = rows.map(function(r){
+    const oo = Object.assign({}, o, { detect: r[0], lag: r[1] });
+    const st = A(oo, 'stale', 'event');
+    const tb = A(Object.assign({}, oo, { rankBias: 0 }), 'stale', 'event');
+    const nd = A(Object.assign({}, oo, { dup: 0 }), 'stale', 'event');
+    return "<tr" + (Math.abs(r[0] - o.detect) < 1e-9 && r[1] === o.lag ? " style='background:#fef3c7'" : "") +
+      "><td>" + (100 * r[0]).toFixed(1) + "%</td><td>" + r[1].toFixed(1) + "</td><td>" +
+      pct(eventFloor(oo)) + "</td><td>" + p2(A(oo, 'cost', 'event')) + "</td><td class='" +
+      (st > 0.03 ? 'bad' : 'warn') + "'>" + pct(st) + "</td><td>" + perK(st) + "</td><td>" +
+      A(oo, 'p99Age', 'event').toFixed(1) + "</td><td>" + perK(nd) + "</td><td class='ok'>" +
+      perK(tb) + "</td></tr>";
+  }).join("");
+  const perfect = Object.assign({}, o, { detect: 1, lag: 0 });
+  $("floorNote").textContent =
+    "The closed-form floor is m(1-detect)/(detect + m(1-detect)) — note that the edit rate is not " +
+    "in it, so a webhook's floor is a property of the webhook and not of the corpus. The top row " +
+    "is the corner worth checking: a PERFECT webhook, every edit detected and zero lag, still " +
+    "ships " + perK(A(perfect, 'stale', 'event')) + " stale answers per thousand, because the " +
+    "event fires for the document that changed and the stale copy is in a document that did not. " +
+    "With one copy of every fact it ships " + perK(A(Object.assign({}, perfect, { dup: 0 }), 'stale', 'event')) +
+    ", and with a recency tiebreak in the reranker it ships " +
+    perK(A(Object.assign({}, perfect, { rankBias: 0 }), 'stale', 'event')) + ".";
+
+  // ---- duplication
+  $("dup").innerHTML = [0, 0.15, 0.30, 0.60].map(function(dp){
+    const oo = Object.assign({}, o, { dup: dp });
+    const tb = Object.assign({}, oo, { rankBias: 0 });
+    return "<tr" + (Math.abs(dp - o.dup) < 0.02 ? " style='background:#fef3c7'" : "") + "><td>" +
+      (100 * dp).toFixed(0) + "%</td><td>" + perK(A(oo, 'stale', 'sqrt', o.budget)) + "</td><td class='ok'>" +
+      perK(A(tb, 'stale', 'sqrt', o.budget)) + "</td><td class='bad'>" + perK(A(oo, 'stale', 'event')) +
+      "</td><td class='ok'>" + perK(A(tb, 'stale', 'event')) + "</td><td>" +
+      pct1(A(oo, 'staleFromDup', 'event')) + "</td></tr>";
+  }).join("");
+  const evNoDup = A(Object.assign({}, o, { dup: 0 }), 'stale', 'event');
+  const evTb = A(Object.assign({}, o, { rankBias: 0 }), 'stale', 'event');
+  const sqTb = A(Object.assign({}, o, { rankBias: 0 }), 'stale', 'sqrt', o.budget);
+  $("dupNote").textContent =
+    "A duplicated fact goes stale in both copies at once and is cured by whichever document is " +
+    "refreshed first, so when one copy is current and the other is not, the answer is decided by " +
+    "the RETRIEVER. Preferring the newer chunk takes the webhook from " + perK(evAt) + " to " +
+    perK(evTb) + " per thousand and the √ sweep from " + perK(sq) + " to " + perK(sqTb) +
+    ". Duplication is what the webhook cannot survive: " + perK(evNoDup) + " with one copy of " +
+    "every fact against " + perK(evAt) + " at " + (100 * o.dup).toFixed(0) +
+    "% duplicated, all of it in a blind spot no detection rate touches.";
+
+  drawTime(h);
+}
+
+// ---------------------------------------------------------------- self-test
+function selfTest(){
+  let n = 0; const bad = [];
+  const ok = (c, l) => { n++; if (!c) bad.push(l); };
+  const B = Object.assign({}, DEFAULTS);
+  const E = (extra, key, pol, budget, weight) => A(Object.assign({}, B, extra || {}), key,
+                                                   pol || 'sqrt', budget, weight);
+
+  // 1. the closed form IS the simulation
+  let worst = 0;
+  for (const b of [3, 4, 6, 8, 12, 20, 32]){
+    const sim = E({}, 'copyStaleRate', 'sqrt', b), cf = E({}, 'predictedCopy', 'sqrt', b);
+    worst = Math.max(worst, Math.abs(sim - cf));
+  }
+  ok(worst < 0.006, "the stale-copy closed form drifted " + worst.toFixed(4) + " from the simulation");
+  // S(x) against a numeric integral of the same definition
+  let sBad = 0;
+  for (const x of [0.05, 0.5, 1, 2, 5, 20]){
+    let acc = 0; const K = 200000;
+    for (let i = 0; i < K; i++) acc += 1 - Math.exp(-x * (i + 0.5) / K);
+    if (Math.abs(acc / K - staleShare(x)) > 2e-9) sBad++;
+  }
+  ok(sBad === 0, "S(x) is not the average of 1-e^-x over the cycle");
+  ok(Math.abs(staleShare(1) - 0.36788) < 1e-4 && Math.abs(staleShare(2) - 0.56767) < 1e-4,
+     "the quoted S(1) and S(2) moved");
+  // the webhook floor does not depend on the edit rate
+  const fl = [1, 6, 24].map(function(e){ return eventFloor(Object.assign({}, B, { edits: e })); });
+  ok(fl[0] === fl[1] && fl[1] === fl[2] && Math.abs(fl[0] - 0.0137) < 5e-4,
+     "the webhook floor started depending on the edit rate");
+
+  // 2. the parameter in nobody's config
+  const s0 = E({ rho: 0 }, 'stale'), s1 = E({ rho: 1 }, 'stale');
+  const u0 = E({ rho: 0 }, 'stale', 'uniform'), u1 = E({ rho: 1 }, 'stale', 'uniform');
+  const dd0 = E({ rho: 0 }, 'copyStaleRate', 'uniform', undefined, 'doc');
+  const dd1 = E({ rho: 1 }, 'copyStaleRate', 'uniform', undefined, 'doc');
+  ok(u1 > 5 * u0, "the correlation gap collapsed to " + (u1 / u0).toFixed(1) + "x");
+  ok(dd1 < dd0, "the document-weighted number no longer moves the WRONG way as rho rises");
+  ok(s1 > s0, "the square-root rule stopped caring about correlation at all");
+  const qc = E({}, 'copyStaleRate', 'uniform'), dc = E({}, 'copyStaleRate', 'uniform', undefined, 'doc');
+  ok(qc > 3 * dc, "the query-weighted / document-weighted gap fell to " + (qc / dc).toFixed(1) + "x");
+
+  // 3. the small-edit share is a MODE dial, until duplication makes it an accuracy dial
+  const noDup = [0, 0.35, 0.65, 1].map(function(s){ return E({ small: s, dup: 0 }, 'correct', 'uniform'); });
+  ok(noDup.every(function(x){ return x === noDup[0]; }),
+     "the small-edit share moved the correct rate with one copy of every fact, which it cannot");
+  const withDup = [0, 0.35, 0.65, 1].map(function(s){ return E({ small: s }, 'correct', 'uniform'); });
+  ok(withDup[0] !== withDup[3] && Math.abs(withDup[0] - withDup[3]) < 0.02,
+     "duplication no longer breaks the invariant by a small amount");
+  ok(E({ small: 0 }, 'stale', 'uniform') === 0 && E({ small: 1, dup: 0 }, 'miss', 'uniform') === 0,
+     "the two ends of the small-edit dial are no longer the declared corners");
+
+  // 4. the inversion, and Cho + Garcia-Molina
+  ok(E({ rho: 0 }, 'stale', 'change') > E({ rho: 0 }, 'stale', 'uniform'),
+     "proportional-to-change stopped losing to a flat cadence at rho = 0");
+  ok(E({ rho: 1 }, 'stale', 'change') * 3 < E({ rho: 1 }, 'stale', 'uniform'),
+     "proportional-to-change stopped winning at rho = 1, so the inversion is gone");
+  const c1 = corpus(W, Object.assign({}, B, { rho: 1 }));
+  const sh = ['change', 'query', 'sqrt'].map(function(k){ return shapeOf(k, c1, Object.assign({}, B, { rho: 1 })); });
+  let shBad = 0;
+  for (let d = 0; d < c1.w.length; d++)
+    if (Math.abs(sh[0][d] - sh[1][d]) > 1e-14 || Math.abs(sh[0][d] - sh[2][d]) > 1e-14) shBad++;
+  ok(shBad === 0, "the three shapes are no longer identical at rho = 1");
+
+  // 5. the null results, kept because they are true
+  const sqS = E({}, 'stale', 'sqrt'), opS = E({}, 'stale', 'optimal');
+  ok(opS > 1.5 * sqS, "the optimiser stopped losing to the square-root rule (" + perK(opS) +
+     " vs " + perK(sqS) + ")");
+  ok(E({}, 'predictedCopy', 'optimal') < E({}, 'predictedCopy', 'sqrt'),
+     "the optimiser stopped winning on its own objective, so the point is lost");
+  ok(E({}, 'stale', 'optimalPlus') > opS &&
+     E({}, 'predictedCopy', 'optimalPlus') < E({}, 'predictedCopy', 'optimal'),
+     "the floor-sweep correction no longer predicts better and ships worse");
+  ok(E({}, 'stale', 'sweepOnly') < 1.1 * sqS,
+     "deleting the webhook option stopped recovering the heuristic's result");
+  ok(E({}, 'p99Age', 'optimal') > 10 * E({}, 'p99Age', 'sqrt'),
+     "the optimiser's tail is no longer the tell");
+
+  // 6. the webhook, and the corner that is NOT degenerate
+  const evPr = eventPrice(B);
+  ok(E({}, 'stale', 'sqrt', evPr) < E({}, 'stale', 'event') &&
+     E({}, 'p99Age', 'sqrt', evPr) < E({}, 'p99Age', 'event'),
+     "the square-root sweep no longer dominates the webhook on both axes at equal cost");
+  ok(E({}, 'p99Age', 'event') > 20 * E({}, 'p99Age', 'uniform', evPr),
+     "the webhook's tail is no longer far worse than a flat cadence at the same price");
+  const perf = E({ detect: 1, lag: 0 }, 'stale', 'event');
+  ok(perf > 0.03, "a perfect webhook is now clean, which was the whole point of checking it");
+  ok(E({ detect: 1, lag: 0, dup: 0 }, 'stale', 'event') === 0 &&
+     E({ detect: 1, lag: 0, rankBias: 0 }, 'stale', 'event') === 0,
+     "a perfect webhook's residual damage is no longer entirely the duplicate tiebreak");
+  ok(E({ rankBias: 0 }, 'stale', 'event') < 0.5 * E({}, 'stale', 'event'),
+     "the recency tiebreak stopped being worth more than half the webhook's stale answers");
+
+  // 7. degeneracy and range
+  ok(E({ material: 0 }, 'stale', 'uniform') === 0, "a corpus with no answer-changing edits went stale");
+  ok(E({}, 'stale', 'sqrt', 200) < 0.002, "a huge budget no longer drives staleness to nearly zero");
+  const mmBig = modeMap(allocate(corpus(W, B), B, 'optimal', 200), corpus(W, B));
+  ok(mmBig.count.live === 300, "the saturation corner no longer moves every document to live fetch");
+  let partBad = 0, cfg = 0;
+  for (const rho of [0, 0.55, 1]) for (const sm of [0, 0.65, 1]) for (const dp of [0, 0.3, 1])
+    for (const pol of ['uniform', 'sqrt', 'optimal', 'event']){
+      const oo = Object.assign({}, B, { rho: rho, small: sm, dup: dp });
+      const e = evaluate(W, oo, allocate(corpus(W, oo), oo, pol, oo.budget), corpus(W, oo));
+      cfg++;
+      if (Math.abs(e.correct + e.miss + e.stale - 1) > 1e-12) partBad++;
+      if (!isFinite(e.cost) || e.cost < 0) partBad++;
+    }
+  ok(partBad === 0, partBad + " of " + cfg + " configurations did not partition into three outcomes");
+  const spread = WORLDS.map(function(w){
+    const c = corpus(w, B);
+    return evaluate(w, B, allocate(c, B, 'sqrt', B.budget), c).stale;
+  });
+  ok(Math.max.apply(null, spread) < 2 * Math.min.apply(null, spread),
+     "one world is a wild outlier: " + spread.map(perK).join(" "));
+  ok(JSON.stringify(Array.from(buildWorld({ queries: 4 }, 9).U)) ===
+     JSON.stringify(Array.from(buildWorld({ queries: 4 }, 9).U)), "the same seed gave two worlds");
+
+  const three = [E({}, 'correct'), E({}, 'miss'), E({}, 'stale')];
+  ok(three[0] > 0.9 && three[1] > 0.001 && three[2] > 0.003,
+     "a default outcome is pinned at an extreme: " + three.map(pct).join(" "));
+  // the sliders are an OVERLAY on DEFAULTS: a missing field is silent NaN, not an exception
+  const live = opts();
+  ok(Object.keys(DEFAULTS).every(function(k){ return live[k] !== undefined; }),
+     "opts() is missing an engine field: " +
+     Object.keys(DEFAULTS).filter(function(k){ return live[k] === undefined; }).join(" "));
+  ok(isFinite(A(live, 'cost')) && A(live, 'cost') > 0, "the live slider configuration prices at NaN");
+
+  $("selftest").textContent = bad.length
+    ? "FAIL\n" + bad.join("\n") + "\n\n" + (n - bad.length) + " / " + n + " assertions pass"
+    : n + " / " + n + " assertions pass\n" +
+      "  the two averages   " + pct(dc) + " of documents hold a stale copy, " + pct(qc) +
+      " of retrieved copies are stale, " + pct(E({}, 'stale', 'uniform')) +
+      " of answers are — one index, three numbers\n" +
+      "  correlation        stale answers " + perK(u0) + " -> " + perK(u1) + " per thousand as " +
+      "edits move onto the popular documents, while the dashboard IMPROVES " + pct(dd0) + " -> " +
+      pct(dd1) + "\n" +
+      "  the inversion      prop-to-change " + perK(E({ rho: 0 }, 'stale', 'change')) + " -> " +
+      perK(E({ rho: 1 }, 'stale', 'change')) + ", flat cadence " + perK(u0) + " -> " + perK(u1) +
+      "; the ranking swaps ends\n" +
+      "  the optimiser      predicts " + perK(E({}, 'predictedCopy', 'optimal')) + " and ships " +
+      perK(opS) + "; sqrt predicts " + perK(E({}, 'predictedCopy', 'sqrt')) + " and ships " +
+      perK(sqS) + "; sweeps-only ships " + perK(E({}, 'stale', 'sweepOnly')) + "\n" +
+      "  the webhook floor  " + pct(eventFloor(B)) + " closed form, edit-rate independent; a " +
+      "PERFECT webhook still ships " + perK(perf) + " per thousand, and 0 with a recency tiebreak\n" +
+      "  equal cost         at the webhook's " + p2(evPr) + " an hour: webhook " +
+      perK(E({}, 'stale', 'event')) + " / p99 " + E({}, 'p99Age', 'event').toFixed(0) + "h, sqrt " +
+      perK(E({}, 'stale', 'sqrt', evPr)) + " / p99 " + E({}, 'p99Age', 'sqrt', evPr).toFixed(0) +
+      "h, flat " + perK(E({}, 'stale', 'uniform', evPr)) + " / p99 " +
+      E({}, 'p99Age', 'uniform', evPr).toFixed(0) + "h\n" +
+      "  averaged over " + WORLDS.length + " worlds of " + W.N + " queries; per-world stale " +
+      spread.map(perK).join(" ");
+}
+
+let queued = null;
+function schedule(){
+  if (queued) cancelAnimationFrame(queued);
+  queued = requestAnimationFrame(function(){ queued = null; render(); });
+}
+["sZ", "sR", "sE", "sM", "sS", "sD", "sB", "sT", "sL", "sG"].forEach(function(id){
+  $(id).addEventListener("input", schedule);
+});
+document.querySelectorAll("#pol button").forEach(function(b){
+  b.addEventListener("click", function(){
+    document.querySelectorAll("#pol button").forEach(function(x){
+      x.classList.remove("tab-active"); x.classList.add("bg-slate-100");
+    });
+    b.classList.add("tab-active"); b.classList.remove("bg-slate-100");
+    policy = b.dataset.p;
+    render();
+  });
+});
+$("nextDoc").addEventListener("click", function(){
+  const steps = [0, 1, 3, 8, 20, 60, 150, 299];
+  docIdx = steps[(steps.indexOf(docIdx) + 1) % steps.length];
+  drawTime(heavy());
+});
+render();
+setTimeout(selfTest, 0);
+</script>
+</body>
+</html>
