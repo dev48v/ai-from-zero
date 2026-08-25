@@ -1,0 +1,1881 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero &middot; Day 71 &mdash; Multi-tenant fairness and the denominator nobody chose</title>
+<style>
+  /* the whole stylesheet is here: no CDN, no build step, no network request of any kind */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin:0; font-family: -apple-system, "Inter", "Segoe UI", sans-serif; line-height:1.55;
+         background:#f8fafc; color:#0f172a; }
+  h1, h2, h3, p, ul, table { margin:0; }
+  button { font-family:inherit; border:0; cursor:pointer; }
+  input[type=range] { width:100%; margin:2px 0 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size:.92em;
+         background:#e2e8f0; padding:1px 4px; border-radius:4px; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px;
+        overflow:auto; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        line-height:1.5; }
+  pre code { background:none; padding:0; color:inherit; }
+  table.num { border-collapse:collapse; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid #e2e8f0; }
+  .ok { color:#166534; font-weight:800; }
+  .bad { color:#991b1b; font-weight:800; }
+  .warn { color:#92400e; font-weight:800; }
+  .win { background:#dcfce7; }
+  .lose { background:#fee2e2; }
+  canvas { width:100%; display:block; border-radius:10px; background:#0f172a; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; }
+  .cell { border-radius:6px; padding:5px 0; font-size:10px; font-weight:800; text-align:center;
+          color:#fff; line-height:1.35; }
+  .tab-active { background:#0f172a; color:#fff; }
+  .scrollx { overflow-x:auto; }
+
+  /* --- the utility layer this page's markup uses, written out ------------------------------- */
+  .hidden { display:none; }
+  .sticky { position:sticky; } .top-0 { top:0; } .z-20 { z-index:20; }
+  .mx-auto { margin-left:auto; margin-right:auto; }
+  .max-w-6xl { max-width:72rem; } .max-w-3xl { max-width:48rem; }
+  .w-full { width:100%; }
+  .minh { min-height:calc(100vh - 96px); }
+  .p-4 { padding:1rem; } .p-5 { padding:1.25rem; }
+  .px-3 { padding-left:.75rem; padding-right:.75rem; }
+  .px-5 { padding-left:1.25rem; padding-right:1.25rem; }
+  .py-1 { padding-top:.25rem; padding-bottom:.25rem; }
+  .py-2 { padding-top:.5rem; padding-bottom:.5rem; }
+  .pl-6 { padding-left:1.5rem; }
+  .mb-1 { margin-bottom:.25rem; } .mb-2 { margin-bottom:.5rem; }
+  .mb-3 { margin-bottom:.75rem; } .mb-4 { margin-bottom:1rem; }
+  .mt-1 { margin-top:.25rem; } .mt-2 { margin-top:.5rem; } .mt-3 { margin-top:.75rem; }
+  .ml-3 { margin-left:.75rem; }
+  .text-xs { font-size:.75rem; line-height:1.45; } .text-sm { font-size:.875rem; }
+  .text-lg { font-size:1.125rem; } .text-xl { font-size:1.25rem; }
+  .text-2xl { font-size:1.5rem; } .text-4xl { font-size:2.25rem; line-height:1.1; }
+  .font-semibold { font-weight:600; } .font-bold { font-weight:700; } .font-black { font-weight:900; }
+  .tracking-wider { letter-spacing:.05em; } .tracking-widest { letter-spacing:.12em; }
+  .leading-tight { line-height:1.3; }
+  .tabular-nums { font-variant-numeric:tabular-nums; }
+  .float-right { float:right; }
+  .list-disc { list-style:disc; }
+  .text-slate-500 { color:#64748b; } .text-slate-600 { color:#475569; } .text-slate-900 { color:#0f172a; }
+  .text-violet-700 { color:#6d28d9; } .text-amber-700 { color:#b45309; } .text-red-700 { color:#b91c1c; }
+  .text-emerald-700 { color:#047857; } .text-sky-700 { color:#0369a1; }
+  .bg-white { background:#fff; } .bg-slate-50 { background:#f8fafc; } .bg-slate-100 { background:#f1f5f9; }
+  .bg-emerald-50 { background:#ecfdf5; } .bg-red-50 { background:#fef2f2; }
+  .bg-amber-50 { background:#fffbeb; } .bg-sky-50 { background:#f0f9ff; }
+  .border-b { border-bottom:1px solid #e2e8f0; }
+  .border-slate-200 { border-color:#e2e8f0; }
+  .border-l-4 { border-left:4px solid #94a3b8; }
+  .border-slate-400 { border-left-color:#94a3b8; } .border-emerald-500 { border-left-color:#10b981; }
+  .border-red-500 { border-left-color:#ef4444; } .border-amber-500 { border-left-color:#f59e0b; }
+  .border-sky-500 { border-left-color:#0ea5e9; }
+  .rounded-md { border-radius:6px; } .rounded-lg { border-radius:8px; } .rounded-2xl { border-radius:16px; }
+  .shadow { box-shadow:0 1px 3px rgba(15,23,42,.10), 0 1px 2px rgba(15,23,42,.06); }
+  .flex { display:flex; } .flex-wrap { flex-wrap:wrap; }
+  .items-center { align-items:center; } .justify-between { justify-content:space-between; }
+  .gap-1 { gap:.25rem; } .gap-2 { gap:.5rem; } .gap-5 { gap:1.25rem; }
+  .grid { display:grid; } .gap-x-6 { column-gap:1.5rem; } .gap-y-3 { row-gap:.75rem; }
+  .space-y-1 > * + * { margin-top:.25rem; }
+  .space-y-5 > * + * { margin-top:1.25rem; }
+  .space-y-6 > * + * { margin-top:1.5rem; }
+  @media (min-width:768px){
+    .md\:p-6 { padding:1.5rem; } .md\:p-8 { padding:2rem; }
+    .md\:text-2xl { font-size:1.5rem; }
+    .md\:grid-cols-2 { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  }
+  @media (min-width:1024px){
+    .lg\:grid-cols-2 { grid-template-columns:repeat(2, minmax(0,1fr)); }
+    .lg\:grid-cols-3 { grid-template-columns:repeat(3, minmax(0,1fr)); }
+  }
+</style>
+</head>
+<body>
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+  <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <p class="text-xs font-bold tracking-widest text-violet-700 mb-2">AIFROMZERO &middot; DAY 71</p>
+    <h1 class="text-xl md:text-2xl font-black leading-tight mb-4">
+      &#9878;&#65039; Multi-tenant fairness &mdash; turning on the fairness feature made it
+      <strong>5.8&times; less fair</strong>. Four tenants on one replica: same prompts, same offered
+      load measured in GPU-seconds, all four permanently backlogged, the same 120 seconds of the
+      same GPU, the same bill. First-come-first-served splits the machine
+      <strong>25.9 / 26.8 / 24.7 / 22.6</strong>. Switch on equal per-tenant request quotas and it
+      splits <strong>7.4 / 11.3 / 30.3 / 51.0</strong> &mdash; <strong>6.87&times;</strong> against
+      <strong>1.18&times;</strong>, decided by one number that is in nobody's config and cannot be
+      known at admission: how many tokens the model is about to generate. Then the published fair
+      scheduler equalises <em>its own counter</em> to <strong>1.014</strong> and hands out the
+      machine <strong>3.05&times;</strong> unequally; a per-tenant slot cap splits decode time
+      <strong>24.7 / 25.2 / 25.2 / 24.9</strong> and still misses by <strong>1.92&times;</strong>;
+      and the repair is one word &mdash; count <em>milliseconds</em>.
+      Pure vanilla JavaScript, one file, no build step.
+    </h1>
+    <div class="flex gap-2 flex-wrap" id="tabs">
+      <button data-tab="look" class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">&#128200; MEASURE</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">&#129504; UNDERSTAND</button>
+      <button data-tab="build" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">&#128296; BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="minh p-4 md:p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto space-y-5">
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+          <label class="text-sm">output-length spread across tenants <span id="vSp" class="font-bold tabular-nums float-right">1.00</span>
+            <input id="sSp" type="range" min="0" max="100" value="100"></label>
+          <label class="text-sm">offered load per tenant, &times; fair share <span id="vOf" class="font-bold tabular-nums float-right">3.0</span>
+            <input id="sOf" type="range" min="4" max="60" value="30"></label>
+          <label class="text-sm">flood: agent tenant offers this much more <span id="vFl" class="font-bold tabular-nums float-right">1.0&times;</span>
+            <input id="sFl" type="range" min="10" max="80" value="10"></label>
+          <label class="text-sm">clients declare an honest <code>max_tokens</code> <span id="vHo" class="font-bold tabular-nums float-right">0%</span>
+            <input id="sHo" type="range" min="0" max="100" value="0"></label>
+          <label class="text-sm">VTC decode weight w<sub>o</sub> (w<sub>p</sub> = 1) <span id="vWo" class="font-bold tabular-nums float-right">2.0</span>
+            <input id="sWo" type="range" min="10" max="400" value="20"></label>
+          <label class="text-sm">per-tenant slot cap <span id="vCs" class="font-bold tabular-nums float-right">6</span>
+            <input id="sCs" type="range" min="1" max="24" value="6"></label>
+          <label class="text-sm">per-tenant quota, requests / minute <span id="vRp" class="font-bold tabular-nums float-right">90</span>
+            <input id="sRp" type="range" min="20" max="400" value="90"></label>
+          <label class="text-sm">max running sequences (batch) <span id="vMb" class="font-bold tabular-nums float-right">24</span>
+            <input id="sMb" type="range" min="4" max="64" value="24"></label>
+          <label class="text-sm">KV cache, tokens <span id="vKv" class="font-bold tabular-nums float-right">16,000</span>
+            <input id="sKv" type="range" min="40" max="400" value="160"></label>
+          <label class="text-sm">mean prompt, tokens <span id="vPm" class="font-bold tabular-nums float-right">400</span>
+            <input id="sPm" type="range" min="40" max="1600" value="400"></label>
+          <label class="text-sm">mean output across the fleet, tokens <span id="vOb" class="font-bold tabular-nums float-right">160</span>
+            <input id="sOb" type="range" min="40" max="480" value="160"></label>
+          <div class="text-sm">what the scheduler does
+            <div class="flex gap-1 flex-wrap mt-1" id="pol">
+              <button data-p="fcfs" class="tab-active px-3 py-1 rounded-md text-xs font-bold">first-come-first-served</button>
+              <button data-p="rr" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">round-robin</button>
+              <button data-p="rpm" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">requests / min quota</button>
+              <button data-p="tpm" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">tokens / min quota</button>
+              <button data-p="cap" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">slot cap</button>
+              <button data-p="capwc" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">slot cap, work-conserving</button>
+              <button data-p="vtc" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">VTC (weighted tokens)</button>
+              <button data-p="vtcNoLift" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">VTC, no lift rule</button>
+              <button data-p="vtcGpu" class="bg-slate-100 px-3 py-1 rounded-md text-xs font-bold">VTC (milliseconds)</button>
+            </div>
+          </div>
+        </div>
+        <p class="text-xs text-slate-500 mt-3">
+          One replica, continuous batching, four tenants, five worlds of 120 simulated seconds each,
+          one number per configuration averaged over all of them. Nothing here simulates language: a
+          request has a prompt length and an output length, an iteration decodes one token for every
+          resident sequence and takes <code>9 + 0.55&middot;B</code> ms, a prefill costs
+          <code>0.06</code> ms per prompt token and stalls the batch, and when the KV cache fills the
+          engine preempts by recompute. <strong>Every policy is given exactly the same machine for
+          exactly the same 120 seconds</strong>, so the bill is identical by construction and the
+          only thing that changes is who gets it. The share of the machine a tenant received is
+          measured in GPU-milliseconds and the four shares sum to 1.000000, because an iteration of
+          batch <em>B</em> is charged <code>dt / B</code> to each resident sequence.
+        </p>
+      </div>
+
+      <div class="grid lg:grid-cols-3 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">UNFAIRNESS &mdash; biggest share &divide; smallest</p>
+          <p class="text-4xl font-black tabular-nums" id="bigGap">&mdash;</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteGap"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">DECODE TOKENS DELIVERED</p>
+          <p class="text-4xl font-black tabular-nums text-sky-700" id="bigTok">&mdash;</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteTok"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">REQUESTS COMPLETED</p>
+          <p class="text-4xl font-black tabular-nums text-emerald-700" id="bigReq">&mdash;</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteReq"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE FOUR TENANTS UNDER THE SELECTED SCHEDULER &mdash; SAME REPLICA, SAME 120 SECONDS</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>tenant</th><th>mean output</th><th>declared max</th><th>sent</th>
+            <th>admitted</th><th>completed</th><th>prefill ms</th><th>decode ms</th>
+            <th>share of GPU</th><th>queued at end</th></tr></thead>
+          <tbody id="tenTbl"></tbody></table>
+        </div>
+        <div class="mt-3" id="shareBars"></div>
+        <p class="text-xs text-slate-500 mt-2" id="tenNote"></p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+            SHARE OF THE MACHINE, PER TENANT</p>
+          <canvas id="cBars" width="640" height="300"></canvas>
+          <p class="text-xs text-slate-500 mt-2">
+            The dashed line is an equal split. Everything above it was taken from somebody below it:
+            the four bars sum to the whole machine, always.</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+            THE FRONTIER &mdash; FAIRNESS AGAINST TOKENS, AT IDENTICAL COST</p>
+          <canvas id="cFront" width="640" height="300"></canvas>
+          <p class="text-xs text-slate-500 mt-2" id="frontNote"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          EVERY SCHEDULER ON THE SAME REPLICA &mdash; SORTED BY WHAT THEY GIVE THE SMALLEST TENANT</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>scheduler</th><th>classify</th><th>chat</th><th>summarise</th><th>agent</th>
+            <th>max &divide; min</th><th>Jain</th><th>admissions max&divide;min</th>
+            <th>decode tokens</th><th>requests</th><th>prefill share</th></tr></thead>
+          <tbody id="polTbl"></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="polNote"></p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+            AS OUTPUT LENGTHS DIVERGE &mdash; THE ONE PARAMETER NOBODY CONFIGURES</p>
+          <canvas id="cSpread" width="640" height="290"></canvas>
+          <p class="text-xs text-slate-500 mt-2" id="spreadNote"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+            AS ONE TENANT FLOODS &mdash; WHERE THE PUBLISHED RANKING COMES BACK</p>
+          <canvas id="cFlood" width="640" height="290"></canvas>
+          <p class="text-xs text-slate-500 mt-2" id="floodNote"></p>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+            THE PERFECT FIX: A SLOT CAP SPLITS DECODE TIME EXACTLY, AND STILL MISSES</p>
+          <div class="scrollx">
+          <table class="num w-full">
+            <thead><tr><th>tenant</th><th>decode ms, share</th><th>prefill ms, % of machine</th>
+              <th>total share</th></tr></thead>
+            <tbody id="capTbl"></tbody></table>
+          </div>
+          <p class="text-xs text-slate-500 mt-2" id="capNote"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+            THE ONE CONSTANT THAT DECIDES VTC &mdash; AND WHAT THE MACHINE SAYS IT SHOULD BE</p>
+          <canvas id="cWo" width="640" height="250"></canvas>
+          <p class="text-xs text-slate-500 mt-2" id="woNote"></p>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+            A TOKEN QUOTA IS ONLY AS HONEST AS THE CLIENT'S <code>max_tokens</code></p>
+          <div class="scrollx">
+          <table class="num w-full">
+            <thead><tr><th>honesty</th><th>declared maxima</th><th>classify</th><th>chat</th>
+              <th>summarise</th><th>agent</th><th>max&divide;min</th><th>answers cut off</th></tr></thead>
+            <tbody id="honTbl"></tbody></table>
+          </div>
+          <p class="text-xs text-slate-500 mt-2" id="honNote"></p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+            THE SLOT CAP ONLY BINDS AT ONE SETTING, WHICH IS ITS WORST</p>
+          <div class="scrollx">
+          <table class="num w-full">
+            <thead><tr><th>slots per tenant</th><th>binds?</th><th>max&divide;min</th>
+              <th>decode tokens</th><th>requests</th></tr></thead>
+            <tbody id="slotTbl"></tbody></table>
+          </div>
+          <p class="text-xs text-slate-500 mt-2" id="slotNote"></p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE CLOSED FORMS &mdash; WHAT EACH SCHEDULER IS EXACTLY FAIR IN, PREDICTED WITHOUT SIMULATING</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>scheduler</th><th>the quantity it equalises</th>
+            <th>predicted GPU share</th><th>measured GPU share</th><th>fair only if</th></tr></thead>
+          <tbody id="cfTbl"></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="cfNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-2">SELF-TEST</p>
+        <pre id="tests">running&hellip;</pre>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="minh p-4 md:p-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">Every fairness knob you can buy is denominated in requests. The GPU is spent in milliseconds.</h2>
+
+      <p class="text-slate-600">
+        Put four teams on one inference replica. They all pay the same. They all send the same
+        prompts. Arrange it so they all offer <em>the same amount of work measured in the resource
+        itself</em> &mdash; each one asks for three times its quarter of the machine, so all four
+        queues stay backlogged for the whole window and &ldquo;fair share&rdquo; is a well-defined
+        thing. The only difference between them is what they do: the first classifies, and its
+        answers are about 24 tokens. The fourth runs an agent loop, and its answers are about 354.
+      </p>
+
+      <div class="bg-slate-50 border-l-4 border-slate-400 p-5 rounded-lg">
+        <p class="font-bold mb-2">Do nothing. Plain first-come-first-served.</p>
+        <p class="text-sm text-slate-600 mb-3">
+          The machine splits <strong>25.9 / 26.8 / 24.7 / 22.6</strong>. Biggest over smallest:
+          <strong class="ok">1.18&times;</strong>. Nobody is being starved. A single global FIFO
+          queue, no counters, no quotas, no config.
+        </p>
+        <p class="font-bold mb-2">Now switch on the fairness feature: an equal requests-per-minute
+          quota for every tenant.</p>
+        <p class="text-sm text-slate-600">
+          The machine splits <strong>7.4 / 11.3 / 30.3 / 51.0</strong>. Biggest over smallest:
+          <strong class="bad">6.87&times;</strong>. The classify team is down from 25.9% of the
+          replica to 7.4%; the agent team is up from 22.6% to 51.0%. Nothing else changed &mdash;
+          same tenants, same prompts, same offered load, same replica, same 120 seconds, same bill.
+          Every tenant is comfortably inside its quota. Every dashboard is green.
+          <strong>Turning on fair queuing made the split 5.8&times; less fair.</strong>
+        </p>
+      </div>
+
+      <h3 class="text-lg font-black">The parameter is the realised output length, and it is in nobody's config</h3>
+      <p class="text-slate-600">
+        A quota admits requests. A round-robin dispatches requests. A rate limit counts requests. All
+        three control the same variable: <em>how many times a tenant gets to start</em>. What a
+        tenant actually consumes is <em>residency</em> &mdash; how long its sequences sit in the
+        running batch taking one slot of every decode iteration &mdash; and residency is the output
+        length. So the exchange rate between &ldquo;one request&rdquo; and &ldquo;one millisecond of
+        GPU&rdquo; is a number that:
+      </p>
+      <ul class="text-slate-600 list-disc pl-6 space-y-1">
+        <li>is not in the operator's config, because the operator never chose it;</li>
+        <li>is not in the client's config either &mdash; <code>max_tokens</code> is a ceiling, not a
+            length;</li>
+        <li>is not knowable at admission time, because it is decided by the model, one token at a
+            time, after the request has already been let in;</li>
+        <li>and is the <em>only</em> thing separating a 1.18&times; split from a 6.87&times; one.</li>
+      </ul>
+      <p class="text-slate-600">
+        Slide the output-length spread from 0 to 1 on the MEASURE tab and watch it happen. At spread
+        0 every tenant's answers are the same length and every scheduler on the page lands between
+        1.01&times; and 1.13&times; &mdash; a quota is exactly fair, round-robin is exactly fair,
+        doing nothing is exactly fair. Nothing about the schedulers changed on the way to spread 1.
+        Only the thing none of them can see.
+      </p>
+
+      <h3 class="text-lg font-black">Why FIFO wins here, and exactly when it stops</h3>
+      <p class="text-slate-600">
+        FIFO is not fair. FIFO hands out service in proportion to <em>offered load</em>: when every
+        queue is deep, the oldest head belongs to whichever tenant has been admitted least relative
+        to what it sent, so admissions settle proportional to arrival rate and service settles
+        proportional to demand. That is why it scores 1.18&times; in a world built so that demands
+        are equal &mdash; it is fair here by coincidence, and the coincidence is the experiment's
+        design, not a property of FIFO.
+      </p>
+      <p class="text-slate-600">
+        Push the flood slider and the coincidence dies. Let the agent tenant offer 4&times; what the
+        others offer and FIFO gives it <strong>53.5%</strong> of the replica; at 8&times; it gives it
+        <strong>68.3%</strong>, and the predicted share <em>offer<sub>i</sub> / &Sigma;
+        offer<sub>j</sub></em> tracks it to within a point and a half at every setting. FIFO has no
+        isolation at all: the way to get more of a shared replica under FIFO is to ask for more of
+        it.
+      </p>
+
+      <h3 class="text-lg font-black">Reproducing the published result, and then watching it inverT</h3>
+      <p class="text-slate-600">
+        Virtual Token Counter (Sheng et al., <em>Fairness in Serving Large Language Models</em>,
+        OSDI 2024) is the right answer to that. Give each tenant a counter, add
+        <em>w<sub>p</sub></em> per prompt token and <em>w<sub>o</sub></em> per generated token
+        <em>as the service is delivered</em>, always dispatch to the lowest counter, and lift a
+        returning tenant's counter to the running minimum so an idle client cannot bank a deficit and
+        cash it in. The page reproduces the paper's direction cleanly: against an equal
+        requests-per-minute quota at <strong>6.87&times;</strong>, VTC scores
+        <strong>3.05&times;</strong>, less than half the gap, and unlike FIFO it does not care at all
+        what anyone floods &mdash; it holds 3.0&times; from flood 1 to flood 8 while FIFO decays from
+        1.18&times; to 7.17&times;.
+      </p>
+      <p class="text-slate-600">
+        And then the ranking inverts. In the default world &mdash; equal offered load, everyone
+        backlogged &mdash; <strong>the published fair scheduler is 2.6&times; worse than having no
+        scheduler at all.</strong> FIFO 1.18, VTC 3.05. Walk the flood slider and the crossover sits
+        <strong>between 3&times; and 4&times;</strong>: below it, deleting your fair queuing improves fairness;
+        above it, VTC is the only thing standing between you and one tenant owning the box. Both
+        halves are true. Neither is the headline on its own.
+      </p>
+
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-5 rounded-lg">
+        <p class="font-bold mb-2">The algorithm is correct. The denominator is wrong.</p>
+        <p class="text-sm text-slate-600">
+          VTC does precisely what it promises. Measure its own counter &mdash; weighted tokens,
+          <em>w<sub>p</sub></em>=1, <em>w<sub>o</sub></em>=2 &mdash; and the four tenants come out at
+          <strong>24.9 / 24.9 / 24.9 / 25.2</strong>, a ratio of <strong class="ok">1.014</strong>.
+          It equalises its counter to within a percent and a half. Measure the machine and the same
+          run reads <strong>12.8 / 17.2 / 31.1 / 38.9</strong>, a ratio of
+          <strong class="bad">3.05</strong>. There is no bug. Weighted tokens and GPU milliseconds
+          are simply not the same quantity, and the algorithm was only ever asked to equalise the
+          first one.
+        </p>
+      </div>
+
+      <h3 class="text-lg font-black">What the two weights are actually worth</h3>
+      <p class="text-slate-600">
+        On this replica a prefill token costs <strong>0.06&nbsp;ms</strong> and a decode token costs
+        <code>(9 + 0.55&middot;B) / B</code> ms of machine per resident sequence &mdash;
+        <strong>0.925&nbsp;ms</strong> at a batch of 24. So the machine's own exchange rate is
+        <strong>w<sub>o</sub> / w<sub>p</sub> = 15.42</strong>. The weights that ship are 1 and 2.
+        Set <em>w<sub>o</sub></em> to 15.42 and token-VTC lands at <strong>1.00&times;</strong>,
+        indistinguishable from charging milliseconds directly; the curve on the MEASURE tab has its
+        minimum exactly there and rises on both sides.
+      </p>
+      <p class="text-slate-600">
+        Which would make this a config bug, except that
+        <strong>15.42 is not a constant</strong>. The correct ratio is
+        <code>(iterBase + iterSlope&middot;B) / (B &middot; prefillCost)</code>: it is
+        <strong>27.92</strong> at a batch of 8 and <strong>12.29</strong> at a batch of 48, because
+        the fixed per-iteration overhead is amortised over however many sequences happen to be
+        resident. The right value of the constant is a function of the load, and the load is what the
+        scheduler is deciding. Drop the offered load to 0.6&times; fair share and the measured cost
+        of a decode token rises from 0.93&nbsp;ms to 4.46&nbsp;ms &mdash; a factor of 4.8 &mdash;
+        because a lone sequence occupies the whole GPU for a whole iteration.
+      </p>
+      <p class="text-slate-600">
+        The repair is therefore not a better constant. It is to delete the constant: charge the
+        counter <code>dt / B</code> per resident sequence per iteration, which the engine already
+        knows because it just did the iteration. That version scores <strong>1.00&times;</strong> at
+        every flood setting, at every spread setting, and it delivers <strong>93,932</strong> decode
+        tokens against FIFO's <strong>92,864</strong> &mdash; better on <em>both</em> axes, which is
+        the only genuinely dominant point on the page.
+      </p>
+
+      <h3 class="text-lg font-black">A perfect version of the obvious fix still fails</h3>
+      <p class="text-slate-600">
+        The obvious fix costs three lines and no counters: cap each tenant at
+        <code>maxBatch / n</code> = 6 running sequences. Under full backlog every tenant holds its
+        six slots at all times, so every tenant gets exactly a quarter of every decode iteration. And
+        it does: decode time splits <strong>24.7 / 25.2 / 25.2 / 24.9</strong>, a ratio of
+        <strong class="ok">1.023</strong>. It is exactly, provably fair in the thing it controls.
+      </p>
+      <p class="text-slate-600">
+        It scores <strong class="bad">1.92&times;</strong> overall &mdash; worse than doing nothing
+        &mdash; because prefill is <strong>31.3%</strong> of this machine and the cap says nothing
+        about it. Six slots of 24-token answers turn over fifteen times faster than six slots of
+        354-token answers, so the classify tenant runs fifteen times as many prefills and burns
+        <strong>18.2%</strong> of the whole replica on them against the agent tenant's
+        <strong>1.3%</strong>. The mechanism is exact, the fairness is exact, and the resource it was
+        never told about is a third of the machine.
+      </p>
+      <p class="text-slate-600">
+        There is a second joke hiding in the cap. Try every setting: 1 slot gives 1.34&times; and
+        collapses throughput to 37,101 tokens; 6 slots &mdash; the only value where four tenants
+        &times; the cap exactly equals the batch &mdash; gives its <em>worst</em> result at
+        1.92&times;; and 8 slots gives 1.21&times;, which looks like a fix and is not, because
+        4&nbsp;&times;&nbsp;8&nbsp;=&nbsp;32 exceeds the batch of 24 and the cap simply never binds.
+        Every setting of the knob that improves the number does so by switching the mechanism off.
+      </p>
+
+      <h3 class="text-lg font-black">The quota denominated in tokens does not save you either</h3>
+      <p class="text-slate-600">
+        Real APIs meter in tokens per minute, and they charge <code>prompt +
+        max_tokens</code> at admission, because that is the only token count that exists before
+        generation. Give every tenant the identical quota expressed both ways &mdash; the page sets
+        the token bucket to exactly <code>rpm &times; (prompt + default max_tokens)</code>, so at
+        the default the two quotas are the same quota &mdash; and they produce the same split to two
+        decimal places: <strong>6.87&times;</strong> both. A token quota where everybody sends the
+        SDK's default <code>max_tokens=1024</code> is a request quota wearing a different unit.
+      </p>
+      <p class="text-slate-600">
+        Slide the honesty dial and TPM does start working: at fully honest declarations the split
+        goes <strong>6.87 &rarr; 1.26</strong>. But look at what had to happen. The declared maxima
+        become 71 / 142 / 569 / 1138 &mdash; every client has to size its own ceiling to its own
+        typical answer, which means the fairness of a multi-tenant replica now rests on a field set
+        by the tenants, in their code, in their interest to inflate. It is not free either: answers
+        cut off by the ceiling go from 16 to 67 out of 1,294, a truncation rate of 5.2%. You bought
+        fairness with a field you do not control and paid for it in clipped answers.
+      </p>
+
+      <h3 class="text-lg font-black">Throughput has no single number, and the ranking flips on the unit</h3>
+      <p class="text-slate-600">
+        Same GPU. Same 120 seconds. Same bill. The requests-per-minute quota delivers
+        <strong>102,765</strong> decode tokens and <strong>697</strong> completed requests. FIFO
+        delivers <strong>92,864</strong> decode tokens and <strong>1,353</strong> completed requests.
+        Counted in tokens the quota wins by <strong>10.7%</strong>; counted in requests it loses by
+        <strong>48.5%</strong>. It is not a paradox &mdash; the unfair schedulers admit fewer, longer
+        requests, so they spend 15.5% of the machine on prefill instead of 28.1% and convert the
+        difference into decode &mdash; but it means an operator optimising tokens per second is being
+        paid, in the only currency their dashboard reports, to starve their smallest tenant.
+      </p>
+      <p class="text-slate-600">
+        The same inversion shows up in the one fairness statistic that is easy to collect. Rank all
+        nine schedulers by how equal their <em>admissions</em> are, rank them again by how equal
+        their <em>service</em> is, and the two orders have a Spearman correlation of
+        <strong>&minus;0.82</strong>. The most egalitarian admitter on the page &mdash; the token
+        quota, at 1.02&times; &mdash; is the least egalitarian server, at 6.87&times;. The fair
+        scheduler that works has the second most lopsided admission counts of the nine. If your
+        fairness dashboard counts requests, it is anti-correlated with the thing you meant.
+      </p>
+
+      <div class="bg-emerald-50 border-l-4 border-emerald-500 p-5 rounded-lg">
+        <p class="font-bold mb-2">What actually survives contact with the measurement</p>
+        <ul class="text-sm text-slate-600 list-disc pl-6 space-y-1">
+          <li>Pick the denominator first. Fairness is not a property of a scheduler; it is a
+              property of a scheduler <em>and</em> the quantity it equalises. Every policy on this
+              page is exactly fair in something.</li>
+          <li>The only denominator that is not an assumption is the one the machine actually spends:
+              <code>dt / B</code>, charged as it is spent.</li>
+          <li>Anything charged at admission &mdash; requests, prompt tokens,
+              <code>max_tokens</code> &mdash; is a forecast of a number the model has not produced
+              yet.</li>
+          <li>Check whether your tenants are backlogged before you argue about fairness. At
+              0.6&times; fair share nothing is queued, and FIFO, round-robin, the work-conserving
+              cap and both VTCs return <em>bit-identical</em> results &mdash; while the two quota
+              policies destroy 14.6% of the throughput throttling a machine nobody was competing
+              for.</li>
+          <li>Report the split, not the summary. Jain's index reads 0.676 where the ratio reads
+              6.87; a four-tenant fleet where one tenant gets a seventh of what another gets still
+              looks like &ldquo;0.68&rdquo; on a chart that tops out at 1.</li>
+        </ul>
+      </div>
+
+      <h3 class="text-lg font-black">What this page does not model</h3>
+      <p class="text-slate-600">
+        No language, no quality, no accuracy: an output length is drawn from a distribution and the
+        tokens are counted, never generated. One replica, no routing across replicas, no
+        heterogeneous hardware, no priority classes or paid tiers, no chunked prefill (a prefill
+        stalls the whole batch here, which is the pessimistic case and the one that makes the slot
+        cap's prefill leak visible). Preemption is by recompute, LIFO, and the tokens it throws away
+        are still charged to the tenant that consumed them, because they did consume them. Arrivals
+        are Poisson and lengths are geometric, which is kinder than reality on both tails. Every
+        number on the MEASURE tab is the mean of five independent worlds of 120 simulated seconds;
+        the four sweep charts use three worlds so the page stays interactive, and say so.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="minh p-4 md:p-8 bg-slate-50">
+    <div class="max-w-3xl mx-auto space-y-6">
+      <h2 class="text-2xl font-black">&#128296; How it is built</h2>
+
+      <p class="text-slate-600">
+        The engine is one function. A replica with a running batch, a queue per tenant, and a policy
+        that answers exactly one question: <em>when a slot is free, whose request goes in?</em>
+        Everything else &mdash; the fairness, the throughput, the inversion &mdash; falls out of that
+        one choice repeated a few thousand times.
+      </p>
+
+      <h3 class="text-lg font-black">1. The machine</h3>
+      <p class="text-slate-600">
+        Continuous batching: sequences join and leave the batch between iterations rather than
+        waiting for the slowest member. One iteration advances every resident sequence by one token
+        and costs <code>iterBase + iterSlope&middot;B</code> milliseconds, so per-sequence cost falls
+        as the batch grows &mdash; that single fact is what later makes the VTC weight
+        load-dependent. A prefill costs <code>prefillCost</code> per prompt token and is added to the
+        iteration that admitted it, stalling everyone.
+      </p>
+<pre><code>const B  = running.length;
+const dt = iterBase + iterSlope*B + prefillCost*prefillTokensAdmittedThisStep;
+const perSeq = (iterBase + iterSlope*B) / B;        // what one decode token costs the machine
+for (const v of running){ v.gen++; gpu[v.tenant] += perSeq; }
+t += dt;</code></pre>
+      <p class="text-slate-600">
+        <code>perSeq</code> is the whole accounting system. Summed over every iteration and every
+        resident sequence it comes to exactly the busy time, so the four tenant shares add to
+        1.000000 &mdash; the self-test asserts it to 1e-9. There is no separate model of
+        &ldquo;capacity&rdquo;: the machine is 120 seconds long and the only question is how it gets
+        divided.
+      </p>
+
+      <h3 class="text-lg font-black">2. The KV cache, and preemption that costs something</h3>
+      <p class="text-slate-600">
+        A resident sequence holds <code>prompt + generated</code> tokens of cache, so the pressure
+        grows as the batch decodes. When it would overflow, the most recently admitted sequence is
+        evicted, its generated tokens are thrown away, and it goes back to the front of its tenant's
+        queue to be re-prefilled. The discarded work is still charged to the tenant that consumed it,
+        which is the honest accounting and also the reason a fairness policy cannot fix its own
+        mistakes for free.
+      </p>
+
+      <h3 class="text-lg font-black">3. Nine policies, one function</h3>
+      <p class="text-slate-600">
+        Each is a rule for picking a tenant from those with a queued request that fits:
+      </p>
+      <ul class="text-slate-600 list-disc pl-6 space-y-1 text-sm">
+        <li><strong>fcfs</strong> &mdash; the oldest waiting request anywhere.</li>
+        <li><strong>rr</strong> &mdash; a rotating cursor over tenant queues, skipping empty ones.</li>
+        <li><strong>rpm</strong> &mdash; a token bucket of requests per tenant; ineligible tenants
+            wait, and among the eligible it is FIFO.</li>
+        <li><strong>tpm</strong> &mdash; the same bucket denominated in tokens, charged
+            <code>prompt + declared max_tokens</code> at admission, sized so that at the default
+            declaration it is arithmetically the same quota as <strong>rpm</strong>.</li>
+        <li><strong>cap</strong> / <strong>capwc</strong> &mdash; a hard limit on running sequences
+            per tenant; the second variant lets a tenant exceed it when nobody else is waiting.</li>
+        <li><strong>vtc</strong> &mdash; lowest virtual counter, where the counter accrues
+            <code>w_p</code> per prompt token and <code>w_o</code> per generated token as service is
+            delivered, plus the lift rule on a tenant that returns from idle.</li>
+        <li><strong>vtcNoLift</strong> &mdash; the same, with the lift rule removed, so an absent
+            tenant banks a deficit.</li>
+        <li><strong>vtcGpu</strong> &mdash; the same, with <code>dt / B</code> in place of the two
+            weights.</li>
+      </ul>
+
+      <h3 class="text-lg font-black">4. The worlds are built once, before the policy is chosen</h3>
+      <p class="text-slate-600">
+        Every arrival &mdash; its time, its prompt length, its output length &mdash; is drawn from a
+        per-tenant <code>mulberry32</code> stream seeded from the world seed and the tenant index,
+        before any scheduling happens. Changing the policy cannot change the workload, and changing
+        one tenant's parameters cannot shift another tenant's random stream. Without that, every
+        comparison on the page would be a comparison of two different worlds.
+      </p>
+
+      <h3 class="text-lg font-black">5. Equal cost is structural, not a correction</h3>
+      <p class="text-slate-600">
+        Each configuration gets one replica for 120,000 simulated milliseconds. There is no budget to
+        normalise and no price to divide by: the bill is the same because the machine is the same
+        machine for the same time. A policy that &ldquo;wins on throughput&rdquo; won by taking the
+        machine away from somebody, and the table shows exactly whom.
+      </p>
+
+      <h3 class="text-lg font-black">6. Two closed forms that let the simulation be checked</h3>
+      <p class="text-slate-600">
+        When every tenant is backlogged, two predictions can be written down without simulating
+        anything, and both are asserted against the engine:
+      </p>
+<pre><code>// any policy that equalises ADMISSIONS gives service in proportion to per-request cost
+cost_i  = prefillCost*promptMean + outMean_i * perSeq(maxBatch)
+share_i = cost_i / sum_j cost_j                     // 6.9 / 10.2 / 29.9 / 52.9 %
+
+// FIFO gives service in proportion to OFFERED LOAD
+share_i = offer_i / sum_j offer_j                   // 25 / 25 / 25 / 25 % by construction
+
+// the weight at which a weighted-token counter equals a millisecond counter
+wStar   = (iterBase + iterSlope*B) / (B * prefillCost)   // 15.42 at B = 24</code></pre>
+      <p class="text-slate-600">
+        The first predicts the quota's measured 7.4 / 11.3 / 30.3 / 51.0 to within a point and a
+        half; the second predicts FIFO under a flood of 8&times; to within four points; the third
+        predicts, to two decimal places, where the <em>w<sub>o</sub></em> curve has its minimum. A
+        simulation that only agrees with itself has not been checked.
+      </p>
+
+      <h3 class="text-lg font-black">7. The self-test</h3>
+      <p class="text-slate-600">
+        Roughly 120 assertions run in the page on load: conservation (shares sum to one, admissions
+        equal completions plus residents, every policy gets the same busy time), the closed forms,
+        the declared corners (spread 0 makes every policy fair; a slot cap at or above the batch is
+        FIFO; no contention makes five policies bit-identical), determinism of the world builder, the
+        monotonicity of each sweep, and the specific measured claims quoted in the headline. A
+        separate Node verifier re-runs the same engine against an independently written reference
+        simulator over several hundred configurations.
+      </p>
+    </div>
+  </div>
+</section>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// A shared LLM inference replica with four tenants and nine scheduling policies. No text, no
+// embeddings, no model: a request is a prompt length and an output length, and the only thing being
+// simulated is who gets the machine. Everything is deterministic given a seed.
+
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function mean(a){ let s = 0; for (let i = 0; i < a.length; i++) s += a[i]; return s / a.length; }
+function quantile(a, p){
+  if (!a.length) return 0;
+  const b = a.slice().sort(function(x, y){ return x - y; });
+  return b[Math.min(b.length - 1, Math.max(0, Math.ceil(p * b.length) - 1))];
+}
+function jain(a){
+  let s1 = 0, s2 = 0;
+  for (let i = 0; i < a.length; i++){ s1 += a[i]; s2 += a[i] * a[i]; }
+  return s2 > 0 ? s1 * s1 / (a.length * s2) : 1;
+}
+
+// The four tenants differ in ONE way: how long their answers are. MULT is the ratio between them;
+// the geometric mean of MULT is 1 and the arithmetic mean is divided out, so the FLEET's mean
+// output length is outBase at every setting of the spread dial. Turning the dial redistributes
+// output length between tenants without changing how much of it there is.
+var NAMES = ['classify', 'chat', 'summarise', 'agent'];
+var MULT  = [0.25, 0.5, 2, 4];
+var POLICIES = ['fcfs', 'rr', 'rpm', 'tpm', 'cap', 'capwc', 'vtc', 'vtcNoLift', 'vtcGpu'];
+var WORLD_SEEDS = [2026, 7, 99, 41, 512];
+
+var DEFAULTS = {
+  horizon: 120000,        // simulated milliseconds of ONE replica; identical for every policy
+  promptMean: 400,        // tokens
+  outBase: 160,           // fleet-mean output tokens, invariant in spread
+  spread: 1,              // 0 = every tenant's answers the same length, 1 = a 16x ratio
+  honest: 0,              // 0 = everyone declares the SDK default max_tokens, 1 = 3x their own mean
+  defaultMax: 1024,
+  offer: 3,               // each tenant offers this many times its 1/n share of the machine
+  flood: 1,               // the last tenant offers this much more than the others
+  maxBatch: 24,
+  kv: 16000,              // tokens of KV cache across the whole batch
+  iterBase: 9,            // ms per decode iteration, independent of batch
+  iterPerSeq: 0.55,       // ms per resident sequence per iteration
+  prefillPerTok: 0.06,    // ms per prompt token, charged to the admitting iteration
+  wPrefill: 1,            // VTC weights as published
+  wDecode: 2,
+  rpm: 90,                // per-tenant requests/minute quota
+  capSlots: 6             // per-tenant running-sequence cap
+};
+
+// what one decode token costs the machine, per resident sequence, at a given batch
+function perSeqMs(o, B){
+  const b = (B === undefined ? o.maxBatch : B);
+  return (o.iterBase + o.iterPerSeq * b) / b;
+}
+// the weight ratio at which a weighted-token counter and a millisecond counter agree. It is a
+// function of the batch size, which is a function of the load, which is what the scheduler decides.
+function wStar(o, B){ return perSeqMs(o, B) / o.prefillPerTok; }
+
+function tenants(o){
+  const n = MULT.length, m = [];
+  for (let i = 0; i < n; i++) m.push(Math.pow(MULT[i], o.spread));
+  const mm = mean(m), ps = perSeqMs(o), out = [];
+  for (let i = 0; i < n; i++){
+    const raw = o.outBase * m[i] / mm;                          // mean before the ceiling
+    const declared = Math.round(Math.exp((1 - o.honest) * Math.log(o.defaultMax) +
+                                          o.honest * Math.log(3 * raw)));
+    const outMean = raw * (1 - Math.exp(-declared / raw));      // E[min(X, max_tokens)]
+    const cost = o.prefillPerTok * o.promptMean + outMean * ps; // predicted GPU ms per request
+    const offer = o.offer * (i === n - 1 ? o.flood : 1);
+    out.push({ i: i, name: NAMES[i], raw: raw, declared: declared, outMean: outMean,
+               cost: cost, offer: offer, lambda: offer * (1000 / n) / cost / 1000 });
+  }
+  return out;
+}
+
+// Arrivals are drawn BEFORE any scheduling, from a per-tenant stream seeded by (world, tenant), so
+// the policy cannot change the workload and one tenant's parameters cannot shift another's stream.
+function arrivals(o, T, seed){
+  const out = [];
+  for (let i = 0; i < T.length; i++){
+    const rng = mulberry32((seed | 0) * 7919 + i * 104729 + 17);
+    let t = 0;
+    for (;;){
+      t += -Math.log(1 - rng()) / T[i].lambda;
+      if (t > o.horizon) break;
+      const prompt = Math.max(32, Math.min(3000, Math.round(-o.promptMean * Math.log(1 - rng()))));
+      const raw = Math.max(1, Math.round(-T[i].raw * Math.log(1 - rng())));
+      const len = Math.min(raw, T[i].declared);
+      out.push({ t: i, arrive: t, prompt: prompt, out: len, raw: raw, trunc: len < raw });
+    }
+  }
+  out.sort(function(a, b){ return a.arrive - b.arrive || a.t - b.t; });
+  return out;
+}
+
+// ---- one replica, one policy, one world ----------------------------------------------------
+function run(o, seed, policy){
+  const T = tenants(o), n = T.length;
+  const reqs = arrivals(o, T, seed);
+  const q = [], qh = [], pre = [], preh = [], st = [];
+  for (let i = 0; i < n; i++){
+    q.push([]); qh.push(0); pre.push([]); preh.push(0);
+    st.push({ name: T[i].name, outMean: T[i].outMean, declared: T[i].declared, cost: T[i].cost,
+              arrived: 0, admitted: 0, completed: 0, prefillTok: 0, decodeTok: 0, wasted: 0,
+              trunc: 0, gpu: 0, prefillMs: 0, lat: [], ttft: [] });
+  }
+  const vc = new Float64Array(n), gc = new Float64Array(n);
+  const bucket = new Float64Array(n), lastRef = new Float64Array(n);
+  const isRpm = policy === 'rpm', isTpm = policy === 'tpm';
+  // the token quota is SIZED so that, at the default declaration, it is arithmetically the same
+  // quota as the request quota. Any difference the page reports between them is the declaration.
+  const tpmTotal = o.rpm * (o.promptMean + o.defaultMax);
+  const rate = isTpm ? tpmTotal / 60000 : o.rpm / 60000;
+  const cap  = isTpm ? tpmTotal / 6 : o.rpm / 6;          // ten seconds of burst
+  for (let i = 0; i < n; i++) bucket[i] = cap;
+  const running = [], runCount = new Int32Array(n);
+  // how many requests a tenant SENT is a fact about the workload; counting it as they are dequeued
+  // would make it depend on where the horizon happened to cut the last iteration
+  for (let k = 0; k < reqs.length; k++) st[reqs[k].t].arrived++;
+  let kvUsed = 0, t = 0, ai = 0, busy = 0, iters = 0, preempts = 0, cursor = 0, batchSum = 0;
+
+  function head(i){
+    if (preh[i] < pre[i].length) return pre[i][preh[i]];
+    return qh[i] < q[i].length ? q[i][qh[i]] : null;
+  }
+  function pop(i){
+    if (preh[i] < pre[i].length) return pre[i][preh[i]++];
+    return q[i][qh[i]++];
+  }
+  function hasWork(i){ return head(i) !== null || runCount[i] > 0; }
+  function refill(i){ bucket[i] = Math.min(cap, bucket[i] + rate * (t - lastRef[i])); lastRef[i] = t; }
+  function charge(r){ return isTpm ? (r.prompt + T[r.t].declared) : 1; }
+  function quotaOk(i, r){
+    if (!isRpm && !isTpm) return true;
+    refill(i); return bucket[i] >= charge(r);
+  }
+  // the LIFT rule: a tenant with nothing in the system cannot bank a deficit while it is away
+  function onArrive(r){
+    if (policy === 'vtc' || policy === 'vtcGpu'){
+      const ctr = policy === 'vtcGpu' ? gc : vc;
+      if (!hasWork(r.t)){
+        let mn = Infinity;
+        for (let j = 0; j < n; j++) if (j !== r.t && hasWork(j)) mn = Math.min(mn, ctr[j]);
+        if (mn < Infinity) ctr[r.t] = Math.max(ctr[r.t], mn);
+      }
+    }
+    q[r.t].push(r);
+  }
+  // THE WHOLE PAGE IS THIS FUNCTION: a slot is free, whose request goes in?
+  function choose(){
+    if (running.length >= o.maxBatch) return -1;
+    const cand = [];
+    for (let i = 0; i < n; i++){
+      const h = head(i);
+      if (!h) continue;
+      if (kvUsed + h.prompt > o.kv) continue;
+      if (!quotaOk(i, h)) continue;
+      if ((policy === 'cap' || policy === 'capwc') && runCount[i] >= o.capSlots) continue;
+      cand.push(i);
+    }
+    if (!cand.length){
+      if (policy !== 'capwc') return -1;
+      const c2 = [];                                   // work-conserving: the cap yields to idleness
+      for (let i = 0; i < n; i++){
+        const h = head(i);
+        if (h && kvUsed + h.prompt <= o.kv) c2.push(i);
+      }
+      if (!c2.length) return -1;
+      c2.sort(function(a, b){ return head(a).arrive - head(b).arrive || a - b; });
+      return c2[0];
+    }
+    if (policy === 'rr'){
+      for (let k = 0; k < n; k++){
+        const i = (cursor + k) % n;
+        if (cand.indexOf(i) >= 0){ cursor = (i + 1) % n; return i; }
+      }
+      return -1;
+    }
+    if (policy === 'vtc' || policy === 'vtcNoLift'){
+      cand.sort(function(a, b){ return vc[a] - vc[b] || a - b; }); return cand[0];
+    }
+    if (policy === 'vtcGpu'){
+      cand.sort(function(a, b){ return gc[a] - gc[b] || a - b; }); return cand[0];
+    }
+    cand.sort(function(a, b){ return head(a).arrive - head(b).arrive || a - b; });
+    return cand[0];
+  }
+
+  while (t < o.horizon){
+    while (ai < reqs.length && reqs[ai].arrive <= t) onArrive(reqs[ai++]);
+    let prefillTok = 0;
+    for (;;){
+      const i = choose();
+      if (i < 0) break;
+      const r = pop(i);
+      if (isRpm || isTpm){ refill(i); bucket[i] -= charge(r); }
+      running.push({ r: r, gen: 0 }); runCount[i]++;
+      kvUsed += r.prompt; prefillTok += r.prompt;
+      st[i].admitted++; st[i].prefillTok += r.prompt;
+      const pms = o.prefillPerTok * r.prompt;
+      st[i].gpu += pms; st[i].prefillMs += pms;
+      vc[i] += o.wPrefill * r.prompt; gc[i] += pms;
+      if (r.trunc) st[i].trunc++;
+    }
+    if (!running.length){
+      if (ai >= reqs.length) break;
+      const nt = Math.min(Math.max(t, reqs[ai].arrive), t + 5);
+      t = nt > t ? nt : t + 5;
+      continue;
+    }
+    // KV pressure: evict the most recently admitted sequence and make it start over
+    while (kvUsed + running.length > o.kv && running.length > 1){
+      const v = running.pop(), i = v.r.t;
+      kvUsed -= (v.r.prompt + v.gen); runCount[i]--; st[i].wasted += v.gen;
+      pre[i].push(v.r); preempts++;
+    }
+    const B = running.length;
+    const dt = o.iterBase + o.iterPerSeq * B + o.prefillPerTok * prefillTok;
+    const ps = (o.iterBase + o.iterPerSeq * B) / B;   // what this iteration costs each resident
+    for (let k = 0; k < running.length; k++){
+      const v = running[k], i = v.r.t;
+      v.gen++; st[i].decodeTok++; st[i].gpu += ps;
+      vc[i] += o.wDecode; gc[i] += ps;
+      if (v.gen === 1) st[i].ttft.push(t + dt - v.r.arrive);
+    }
+    kvUsed += B; t += dt; busy += dt; iters++; batchSum += B;
+    for (let k = running.length - 1; k >= 0; k--){
+      const v = running[k];
+      if (v.gen >= v.r.out){
+        const i = v.r.t;
+        running.splice(k, 1); runCount[i]--;
+        kvUsed -= (v.r.prompt + v.gen);
+        st[i].completed++; st[i].lat.push(t - v.r.arrive);
+      }
+    }
+  }
+  const backlog = [], gpu = [];
+  let totBusy = 0;
+  for (let i = 0; i < n; i++){
+    backlog.push((q[i].length - qh[i]) + (pre[i].length - preh[i]));
+    gpu.push(st[i].gpu); totBusy += st[i].gpu;
+  }
+  const share = gpu.map(function(x){ return x / totBusy; });
+  let decodeTok = 0, done = 0, prefillMs = 0, wasted = 0, trunc = 0, sent = 0;
+  for (let i = 0; i < n; i++){
+    decodeTok += st[i].decodeTok; done += st[i].completed;
+    prefillMs += st[i].prefillMs; wasted += st[i].wasted;
+    trunc += st[i].trunc; sent += st[i].arrived;   // = reqs.length, policy-independent
+  }
+  return { T: T, st: st, gpu: gpu, share: share, backlog: backlog, t: t, busy: busy,
+           totBusy: totBusy, iters: iters, preempts: preempts, decodeTok: decodeTok, done: done,
+           prefillMs: prefillMs, wasted: wasted, trunc: trunc, sent: sent,
+           meanBatch: iters ? batchSum / iters : 0,
+           vcShare: st.map(function(s){ return o.wPrefill * s.prefillTok + o.wDecode * s.decodeTok; }),
+           running: running.length };
+}
+
+// ---- averaging over worlds ------------------------------------------------------------------
+function summarise(runs, o){
+  const n = runs[0].st.length, share = [], adm = [], comp = [], sentA = [], bl = [],
+        dec = [], pre = [], decShare = [], vcS = [], lat = [];
+  for (let i = 0; i < n; i++){
+    share.push(mean(runs.map(function(r){ return r.share[i]; })));
+    adm.push(mean(runs.map(function(r){ return r.st[i].admitted; })));
+    comp.push(mean(runs.map(function(r){ return r.st[i].completed; })));
+    sentA.push(mean(runs.map(function(r){ return r.st[i].arrived; })));
+    bl.push(mean(runs.map(function(r){ return r.backlog[i]; })));
+    dec.push(mean(runs.map(function(r){ return r.st[i].gpu - r.st[i].prefillMs; })));
+    pre.push(mean(runs.map(function(r){ return r.st[i].prefillMs / r.totBusy; })));
+    decShare.push(mean(runs.map(function(r){
+      let d = 0;
+      for (let j = 0; j < n; j++) d += r.st[j].gpu - r.st[j].prefillMs;
+      return (r.st[i].gpu - r.st[i].prefillMs) / d;
+    })));
+    vcS.push(mean(runs.map(function(r){
+      let s = 0;
+      for (let j = 0; j < n; j++) s += r.vcShare[j];
+      return r.vcShare[i] / s;
+    })));
+    lat.push(mean(runs.map(function(r){ return quantile(r.st[i].lat, 0.5); })));
+  }
+  const mx = Math.max.apply(null, share), mn = Math.min.apply(null, share);
+  return {
+    share: share, adm: adm, comp: comp, sent: sentA, backlog: bl, decMs: dec,
+    prefillShare: pre, decShare: decShare, vcShare: vcS, lat50: lat,
+    ratio: mn > 0 ? mx / mn : Infinity,
+    jain: jain(share),
+    decRatio: Math.min.apply(null, decShare) > 0
+      ? Math.max.apply(null, decShare) / Math.min.apply(null, decShare) : Infinity,
+    vcRatio: Math.min.apply(null, vcS) > 0
+      ? Math.max.apply(null, vcS) / Math.min.apply(null, vcS) : Infinity,
+    admRatio: Math.min.apply(null, adm) > 0
+      ? Math.max.apply(null, adm) / Math.min.apply(null, adm) : Infinity,
+    tokens: mean(runs.map(function(r){ return r.decodeTok; })),
+    done: mean(runs.map(function(r){ return r.done; })),
+    sentTotal: mean(runs.map(function(r){ return r.sent; })),
+    prefillTotal: mean(runs.map(function(r){ return r.prefillMs / r.totBusy; })),
+    wasted: mean(runs.map(function(r){ return r.wasted; })),
+    trunc: mean(runs.map(function(r){ return r.trunc; })),
+    preempts: mean(runs.map(function(r){ return r.preempts; })),
+    busy: mean(runs.map(function(r){ return r.busy; })),
+    meanBatch: mean(runs.map(function(r){ return r.meanBatch; })),
+    minBacklog: Math.min.apply(null, bl)
+  };
+}
+function evaluate(o, policy, seeds){
+  const ss = seeds || WORLD_SEEDS;
+  return summarise(ss.map(function(s){ return run(o, s, policy); }), o);
+}
+
+// ---- the two closed forms, written down without simulating anything --------------------------
+// any policy that equalises ADMISSIONS gives service in proportion to per-request cost
+function predictEqualAdmissions(o){
+  const T = tenants(o);
+  let s = 0;
+  for (let i = 0; i < T.length; i++) s += T[i].cost;
+  return T.map(function(x){ return x.cost / s; });
+}
+// FIFO with every queue backlogged gives service in proportion to OFFERED LOAD
+function predictFcfs(o){
+  const T = tenants(o);
+  let s = 0;
+  for (let i = 0; i < T.length; i++) s += T[i].offer;
+  return T.map(function(x){ return x.offer / s; });
+}
+function l1(a, b){
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d += Math.abs(a[i] - b[i]);
+  return d;
+}
+
+// ---- sweeps ----------------------------------------------------------------------------------
+function sweep(o, field, values, pols, seeds){
+  const rows = [];
+  for (let k = 0; k < values.length; k++){
+    const oo = Object.assign({}, o);
+    oo[field] = values[k];
+    const row = { x: values[k], by: {} };
+    for (let p = 0; p < pols.length; p++) row.by[pols[p]] = evaluate(oo, pols[p], seeds);
+    rows.push(row);
+  }
+  return rows;
+}
+// ===== ENGINE:END =====
+
+// ---------------------------------------------------------------- UI
+const $ = id => document.getElementById(id);
+const SWEEP_SEEDS = [2026, 7, 99];
+const COLORS = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171'];
+const POL_LABEL = {
+  fcfs: 'first-come-first-served', rr: 'round-robin', rpm: 'requests / min quota',
+  tpm: 'tokens / min quota', cap: 'slot cap', capwc: 'slot cap, work-conserving',
+  vtc: 'VTC (weighted tokens)', vtcNoLift: 'VTC, no lift rule', vtcGpu: 'VTC (milliseconds)'
+};
+let policy = 'fcfs';
+
+const p1 = x => x.toFixed(1);
+const p2 = x => x.toFixed(2);
+const p3 = x => x.toFixed(3);
+const pc1 = x => (100 * x).toFixed(1);
+const kfmt = x => Math.round(x).toLocaleString('en-US');
+
+// The sliders are an OVERLAY on DEFAULTS, never a replacement: a missing field is not an exception,
+// it is a silent NaN that turns every number on the page into garbage. The self-test checks for it.
+function opts(extra){
+  return Object.assign({}, DEFAULTS, {
+    spread: +$("sSp").value / 100,
+    offer: +$("sOf").value / 10,
+    flood: +$("sFl").value / 10,
+    honest: +$("sHo").value / 100,
+    wDecode: +$("sWo").value / 10,
+    capSlots: +$("sCs").value,
+    rpm: +$("sRp").value,
+    maxBatch: +$("sMb").value,
+    kv: +$("sKv").value * 100,
+    promptMean: +$("sPm").value,
+    outBase: +$("sOb").value
+  }, extra || {});
+}
+
+const cache = new Map();
+// a slider that only one policy reads must not invalidate the other eight. Dropping the irrelevant
+// fields from the cache key is what makes dragging w_o or the slot cap cheap.
+const IRRELEVANT = { wDecode: ['vtc', 'vtcNoLift'], wPrefill: ['vtc', 'vtcNoLift'],
+                     capSlots: ['cap', 'capwc'], rpm: ['rpm', 'tpm'] };
+function keyOf(o, pol){
+  const c = Object.assign({}, o);
+  for (const f in IRRELEVANT) if (IRRELEVANT[f].indexOf(pol) < 0) c[f] = 0;
+  return JSON.stringify(c);
+}
+function ev(o, pol, seeds){
+  const key = pol + '|' + (seeds ? seeds.length : 5) + '|' + keyOf(o, pol);
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const v = evaluate(o, pol, seeds);
+  if (cache.size > 900) cache.clear();
+  cache.set(key, v);
+  return v;
+}
+
+let memo = { key: null, val: null };
+function heavy(){
+  const o = opts();
+  const key = JSON.stringify(o);
+  if (memo.key === key) return memo.val;
+  const all = {};
+  for (let i = 0; i < POLICIES.length; i++) all[POLICIES[i]] = ev(o, POLICIES[i]);
+  const spreadRows = sweep(o, 'spread', [0, 0.25, 0.5, 0.75, 1],
+                           ['fcfs', 'rr', 'vtc', 'vtcGpu'], SWEEP_SEEDS);
+  const floodRows = sweep(o, 'flood', [1, 2, 4, 6, 8],
+                          ['fcfs', 'rr', 'vtc', 'vtcGpu'], SWEEP_SEEDS);
+  const ws = wStar(o);
+  const woVals = [1, 2, 4, 8, 11, ws, 20, 28, 40];
+  const woRows = sweep(o, 'wDecode', woVals, ['vtc']);
+  const slotVals = [1, 2, 3, 4, 6, 8, o.maxBatch];
+  const slotRows = sweep(o, 'capSlots', slotVals, ['cap']);
+  const honVals = [0, 0.25, 0.5, 0.75, 1];
+  const honRows = sweep(o, 'honest', honVals, ['tpm']);
+  memo = { key: key, val: { o: o, all: all, spreadRows: spreadRows, floodRows: floodRows,
+                            woRows: woRows, woVals: woVals, slotRows: slotRows,
+                            slotVals: slotVals, honRows: honRows, honVals: honVals,
+                            wStar: ws, T: tenants(o),
+                            predEqual: predictEqualAdmissions(o), predFcfs: predictFcfs(o) } };
+  return memo.val;
+}
+
+// ---------------------------------------------------------------- charts
+function axes(g, w, h, L, R, T, B){
+  g.strokeStyle = '#334155'; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(L, T); g.lineTo(L, h - B); g.lineTo(w - R, h - B); g.stroke();
+}
+function drawBars(id, hv){
+  const c = $(id), g = c.getContext('2d');
+  const w = c.width, h = c.height, L = 46, R = 14, T = 18, B = 40;
+  g.clearRect(0, 0, w, h);
+  const s = hv.all[policy].share;
+  const mx = Math.max(0.42, Math.max.apply(null, s) * 1.15);
+  axes(g, w, h, L, R, T, B);
+  const bw = (w - L - R) / s.length;
+  for (let i = 0; i < s.length; i++){
+    const x = L + i * bw + bw * 0.18, bwd = bw * 0.64;
+    const y = h - B - (s[i] / mx) * (h - T - B);
+    g.fillStyle = COLORS[i];
+    g.fillRect(x, y, bwd, h - B - y);
+    g.fillStyle = '#e2e8f0'; g.font = 'bold 13px ui-monospace, monospace'; g.textAlign = 'center';
+    g.fillText(pc1(s[i]) + '%', x + bwd / 2, y - 6);
+    g.fillStyle = '#94a3b8'; g.font = '11px sans-serif';
+    g.fillText(NAMES[i], x + bwd / 2, h - B + 15);
+    g.fillText('~' + Math.round(hv.T[i].outMean) + ' tok', x + bwd / 2, h - B + 28);
+  }
+  const yf = h - B - (0.25 / mx) * (h - T - B);
+  g.strokeStyle = '#f1f5f9'; g.setLineDash([5, 4]); g.beginPath();
+  g.moveTo(L, yf); g.lineTo(w - R, yf); g.stroke(); g.setLineDash([]);
+  g.fillStyle = '#f1f5f9'; g.font = '10px sans-serif'; g.textAlign = 'left';
+  g.fillText('equal share', L + 4, yf - 5);
+}
+function drawFrontier(id, hv){
+  const c = $(id), g = c.getContext('2d');
+  const w = c.width, h = c.height, L = 56, R = 16, T = 16, B = 34;
+  g.clearRect(0, 0, w, h);
+  const pts = POLICIES.map(function(p){
+    return { p: p, x: hv.all[p].ratio, y: hv.all[p].tokens };
+  });
+  const curve = hv.woRows.map(function(r, i){
+    return { x: r.by.vtc.ratio, y: r.by.vtc.tokens, w: hv.woVals[i] };
+  });
+  const xs = pts.map(function(q){ return Math.log(q.x); })
+                .concat(curve.map(function(q){ return Math.log(q.x); }));
+  const ys = pts.map(function(q){ return q.y; }).concat(curve.map(function(q){ return q.y; }));
+  const x0 = Math.min.apply(null, xs) - 0.06, x1 = Math.max.apply(null, xs) + 0.06;
+  const y0 = Math.min.apply(null, ys) * 0.985, y1 = Math.max.apply(null, ys) * 1.015;
+  const X = v => L + (Math.log(v) - x0) / (x1 - x0) * (w - L - R);
+  const Y = v => h - B - (v - y0) / (y1 - y0) * (h - T - B);
+  axes(g, w, h, L, R, T, B);
+  g.strokeStyle = '#475569'; g.lineWidth = 1.5; g.beginPath();
+  for (let i = 0; i < curve.length; i++){
+    const px = X(curve[i].x), py = Y(curve[i].y);
+    if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+  }
+  g.stroke();
+  g.font = '10px sans-serif';
+  for (let i = 0; i < pts.length; i++){
+    const q = pts[i], px = X(q.x), py = Y(q.y);
+    const good = q.p === 'vtcGpu';
+    g.fillStyle = q.p === policy ? '#fbbf24' : (good ? '#4ade80' : '#94a3b8');
+    g.beginPath(); g.arc(px, py, q.p === policy ? 6 : 4, 0, 7); g.fill();
+    g.fillStyle = q.p === policy ? '#fde68a' : '#cbd5e1';
+    g.textAlign = px > w - 150 ? 'right' : 'left';
+    g.fillText(q.p, px + (px > w - 150 ? -8 : 8), py + 3);
+  }
+  g.fillStyle = '#94a3b8'; g.font = '10px sans-serif'; g.textAlign = 'center';
+  g.fillText('unfairness, max / min share (log)', (L + w - R) / 2, h - 8);
+  g.save(); g.translate(13, (T + h - B) / 2); g.rotate(-Math.PI / 2); g.textAlign = 'center';
+  g.fillText('decode tokens delivered', 0, 0); g.restore();
+}
+function drawSweep(id, rows, pols, xlab, marker){
+  const c = $(id), g = c.getContext('2d');
+  const w = c.width, h = c.height, L = 46, R = 92, T = 14, B = 34;
+  g.clearRect(0, 0, w, h);
+  let mx = 1.05;
+  for (let i = 0; i < rows.length; i++)
+    for (let p = 0; p < pols.length; p++) mx = Math.max(mx, rows[i].by[pols[p][0]].ratio);
+  mx *= 1.08;
+  const xa = rows[0].x, xb = rows[rows.length - 1].x;
+  const X = v => L + (v - xa) / (xb - xa) * (w - L - R);
+  const Y = v => h - B - (v - 1) / (mx - 1) * (h - T - B);
+  axes(g, w, h, L, R, T, B);
+  if (marker !== undefined && marker >= xa && marker <= xb){
+    g.strokeStyle = '#64748b'; g.setLineDash([4, 4]); g.beginPath();
+    g.moveTo(X(marker), T); g.lineTo(X(marker), h - B); g.stroke(); g.setLineDash([]);
+  }
+  for (let p = 0; p < pols.length; p++){
+    g.strokeStyle = pols[p][1]; g.lineWidth = 2; g.beginPath();
+    for (let i = 0; i < rows.length; i++){
+      const px = X(rows[i].x), py = Y(rows[i].by[pols[p][0]].ratio);
+      if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+    }
+    g.stroke();
+    g.fillStyle = pols[p][1]; g.font = 'bold 10px sans-serif'; g.textAlign = 'left';
+    g.fillText(pols[p][0], w - R + 5, Y(rows[rows.length - 1].by[pols[p][0]].ratio) + 3);
+  }
+  g.fillStyle = '#94a3b8'; g.font = '10px sans-serif'; g.textAlign = 'center';
+  g.fillText(xlab, (L + w - R) / 2, h - 8);
+  g.textAlign = 'right';
+  for (const v of [1, mx]){ g.fillText(p1(v) + 'x', L - 5, Y(v) + 3); }
+  g.save(); g.translate(13, (T + h - B) / 2); g.rotate(-Math.PI / 2); g.textAlign = 'center';
+  g.fillText('max / min share', 0, 0); g.restore();
+}
+function drawWo(id, hv){
+  const c = $(id), g = c.getContext('2d');
+  const w = c.width, h = c.height, L = 46, R = 16, T = 14, B = 34;
+  g.clearRect(0, 0, w, h);
+  const xs = hv.woVals, ys = hv.woRows.map(function(r){ return r.by.vtc.ratio; });
+  const mx = Math.max.apply(null, ys) * 1.08;
+  const xa = Math.log(xs[0]), xb = Math.log(xs[xs.length - 1]);
+  const X = v => L + (Math.log(v) - xa) / (xb - xa) * (w - L - R);
+  const Y = v => h - B - (v - 1) / (mx - 1) * (h - T - B);
+  axes(g, w, h, L, R, T, B);
+  g.strokeStyle = '#64748b'; g.setLineDash([4, 4]); g.beginPath();
+  g.moveTo(X(hv.wStar), T); g.lineTo(X(hv.wStar), h - B); g.stroke(); g.setLineDash([]);
+  g.strokeStyle = '#a78bfa'; g.lineWidth = 2; g.beginPath();
+  for (let i = 0; i < xs.length; i++){
+    const px = X(xs[i]), py = Y(ys[i]);
+    if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+  }
+  g.stroke();
+  for (let i = 0; i < xs.length; i++){
+    g.fillStyle = Math.abs(xs[i] - hv.wStar) < 1e-9 ? '#4ade80' : '#a78bfa';
+    g.beginPath(); g.arc(X(xs[i]), Y(ys[i]), 3.5, 0, 7); g.fill();
+  }
+  g.fillStyle = '#e2e8f0'; g.font = 'bold 10px sans-serif'; g.textAlign = 'center';
+  g.fillText('the machine says ' + p2(hv.wStar), X(hv.wStar), T + 10);
+  g.fillStyle = '#f87171';
+  g.fillText('shipped: 2', X(2), Y(hv.woRows[1].by.vtc.ratio) - 8);
+  g.fillStyle = '#94a3b8'; g.font = '10px sans-serif';
+  g.fillText('VTC decode weight w_o, log scale', (L + w - R) / 2, h - 8);
+  g.textAlign = 'right';
+  g.fillText('1.0x', L - 5, Y(1) + 3);
+  g.fillText(p1(mx) + 'x', L - 5, Y(mx) + 3);
+}
+
+// ---------------------------------------------------------------- tables
+function renderTenants(hv){
+  const a = hv.all[policy], rows = [];
+  for (let i = 0; i < NAMES.length; i++){
+    rows.push('<tr><td><span class="swatch" style="background:' + COLORS[i] + '"></span>' +
+      NAMES[i] + '</td><td>' + p1(hv.T[i].outMean) + '</td><td>' + hv.T[i].declared + '</td><td>' +
+      kfmt(a.sent[i]) + '</td><td>' + kfmt(a.adm[i]) + '</td><td>' + kfmt(a.comp[i]) + '</td><td>' +
+      kfmt(a.prefillShare[i] * a.busy) + '</td><td>' + kfmt(a.decMs[i]) + '</td><td class="' +
+      (a.share[i] > 0.28 ? 'bad' : (a.share[i] < 0.22 ? 'warn' : 'ok')) + '">' +
+      pc1(a.share[i]) + '%</td><td>' + kfmt(a.backlog[i]) + '</td></tr>');
+  }
+  $("tenTbl").innerHTML = rows.join('');
+  const bl = a.minBacklog;
+  $("tenNote").innerHTML = POL_LABEL[policy] + ': the machine splits <strong>' +
+    a.share.map(pc1).join(' / ') + '</strong>, a ratio of <strong>' + p2(a.ratio) +
+    '&times;</strong> and a Jain index of ' + p3(a.jain) + '. ' +
+    (bl >= 5
+      ? 'All four tenants were still backlogged at the end (smallest queue ' + kfmt(bl) +
+        '), so a fair share is a well-defined thing to ask for.'
+      : '<strong class="warn">At least one tenant ran dry (smallest queue ' + kfmt(bl) +
+        ')</strong>, so max-min fairness is not defined here &mdash; nobody is being starved of ' +
+        'something they asked for.') +
+    ' Prefill took ' + pc1(a.prefillTotal) + '% of the replica; ' + kfmt(a.preempts) +
+    ' preemptions threw away ' + kfmt(a.wasted) + ' already-generated tokens.';
+}
+function renderPolicies(hv){
+  const rows = [], order = POLICIES.slice().sort(function(a, b){
+    return hv.all[a].ratio - hv.all[b].ratio;
+  });
+  let bestTok = 0, bestRatio = Infinity;
+  for (const p of POLICIES){
+    bestTok = Math.max(bestTok, hv.all[p].tokens);
+    bestRatio = Math.min(bestRatio, hv.all[p].ratio);
+  }
+  for (const p of order){
+    const a = hv.all[p];
+    rows.push('<tr' + (p === policy ? ' style="background:#fef9c3"' : '') + '><td>' +
+      POL_LABEL[p] + '</td>' +
+      a.share.map(function(x){ return '<td>' + pc1(x) + '%</td>'; }).join('') +
+      '<td class="' + (a.ratio <= 1.3 ? 'ok' : (a.ratio >= 3 ? 'bad' : 'warn')) + '">' +
+      p2(a.ratio) + '&times;</td><td>' + p3(a.jain) + '</td><td>' + p2(a.admRatio) +
+      '&times;</td><td' + (a.tokens === bestTok ? ' class="win"' : '') + '>' + kfmt(a.tokens) +
+      '</td><td>' + kfmt(a.done) + '</td><td>' + pc1(a.prefillTotal) + '%</td></tr>');
+  }
+  $("polTbl").innerHTML = rows.join('');
+  // rank correlation between admission equality and service equality
+  const byAdm = POLICIES.slice().sort(function(a, b){ return hv.all[a].admRatio - hv.all[b].admRatio; });
+  const bySvc = POLICIES.slice().sort(function(a, b){ return hv.all[a].ratio - hv.all[b].ratio; });
+  let d2 = 0;
+  for (const p of POLICIES) d2 += Math.pow(byAdm.indexOf(p) - bySvc.indexOf(p), 2);
+  const n = POLICIES.length, rho = 1 - 6 * d2 / (n * (n * n - 1));
+  const f = hv.all.fcfs, r = hv.all.rpm;
+  $("polNote").innerHTML =
+    'Every row is the same replica for the same 120 seconds, so the cost is identical and only the ' +
+    'split changes. Rank the nine by how equal their <em>admissions</em> are and again by how equal ' +
+    'their <em>service</em> is, and the two orders correlate <strong>' + p2(rho) +
+    '</strong> (Spearman): the most egalitarian admitter is close to the least egalitarian server. ' +
+    'Counted in tokens the request quota ' +
+    (r.tokens > f.tokens ? 'beats' : 'loses to') + ' first-come-first-served by ' +
+    p1(Math.abs(100 * (r.tokens / f.tokens - 1))) + '%; counted in requests it ' +
+    (r.done > f.done ? 'beats' : 'loses to') + ' it by ' +
+    p1(Math.abs(100 * (r.done / f.done - 1))) + '%. Same two runs.';
+}
+function renderCap(hv){
+  const a = hv.all.cap, rows = [];
+  for (let i = 0; i < NAMES.length; i++){
+    rows.push('<tr><td><span class="swatch" style="background:' + COLORS[i] + '"></span>' +
+      NAMES[i] + '</td><td class="ok">' + pc1(a.decShare[i]) + '%</td><td class="' +
+      (a.prefillShare[i] > 0.1 ? 'bad' : '') + '">' + pc1(a.prefillShare[i]) + '%</td><td>' +
+      pc1(a.share[i]) + '%</td></tr>');
+  }
+  $("capTbl").innerHTML = rows.join('');
+  $("capNote").innerHTML = 'A cap of ' + hv.o.capSlots +
+    ' running sequences per tenant splits decode time <strong>' + a.decShare.map(pc1).join(' / ') +
+    '</strong> &mdash; a ratio of <strong class="ok">' + p2(a.decRatio) +
+    '&times;</strong>, exactly fair in the thing it controls. Overall it scores <strong class="' +
+    (a.ratio > 1.5 ? 'bad' : 'warn') + '">' + p2(a.ratio) +
+    '&times;</strong>, because prefill is ' + pc1(a.prefillTotal) +
+    '% of the machine and the cap says nothing about it: short answers turn their six slots over ' +
+    'far faster, so they pay far more prefills.';
+}
+function renderWo(hv){
+  const best = hv.woRows.reduce(function(a, b){ return b.by.vtc.ratio < a.by.vtc.ratio ? b : a; });
+  const at2 = hv.woRows[1].by.vtc;
+  $("woNote").innerHTML = 'A prefill token costs ' + hv.o.prefillPerTok +
+    ' ms and a decode token costs ' + p3(perSeqMs(hv.o)) + ' ms at a batch of ' + hv.o.maxBatch +
+    ', so the machine’s own exchange rate is <strong>' + p2(hv.wStar) +
+    '</strong>. VTC ships w<sub>o</sub> = 2, which measures <strong>' + p2(at2.ratio) +
+    '&times;</strong>; the curve bottoms out at w<sub>o</sub> = ' + p2(best.x) + ' with <strong>' +
+    p2(best.by.vtc.ratio) + '&times;</strong>. It is not a constant: the same formula gives ' +
+    p2(wStar(hv.o, 8)) + ' at a batch of 8 and ' + p2(wStar(hv.o, 48)) +
+    ' at 48, so the right value moves with the load the scheduler is deciding.';
+}
+function renderHon(hv){
+  const rows = [];
+  for (let i = 0; i < hv.honVals.length; i++){
+    const a = hv.honRows[i].by.tpm;
+    const T = tenants(Object.assign({}, hv.o, { honest: hv.honVals[i] }));
+    rows.push('<tr><td>' + Math.round(100 * hv.honVals[i]) + '%</td><td>' +
+      T.map(function(x){ return x.declared; }).join(' / ') + '</td>' +
+      a.share.map(function(x){ return '<td>' + pc1(x) + '%</td>'; }).join('') +
+      '<td class="' + (a.ratio <= 1.4 ? 'ok' : (a.ratio >= 3 ? 'bad' : 'warn')) + '">' +
+      p2(a.ratio) + '&times;</td><td>' + kfmt(a.trunc) + ' of ' + kfmt(a.done) + '</td></tr>');
+  }
+  $("honTbl").innerHTML = rows.join('');
+  const a0 = hv.honRows[0].by.tpm, a1 = hv.honRows[hv.honRows.length - 1].by.tpm;
+  $("honNote").innerHTML = 'The token bucket is sized to <code>rpm &times; (prompt + default ' +
+    'max_tokens)</code>, so at 0% honesty it is arithmetically the same quota as the request one ' +
+    '&mdash; and measures the same, <strong>' + p2(a0.ratio) + '&times;</strong> against <strong>' +
+    p2(hv.all.rpm.ratio) + '&times;</strong>. Fully honest declarations take it to <strong>' +
+    p2(a1.ratio) + '&times;</strong>, at the price of ' +
+    p1(100 * a1.trunc / Math.max(1, a1.done)) + '% of answers hitting their ceiling &mdash; and of ' +
+    'resting your replica’s fairness on a field the tenants set.';
+}
+function renderSlots(hv){
+  const rows = [];
+  for (let i = 0; i < hv.slotVals.length; i++){
+    const a = hv.slotRows[i].by.cap, v = hv.slotVals[i];
+    const binds = v * NAMES.length <= hv.o.maxBatch;
+    rows.push('<tr><td>' + v + (v * NAMES.length === hv.o.maxBatch ? ' (exactly the batch)' : '') +
+      '</td><td>' + (binds ? '<span class="warn">yes</span>' : '<span class="ok">never</span>') +
+      '</td><td>' + p2(a.ratio) + '&times;</td><td>' + kfmt(a.tokens) + '</td><td>' +
+      kfmt(a.done) + '</td></tr>');
+  }
+  $("slotTbl").innerHTML = rows.join('');
+  const tight = hv.slotRows.filter(function(r){ return r.x * NAMES.length <= hv.o.maxBatch; });
+  const worst = tight.reduce(function(a, b){ return b.by.cap.ratio > a.by.cap.ratio ? b : a; });
+  $("slotNote").innerHTML = 'The cap only does anything while ' + NAMES.length +
+    ' &times; slots &le; the batch of ' + hv.o.maxBatch +
+    '. Inside that range its worst setting is <strong>' + worst.x +
+    ' slots</strong> at ' + p2(worst.by.cap.ratio) +
+    '&times; &mdash; and the loosest settings look best only because they never bind, at which ' +
+    'point the policy IS first-come-first-served (' + p2(hv.all.fcfs.ratio) + '&times;).';
+}
+function renderClosedForms(hv){
+  const pe = hv.predEqual, pf = hv.predFcfs;
+  const rows = [
+    ['first-come-first-served', 'the age of the oldest waiting request',
+     pf, hv.all.fcfs.share, 'every tenant offers the same load'],
+    ['round-robin', 'the number of admissions', pe, hv.all.rr.share,
+     'every tenant’s answers are the same length'],
+    ['requests / min quota', 'the number of admissions', pe, hv.all.rpm.share,
+     'every tenant’s answers are the same length'],
+    ['tokens / min quota', 'prompt + declared max_tokens admitted', pe, hv.all.tpm.share,
+     'every client declares an honest max_tokens'],
+    ['slot cap', 'resident sequences, hence decode iterations', null, hv.all.cap.share,
+     'prefill is free'],
+    ['VTC (weighted tokens)', 'w_p&middot;prefill + w_o&middot;decode', null, hv.all.vtc.share,
+     'w_o / w_p equals ' + p2(hv.wStar) + ' at the running batch'],
+    ['VTC (milliseconds)', 'the machine itself, dt / B', null, hv.all.vtcGpu.share, '&mdash;']
+  ];
+  $("cfTbl").innerHTML = rows.map(function(r){
+    return '<tr><td>' + r[0] + '</td><td style="text-align:left;font-size:11.5px;color:#475569">' +
+      r[1] + '</td><td>' + (r[2] ? r[2].map(pc1).join(' / ') : '&mdash;') + '</td><td>' +
+      r[3].map(pc1).join(' / ') + '</td><td style="text-align:left;font-size:11.5px;color:#475569">' +
+      r[4] + '</td></tr>';
+  }).join('');
+  $("cfNote").innerHTML = 'The predictions are arithmetic, not simulation: share &prop; offered ' +
+    'load for FIFO, share &prop; per-request GPU cost for anything that equalises admissions. ' +
+    'They land within ' + p1(100 * l1(pe, hv.all.rpm.share) / 2) +
+    ' percentage points (total variation) of the measured quota split and ' +
+    p1(100 * l1(pf, hv.all.fcfs.share) / 2) + ' of the measured FIFO split. ' +
+    '<strong>Every policy here is exactly fair in something.</strong> The question was never which ' +
+    'one is fair &mdash; it is which denominator you meant.';
+}
+
+// ---------------------------------------------------------------- render
+function renderLabels(){
+  $("vSp").textContent = p2(+$("sSp").value / 100);
+  $("vOf").textContent = p1(+$("sOf").value / 10);
+  $("vFl").textContent = p1(+$("sFl").value / 10) + '×';
+  $("vHo").textContent = $("sHo").value + '%';
+  $("vWo").textContent = p1(+$("sWo").value / 10);
+  $("vCs").textContent = $("sCs").value;
+  $("vRp").textContent = $("sRp").value;
+  $("vMb").textContent = $("sMb").value;
+  $("vKv").textContent = kfmt(+$("sKv").value * 100);
+  $("vPm").textContent = $("sPm").value;
+  $("vOb").textContent = $("sOb").value;
+}
+function render(){
+  renderLabels();
+  const hv = heavy(), a = hv.all[policy], f = hv.all.fcfs, r = hv.all.rpm;
+  $("bigGap").textContent = p2(a.ratio) + '×';
+  $("bigGap").className = 'text-4xl font-black tabular-nums ' +
+    (a.ratio <= 1.3 ? 'text-emerald-700' : (a.ratio >= 3 ? 'text-red-700' : 'text-amber-700'));
+  $("noteGap").innerHTML = 'first-come-first-served on this workload: <strong>' + p2(f.ratio) +
+    '&times;</strong> &middot; an equal request quota: <strong>' + p2(r.ratio) +
+    '&times;</strong> &middot; milliseconds: <strong>' + p2(hv.all.vtcGpu.ratio) + '&times;</strong>';
+  $("bigTok").textContent = kfmt(a.tokens);
+  $("noteTok").innerHTML = 'in ' + kfmt(a.busy / 1000) + ' s of one replica, mean batch ' +
+    p1(a.meanBatch) + ', ' + pc1(a.prefillTotal) + '% of the machine spent on prefill';
+  $("bigReq").textContent = kfmt(a.done);
+  $("noteReq").innerHTML = 'of ' + kfmt(a.sentTotal) + ' sent &middot; ' + kfmt(a.trunc) +
+    ' answers hit their <code>max_tokens</code> ceiling';
+
+  renderTenants(hv); renderPolicies(hv); renderCap(hv); renderWo(hv);
+  renderHon(hv); renderSlots(hv); renderClosedForms(hv);
+  drawBars('cBars', hv); drawFrontier('cFront', hv);
+  drawSweep('cSpread', hv.spreadRows,
+            [['fcfs', '#38bdf8'], ['rr', '#f87171'], ['vtc', '#a78bfa'], ['vtcGpu', '#4ade80']],
+            'output-length spread (0 = identical, 1 = 16x)');
+  let cross = null;
+  for (let i = 1; i < hv.floodRows.length; i++){
+    const a0 = hv.floodRows[i - 1], a1 = hv.floodRows[i];
+    const d0 = a0.by.fcfs.ratio - a0.by.vtc.ratio, d1 = a1.by.fcfs.ratio - a1.by.vtc.ratio;
+    if (d0 < 0 && d1 > 0) cross = a0.x + (a1.x - a0.x) * (-d0) / (d1 - d0);
+  }
+  drawSweep('cFlood', hv.floodRows,
+            [['fcfs', '#38bdf8'], ['rr', '#f87171'], ['vtc', '#a78bfa'], ['vtcGpu', '#4ade80']],
+            'how much more the agent tenant offers', cross === null ? undefined : cross);
+  drawWo('cWo', hv);
+
+  const best = POLICIES.reduce(function(x, y){
+    return hv.all[y].ratio < hv.all[x].ratio ? y : x;
+  });
+  $("frontNote").innerHTML = 'Up and to the left is better: fewer wasted milliseconds AND a fairer ' +
+    'split, for the same GPU and the same 120 seconds. The grey curve is one algorithm &mdash; ' +
+    'token-VTC &mdash; swept over its decode weight; ' +
+    (hv.all.vtcGpu.ratio <= hv.all.fcfs.ratio && hv.all.vtcGpu.tokens >= hv.all.fcfs.tokens
+      ? '<strong>VTC in milliseconds is the one point that beats doing nothing on BOTH axes</strong> (' +
+        p2(hv.all.vtcGpu.ratio) + '&times; and ' + kfmt(hv.all.vtcGpu.tokens) + ' tokens against ' +
+        p2(hv.all.fcfs.ratio) + '&times; and ' + kfmt(hv.all.fcfs.tokens) + ').'
+      : 'at this setting nothing dominates first-come-first-served on both axes.') +
+    ' Best fairness here: <strong>' + POL_LABEL[best] + '</strong>.';
+  $("spreadNote").innerHTML = 'At spread 0 every tenant’s answers are the same length and ' +
+    'every scheduler on the page is fair (' +
+    ['fcfs', 'rr', 'vtc', 'vtcGpu'].map(function(p){
+      return p2(hv.spreadRows[0].by[p].ratio) + '×';
+    }).join(' / ') + '). Nothing about the schedulers changes on the way to spread 1 &mdash; only ' +
+    'a number none of them can see. Three worlds per point.';
+  $("floodNote").innerHTML = 'First-come-first-served has no isolation: its share tracks ' +
+    '<code>offer<sub>i</sub> / &Sigma;offer<sub>j</sub></code>, so a tenant that asks for more gets ' +
+    'more. VTC does not move. ' +
+    (cross === null
+      ? 'Over this range the ranking does not cross.'
+      : 'The two cross at about <strong>' + p1(cross) + '&times;</strong>: below it, deleting ' +
+        'your fair queuing improves fairness; above it, it is the only thing between you and one ' +
+        'tenant owning the box.') + ' Three worlds per point.';
+}
+
+// ---------------------------------------------------------------- self-test
+function selfTest(){
+  let n = 0; const bad = [];
+  const ok = (c, l) => { n++; if (!c) bad.push(l); };
+  const B = Object.assign({}, DEFAULTS);
+  const S3 = [2026, 7, 99], S1 = [2026];
+  const E = (extra, pol, seeds) => ev(Object.assign({}, B, extra || {}), pol || 'fcfs', seeds);
+
+  // 1. conservation: the machine is one machine, and every policy gets all of it
+  {
+    let worst = 0, busySpread = [];
+    for (const p of POLICIES){
+      const r = run(B, 2026, p);
+      let s = 0;
+      for (let i = 0; i < r.share.length; i++) s += r.share[i];
+      worst = Math.max(worst, Math.abs(s - 1));
+      busySpread.push(r.busy);
+      ok(Math.abs(r.totBusy - r.busy) < 1e-6,
+         p + ': charged GPU time (' + p1(r.totBusy) + ') is not the busy time (' + p1(r.busy) + ')');
+      let admitted = 0;
+      for (let i = 0; i < r.st.length; i++) admitted += r.st[i].admitted;
+      // every admission ends in exactly one of three ways, so this is an identity, not a bound
+      ok(admitted === r.done + r.running + r.preempts,
+         p + ': ' + admitted + ' admissions against ' + r.done + ' completions + ' + r.running +
+         ' resident + ' + r.preempts + ' preemptions');
+      ok(r.decodeTok > 0 && r.sent > 0, p + ' produced nothing at all');
+    }
+    ok(worst < 1e-12, 'the four shares do not sum to one: off by ' + worst.toExponential(2));
+    const bMin = Math.min.apply(null, busySpread), bMax = Math.max.apply(null, busySpread);
+    ok(bMax / bMin < 1.001 && bMin > 0.99 * B.horizon,
+       'the policies are not being given the same machine: busy time ranges ' + p1(bMin) +
+       ' to ' + p1(bMax));
+  }
+
+  // 2. determinism, and the workload is built before the policy is chosen
+  {
+    const a = arrivals(B, tenants(B), 2026), b = arrivals(B, tenants(B), 2026);
+    ok(JSON.stringify(a) === JSON.stringify(b), 'the same seed produced two different worlds');
+    ok(JSON.stringify(arrivals(B, tenants(B), 7)) !== JSON.stringify(a),
+       'two different seeds produced the same world');
+    const r1 = run(B, 2026, 'fcfs'), r2 = run(B, 2026, 'rpm');
+    ok(r1.sent === r2.sent, 'the policy changed how many requests were SENT (' + r1.sent +
+       ' vs ' + r2.sent + ')');
+    // one tenant's parameters must not shift another tenant's stream
+    const T2 = tenants(Object.assign({}, B, { flood: 5 }));
+    const a2 = arrivals(Object.assign({}, B, { flood: 5 }), T2, 2026);
+    const only0 = x => x.filter(function(q){ return q.t === 0; }).map(function(q){ return q.arrive; });
+    ok(JSON.stringify(only0(a2)) === JSON.stringify(only0(a)),
+       'flooding tenant 3 moved tenant 0’s arrivals');
+  }
+
+  // 3. the tenant construction: spread redistributes output length without changing how much
+  {
+    for (const s of [0, 0.3, 0.6, 1]){
+      const T = tenants(Object.assign({}, B, { spread: s, honest: 0, defaultMax: 1e9 }));
+      const m = mean(T.map(function(x){ return x.raw; }));
+      ok(Math.abs(m - B.outBase) < 1e-9,
+         'spread ' + s + ' changed the fleet mean output to ' + p2(m));
+    }
+    const T0 = tenants(Object.assign({}, B, { spread: 0 }));
+    ok(Math.abs(T0[0].raw - T0[3].raw) < 1e-9, 'spread 0 did not make the tenants identical');
+    const T1 = tenants(B);
+    ok(Math.abs(T1[3].raw / T1[0].raw - 16) < 1e-9,
+       'spread 1 is no longer a 16x ratio: ' + p2(T1[3].raw / T1[0].raw));
+    // E[min(X, M)] for an exponential is m(1 - e^-M/m), checked against a numeric mean
+    for (const mm of [40, 200, 600]) for (const M of [50, 300, 1024]){
+      let acc = 0; const K = 20000;
+      for (let i = 1; i <= K; i++) acc += Math.min(-mm * Math.log(1 - (i - 0.5) / K), M);
+      ok(Math.abs(acc / K - mm * (1 - Math.exp(-M / mm))) < 0.02 * mm,
+         'the truncated-mean closed form is wrong at mean ' + mm + ', cap ' + M);
+    }
+  }
+
+  // 4. THE HEADLINE: same everything, different outcome
+  {
+    const f = E({}, 'fcfs'), q = E({}, 'rpm');
+    ok(f.ratio < 1.35, 'first-come-first-served no longer splits this machine evenly: ' + p2(f.ratio));
+    ok(q.ratio > 5, 'the equal request quota stopped starving anyone: ' + p2(q.ratio));
+    ok(q.ratio / f.ratio > 4, 'turning on the quota is only ' + p2(q.ratio / f.ratio) +
+       'x less fair, which is not the claim');
+    ok(q.share[0] < 0.10 && q.share[3] > 0.45,
+       'the quota split moved: ' + q.share.map(pc1).join('/'));
+    ok(f.share[0] > 0.24 && f.share[3] > 0.20,
+       'the FIFO split moved: ' + f.share.map(pc1).join('/'));
+    ok(q.admRatio < 1.15 && f.admRatio > 4,
+       'the quota is no longer the EQUAL admitter (' + p2(q.admRatio) + ') while FIFO is unequal (' +
+       p2(f.admRatio) + ')');
+    // and it is the output-length spread that does it, nothing else
+    const f0 = E({ spread: 0 }, 'fcfs'), q0 = E({ spread: 0 }, 'rpm');
+    ok(q0.ratio < 1.2 && f0.ratio < 1.2,
+       'at spread 0 the quota and FIFO are no longer both fair: ' + p2(q0.ratio) + ' / ' + p2(f0.ratio));
+    let mono = true, prev = 0;
+    for (const s of [0, 0.25, 0.5, 0.75, 1]){
+      const v = E({ spread: s }, 'rpm', S3).ratio;
+      if (v < prev - 0.05) mono = false;
+      prev = v;
+    }
+    ok(mono, 'the quota’s unfairness is no longer monotone in the output-length spread');
+  }
+
+  // 5. the closed forms
+  {
+    const pe = predictEqualAdmissions(B), pf = predictFcfs(B);
+    ok(Math.abs(pe.reduce(function(a, x){ return a + x; }, 0) - 1) < 1e-12 &&
+       Math.abs(pf.reduce(function(a, x){ return a + x; }, 0) - 1) < 1e-12,
+       'a closed-form prediction does not sum to one');
+    ok(l1(pe, E({}, 'rpm').share) < 0.09,
+       'the equal-admissions closed form drifted from the quota by ' +
+       p3(l1(pe, E({}, 'rpm').share)));
+    for (const fl of [4, 8]){
+      const p = predictFcfs(Object.assign({}, B, { flood: fl }));
+      ok(l1(p, E({ flood: fl }, 'fcfs').share) < 0.11,
+         'the FIFO closed form drifted at flood ' + fl + ' by ' +
+         p3(l1(p, E({ flood: fl }, 'fcfs').share)));
+    }
+    ok(pe[3] / pe[0] > 6, 'the equal-admissions prediction no longer has a 6x spread');
+    ok(Math.abs(pf[0] - 0.25) < 1e-12, 'the FIFO prediction at flood 1 is not an even split');
+  }
+
+  // 6. VTC does exactly what it says, and that is the problem
+  {
+    const v = E({}, 'vtc');
+    ok(v.vcRatio < 1.1, 'VTC no longer equalises its OWN counter: ' + p3(v.vcRatio));
+    ok(v.ratio > 2.5, 'VTC’s GPU split is no longer the point: ' + p2(v.ratio));
+    ok(v.ratio / v.vcRatio > 2, 'the gap between VTC’s counter and the machine collapsed');
+    ok(v.ratio > E({}, 'fcfs').ratio,
+       'the published fair scheduler no longer loses to doing nothing at equal offered load');
+    // the weight that closes it is the machine's own ratio, and it is not a constant
+    const ws = wStar(B);
+    ok(Math.abs(ws - perSeqMs(B) / B.prefillPerTok) < 1e-12, 'wStar is not perSeq / prefillCost');
+    ok(Math.abs(ws - 15.42) < 0.02, 'the machine’s exchange rate moved from 15.42: ' + p2(ws));
+    ok(wStar(B, 8) > 1.7 * ws && wStar(B, 48) < ws,
+       'the correct weight stopped depending on the batch size');
+    const tuned = E({ wDecode: ws }, 'vtc');
+    ok(tuned.ratio < 1.12, 'tuning w_o to the machine no longer fixes VTC: ' + p2(tuned.ratio));
+    ok(Math.abs(tuned.ratio - E({}, 'vtcGpu').ratio) < 0.15,
+       'the tuned weight and the millisecond counter no longer agree');
+    // the curve has a minimum AT the machine's ratio, not at an end
+    const lo = E({ wDecode: ws / 3 }, 'vtc', S3).ratio, hi = E({ wDecode: ws * 3 }, 'vtc', S3).ratio;
+    ok(lo > tuned.ratio && hi > tuned.ratio,
+       'the w_o curve no longer has an interior minimum (' + p2(lo) + ' / ' + p2(tuned.ratio) +
+       ' / ' + p2(hi) + ')');
+    // milliseconds dominate doing nothing on BOTH axes
+    const g = E({}, 'vtcGpu'), f = E({}, 'fcfs');
+    ok(g.ratio < f.ratio && g.tokens > f.tokens,
+       'the millisecond counter no longer dominates FIFO on both axes: ' + p2(g.ratio) + '/' +
+       kfmt(g.tokens) + ' vs ' + p2(f.ratio) + '/' + kfmt(f.tokens));
+    ok(g.ratio < 1.05, 'the millisecond counter stopped being fair: ' + p3(g.ratio));
+  }
+
+  // 7. a PERFECT slot cap, and the resource it was never told about
+  {
+    const c = E({}, 'cap');
+    ok(c.decRatio < 1.06, 'the slot cap no longer splits decode time evenly: ' + p3(c.decRatio));
+    ok(c.ratio > 1.6, 'the slot cap stopped failing overall: ' + p2(c.ratio));
+    ok(c.ratio > E({}, 'fcfs').ratio, 'the slot cap no longer loses to doing nothing');
+    ok(c.prefillShare[0] > 6 * c.prefillShare[3],
+       'the prefill leak closed: ' + c.prefillShare.map(pc1).join('/'));
+    ok(c.prefillTotal > 0.25, 'prefill stopped being a large share of the machine: ' +
+       pc1(c.prefillTotal) + '%');
+    // it only binds while n x slots <= batch, and at that boundary it is at its worst
+    const loose = E({ capSlots: B.maxBatch }, 'cap'), f = E({}, 'fcfs');
+    ok(Math.abs(loose.ratio - f.ratio) < 0.06,
+       'a cap at the full batch is no longer identical to FIFO: ' + p2(loose.ratio) + ' vs ' +
+       p2(f.ratio));
+    const tight = E({ capSlots: Math.floor(B.maxBatch / NAMES.length) }, 'cap');
+    ok(tight.ratio > loose.ratio, 'the only binding setting is no longer the worse one');
+    const starved = E({ capSlots: 1 }, 'cap', S3);
+    ok(starved.tokens < 0.6 * f.tokens,
+       'a one-slot cap no longer costs throughput: ' + kfmt(starved.tokens));
+  }
+
+  // 8. the two quotas are the same quota until the declaration changes
+  {
+    const q = E({}, 'rpm'), tq = E({}, 'tpm');
+    ok(Math.abs(q.ratio - tq.ratio) < 0.25,
+       'the token quota and the request quota stopped agreeing at the default declaration: ' +
+       p2(q.ratio) + ' vs ' + p2(tq.ratio));
+    const h1 = E({ honest: 1 }, 'tpm');
+    ok(h1.ratio < 0.35 * tq.ratio,
+       'honest max_tokens no longer rescues the token quota: ' + p2(h1.ratio));
+    ok(h1.trunc > 2 * tq.trunc,
+       'honest declarations no longer cost truncations: ' + p1(h1.trunc) + ' vs ' + p1(tq.trunc));
+    const Th = tenants(Object.assign({}, B, { honest: 1 }));
+    ok(Th[3].declared > 6 * Th[0].declared,
+       'the honest declarations are no longer spread out: ' +
+       Th.map(function(x){ return x.declared; }).join('/'));
+    ok(E({ honest: 1 }, 'rpm').ratio > 4,
+       'honest max_tokens started fixing the REQUEST quota, which it cannot');
+  }
+
+  // 9. the inversion: FIFO has no isolation, VTC does
+  {
+    const prev = [];
+    for (const fl of [1, 2, 4, 8]) prev.push(E({ flood: fl }, 'fcfs', S3).ratio);
+    let mono = true;
+    for (let i = 1; i < prev.length; i++) if (prev[i] < prev[i - 1] - 0.02) mono = false;
+    ok(mono, 'FIFO no longer degrades monotonically under a flood: ' + prev.map(p2).join(' '));
+    ok(prev[3] > 4 * prev[0], 'the flood stopped hurting FIFO: ' + p2(prev[0]) + ' to ' + p2(prev[3]));
+    const vs = [1, 2, 4, 8].map(function(fl){ return E({ flood: fl }, 'vtc', S3).ratio; });
+    ok(Math.max.apply(null, vs) / Math.min.apply(null, vs) < 1.25,
+       'VTC started caring about the flood: ' + vs.map(p2).join(' '));
+    ok(E({ flood: 1 }, 'fcfs', S3).ratio < E({ flood: 1 }, 'vtc', S3).ratio &&
+       E({ flood: 8 }, 'fcfs', S3).ratio > E({ flood: 8 }, 'vtc', S3).ratio,
+       'the FIFO / VTC ranking no longer inverts across the flood dial');
+    const gs = [1, 4, 8].map(function(fl){ return E({ flood: fl }, 'vtcGpu', S3).ratio; });
+    ok(Math.max.apply(null, gs) < 1.08, 'the millisecond counter moved under a flood: ' +
+       gs.map(p3).join(' '));
+  }
+
+  // 10. degeneracy and declared corners
+  {
+    // with no contention every work-conserving policy is the SAME policy, bit for bit
+    const idle = { offer: 0.6 };
+    const base = run(Object.assign({}, B, idle), 2026, 'fcfs');
+    for (const p of ['rr', 'capwc', 'vtc', 'vtcGpu', 'vtcNoLift']){
+      const r = run(Object.assign({}, B, idle), 2026, p);
+      ok(JSON.stringify(r.share) === JSON.stringify(base.share),
+         'at 0.6x fair share ' + p + ' is no longer bit-identical to FIFO');
+    }
+    ok(base.backlog.every(function(x){ return x === 0; }),
+       'the uncontended corner is no longer uncontended: ' + base.backlog.join('/'));
+    const qIdle = E(idle, 'rpm', S3);
+    ok(qIdle.tokens < 0.92 * E(idle, 'fcfs', S3).tokens,
+       'a rate limit on an idle machine stopped destroying throughput');
+    // backlog appears as the offered load rises, and the shares stop moving once it does
+    const bl = [0.6, 1, 2, 4].map(function(x){ return E({ offer: x }, 'fcfs', S1).minBacklog; });
+    ok(bl[0] === 0 && bl[3] > 100, 'the offered-load dial stopped creating a backlog: ' + bl.join(' '));
+    ok(Math.abs(E({ offer: 2 }, 'rpm', S3).ratio - E({ offer: 4 }, 'rpm', S3).ratio) < 0.9,
+       'the quota result is not stable once everyone is backlogged');
+    // a huge KV budget and a tiny one are both survivable
+    ok(E({ kv: 200000 }, 'fcfs', S3).preempts === 0, 'a huge KV cache still preempts');
+    ok(E({ kv: 4000 }, 'fcfs', S3).preempts > 0, 'a tiny KV cache no longer preempts');
+    ok(E({ maxBatch: 1 }, 'fcfs', S1).tokens > 0, 'a batch of one produced nothing');
+  }
+
+  // 11. the throughput ranking flips on the unit, and the dashboards anticorrelate
+  {
+    const f = E({}, 'fcfs'), q = E({}, 'rpm');
+    ok(q.tokens > f.tokens && q.done < f.done,
+       'the throughput inversion is gone: quota ' + kfmt(q.tokens) + '/' + kfmt(q.done) +
+       ' vs FIFO ' + kfmt(f.tokens) + '/' + kfmt(f.done));
+    ok(f.done > 1.6 * q.done, 'the request-count gap collapsed to ' + p2(f.done / q.done) + 'x');
+    ok(f.prefillTotal > 1.5 * q.prefillTotal,
+       'the prefill share stopped explaining the token gap: ' + pc1(f.prefillTotal) + '% vs ' +
+       pc1(q.prefillTotal) + '%');
+    const byAdm = POLICIES.slice().sort(function(a, b){ return E({}, a).admRatio - E({}, b).admRatio; });
+    const bySvc = POLICIES.slice().sort(function(a, b){ return E({}, a).ratio - E({}, b).ratio; });
+    let d2 = 0;
+    for (const p of POLICIES) d2 += Math.pow(byAdm.indexOf(p) - bySvc.indexOf(p), 2);
+    const nn = POLICIES.length, rho = 1 - 6 * d2 / (nn * (nn * nn - 1));
+    ok(rho < -0.5, 'admission equality and service equality stopped anticorrelating: rho = ' + p2(rho));
+  }
+
+  // 12. more identities the page relies on
+  {
+    // the four tenants offer the SAME load measured in the resource itself; that is the experiment
+    const T = tenants(B);
+    const loads = T.map(function(x){ return x.lambda * 1000 * x.cost; });
+    ok(Math.max.apply(null, loads) / Math.min.apply(null, loads) < 1 + 1e-12,
+       'the tenants no longer offer identical load: ' + loads.map(p1).join(' '));
+    ok(Math.abs(loads[0] - B.offer * 250) < 1e-9,
+       'a tenant no longer offers ' + B.offer + 'x its quarter of the machine');
+    ok(T.every(function(x){ return x.declared === B.defaultMax; }),
+       'at zero honesty the tenants no longer all declare the SDK default');
+    // the two quotas admit alike, which is why they measure alike
+    const q = E({}, 'rpm'), tq = E({}, 'tpm');
+    ok(Math.abs(q.admRatio - tq.admRatio) < 0.2, 'the two quotas stopped admitting alike');
+    // work conservation can only help
+    const c = E({}, 'cap'), wc = E({}, 'capwc');
+    ok(wc.ratio < c.ratio && wc.tokens > c.tokens,
+       'the work-conserving cap is no longer strictly better than the strict one');
+    // Jain flatters exactly the split the ratio condemns
+    ok(q.jain > 0.6 && q.ratio > 5,
+       'Jain no longer flatters the starved split: ' + p3(q.jain) + ' at ' + p2(q.ratio) + 'x');
+    // there is one crossing on the flood grid, not zero and not two
+    const fl = [1, 2, 4, 6, 8];
+    const fsv = fl.map(function(x){ return E({ flood: x }, 'fcfs', S3).ratio; });
+    const vsv = fl.map(function(x){ return E({ flood: x }, 'vtc', S3).ratio; });
+    let cross = 0;
+    for (let i = 1; i < fl.length; i++)
+      if ((fsv[i - 1] - vsv[i - 1]) * (fsv[i] - vsv[i]) < 0) cross++;
+    ok(cross === 1, cross + ' crossings on the flood grid, not one');
+    // the w_o sweep buys fairness with tokens, monotonically, all the way to the machine's ratio
+    const ws2 = wStar(B);
+    const tk = [1, 2, 4, 8, ws2].map(function(w){ return E({ wDecode: w }, 'vtc', S3).tokens; });
+    let falling = true;
+    for (let i = 1; i < tk.length; i++) if (tk[i] > tk[i - 1] + 200) falling = false;
+    ok(falling, 'the w_o sweep stopped costing tokens on the way to fairness');
+  }
+  // 13. the lift rule, and the sliders
+  {
+    const v = E({}, 'vtc'), nl = E({}, 'vtcNoLift');
+    ok(Math.abs(v.ratio - nl.ratio) < 0.4,
+       'the lift rule now changes the saturated result, where nobody is ever idle');
+    const live = opts();
+    ok(Object.keys(DEFAULTS).every(function(k){ return live[k] !== undefined; }),
+       'opts() is missing an engine field: ' +
+       Object.keys(DEFAULTS).filter(function(k){ return live[k] === undefined; }).join(', '));
+    ok(Object.keys(DEFAULTS).every(function(k){ return isFinite(live[k]); }),
+       'a slider is feeding the engine a NaN');
+    ok(POLICIES.length === 9 && NAMES.length === 4, 'the policy or tenant roster changed size');
+    // every world is a world, not an outlier
+    const spread = WORLD_SEEDS.map(function(s){
+      const r = run(B, s, 'rpm');
+      return Math.max.apply(null, r.share) / Math.min.apply(null, r.share);
+    });
+    ok(Math.max.apply(null, spread) < 1.4 * Math.min.apply(null, spread),
+       'one world is a wild outlier: ' + spread.map(p2).join(' '));
+    const fspread = WORLD_SEEDS.map(function(s){
+      const r = run(B, s, 'fcfs');
+      return Math.max.apply(null, r.share) / Math.min.apply(null, r.share);
+    });
+    ok(Math.max.apply(null, fspread) < 1.6, 'a FIFO world went unfair: ' + fspread.map(p2).join(' '));
+  }
+
+  const lines = ['assertions: ' + n + '   failures: ' + bad.length];
+  if (bad.length) for (const b of bad) lines.push('  FAIL  ' + b);
+  else {
+    const f = E({}, 'fcfs'), q = E({}, 'rpm'), v = E({}, 'vtc'), g = E({}, 'vtcGpu'), c = E({}, 'cap');
+    lines.push('');
+    lines.push('  same replica, same 120 s, same bill, five worlds:');
+    lines.push('    first-come-first-served  ' + f.share.map(pc1).join(' / ') + '   ' +
+               p2(f.ratio) + 'x');
+    lines.push('    equal request quota      ' + q.share.map(pc1).join(' / ') + '   ' +
+               p2(q.ratio) + 'x   <- the fairness feature');
+    lines.push('    VTC, weighted tokens     ' + v.share.map(pc1).join(' / ') + '   ' +
+               p2(v.ratio) + 'x   (its own counter: ' + p3(v.vcRatio) + 'x)');
+    lines.push('    per-tenant slot cap      ' + c.share.map(pc1).join(' / ') + '   ' +
+               p2(c.ratio) + 'x   (its own decode split: ' + p3(c.decRatio) + 'x)');
+    lines.push('    VTC, milliseconds        ' + g.share.map(pc1).join(' / ') + '   ' +
+               p2(g.ratio) + 'x');
+    lines.push('');
+    lines.push('  the machine’s own w_o = ' + p2(wStar(B)) + ' at batch ' + B.maxBatch +
+               ', ' + p2(wStar(B, 8)) + ' at 8, ' + p2(wStar(B, 48)) + ' at 48. VTC ships 2.');
+    lines.push('  tokens: quota ' + kfmt(q.tokens) + ' vs FIFO ' + kfmt(f.tokens) +
+               '   requests: quota ' + kfmt(q.done) + ' vs FIFO ' + kfmt(f.done));
+  }
+  $("tests").textContent = lines.join('\n');
+  $("tests").style.color = bad.length ? '#fca5a5' : '#86efac';
+}
+
+// ---------------------------------------------------------------- wiring
+for (const b of document.querySelectorAll('#tabs button')){
+  b.onclick = function(){
+    for (const x of document.querySelectorAll('#tabs button')){
+      x.className = 'bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm';
+    }
+    b.className = 'tab-active px-5 py-2 rounded-lg font-semibold text-sm';
+    for (const s of document.querySelectorAll('.tab-panel')) s.classList.add('hidden');
+    $(b.dataset.tab).classList.remove('hidden');
+  };
+}
+for (const b of document.querySelectorAll('#pol button')){
+  b.onclick = function(){
+    policy = b.dataset.p;
+    for (const x of document.querySelectorAll('#pol button')){
+      x.className = 'bg-slate-100 px-3 py-1 rounded-md text-xs font-bold';
+    }
+    b.className = 'tab-active px-3 py-1 rounded-md text-xs font-bold';
+    schedule();
+  };
+}
+// a full recompute is a few hundred simulated replicas, so the labels move on every input event and
+// the arithmetic waits for the drag to settle
+let pending = false, timer = null;
+function schedule(){
+  renderLabels();
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(function(){
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(function(){ pending = false; render(); });
+  }, 180);
+}
+for (const id of ['sSp', 'sOf', 'sFl', 'sHo', 'sWo', 'sCs', 'sRp', 'sMb', 'sKv', 'sPm', 'sOb']){
+  $(id).addEventListener('input', schedule);
+}
+render();
+requestAnimationFrame(function(){ requestAnimationFrame(selfTest); });
+</script>
+</body>
+</html>
