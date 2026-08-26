@@ -73,6 +73,7 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 69 — Agent step reliability](https://dev48.infy.uk/ai/days/day69-agent-step-reliability.html) — `day69-agent-step-reliability.html`
 - [AIFromZero · Day 70 — RAG index freshness](https://dev48.infy.uk/ai/days/day70-rag-index-freshness.html) — `day70-rag-index-freshness.html`
 - [AIFromZero · Day 71 — Multi-tenant fairness](https://dev48.infy.uk/ai/days/day71-multi-tenant-fairness.html) — `day71-multi-tenant-fairness.html`
+- [AIFromZero · Day 72 — Where a preference eval’s variance lives](https://dev48.infy.uk/ai/days/day72-preference-eval-variance.html) — `day72-preference-eval-variance.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

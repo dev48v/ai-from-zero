@@ -1,0 +1,2792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero &middot; Day 72 &mdash; Where a preference eval's variance lives</title>
+<style>
+  /* the whole stylesheet is here: no CDN, no build step, no network request of any kind */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin:0; font-family: -apple-system, "Inter", "Segoe UI", sans-serif; line-height:1.55;
+         background:#f8fafc; color:#0f172a; }
+  h1, h2, h3, p, ul, table { margin:0; }
+  button { font-family:inherit; border:0; cursor:pointer; }
+  input[type=range] { width:100%; margin:2px 0 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size:.92em;
+         background:#e2e8f0; padding:1px 4px; border-radius:4px; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:12px;
+        overflow:auto; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        line-height:1.5; }
+  pre code { background:none; padding:0; color:inherit; }
+  table.num { border-collapse:collapse; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid #e2e8f0; }
+  .ok { color:#166534; font-weight:800; }
+  .bad { color:#991b1b; font-weight:800; }
+  .warn { color:#92400e; font-weight:800; }
+  .win { background:#dcfce7; }
+  .lose { background:#fee2e2; }
+  canvas { width:100%; display:block; border-radius:10px; background:#0f172a; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; }
+  .tab-active { background:#0f172a; color:#fff; }
+  .scrollx { overflow-x:auto; }
+  .pend { color:#94a3b8; font-style:italic; }
+
+  /* --- the utility layer this page's markup uses, written out ------------------------------- */
+  .hidden { display:none; }
+  .sticky { position:sticky; } .top-0 { top:0; } .z-20 { z-index:20; }
+  .mx-auto { margin-left:auto; margin-right:auto; }
+  .max-w-6xl { max-width:72rem; } .max-w-3xl { max-width:48rem; }
+  .w-full { width:100%; }
+  .minh { min-height:calc(100vh - 96px); }
+  .p-4 { padding:1rem; } .p-5 { padding:1.25rem; }
+  .px-3 { padding-left:.75rem; padding-right:.75rem; }
+  .px-5 { padding-left:1.25rem; padding-right:1.25rem; }
+  .py-1 { padding-top:.25rem; padding-bottom:.25rem; }
+  .py-2 { padding-top:.5rem; padding-bottom:.5rem; }
+  .pl-6 { padding-left:1.5rem; }
+  .mb-1 { margin-bottom:.25rem; } .mb-2 { margin-bottom:.5rem; }
+  .mb-3 { margin-bottom:.75rem; } .mb-4 { margin-bottom:1rem; }
+  .mt-1 { margin-top:.25rem; } .mt-2 { margin-top:.5rem; } .mt-3 { margin-top:.75rem; }
+  .ml-3 { margin-left:.75rem; }
+  .text-xs { font-size:.75rem; line-height:1.45; } .text-sm { font-size:.875rem; }
+  .text-lg { font-size:1.125rem; } .text-xl { font-size:1.25rem; }
+  .text-2xl { font-size:1.5rem; } .text-4xl { font-size:2.25rem; line-height:1.1; }
+  .font-semibold { font-weight:600; } .font-bold { font-weight:700; } .font-black { font-weight:900; }
+  .tracking-wider { letter-spacing:.05em; } .tracking-widest { letter-spacing:.12em; }
+  .leading-tight { line-height:1.35; }
+  .tabular-nums { font-variant-numeric:tabular-nums; }
+  .float-right { float:right; }
+  .list-disc { list-style:disc; }
+  .text-slate-500 { color:#64748b; } .text-slate-600 { color:#475569; } .text-slate-900 { color:#0f172a; }
+  .text-violet-700 { color:#6d28d9; } .text-amber-700 { color:#b45309; } .text-red-700 { color:#b91c1c; }
+  .text-emerald-700 { color:#047857; } .text-sky-700 { color:#0369a1; }
+  .bg-white { background:#fff; } .bg-slate-50 { background:#f8fafc; } .bg-slate-100 { background:#f1f5f9; }
+  .bg-emerald-50 { background:#ecfdf5; } .bg-red-50 { background:#fef2f2; }
+  .bg-amber-50 { background:#fffbeb; } .bg-sky-50 { background:#f0f9ff; }
+  .border-b { border-bottom:1px solid #e2e8f0; }
+  .border-slate-200 { border-color:#e2e8f0; }
+  .border-l-4 { border-left:4px solid #94a3b8; }
+  .border-slate-400 { border-left-color:#94a3b8; } .border-emerald-500 { border-left-color:#10b981; }
+  .border-red-500 { border-left-color:#ef4444; } .border-amber-500 { border-left-color:#f59e0b; }
+  .border-sky-500 { border-left-color:#0ea5e9; }
+  .rounded-md { border-radius:6px; } .rounded-lg { border-radius:8px; } .rounded-2xl { border-radius:16px; }
+  .shadow { box-shadow:0 1px 3px rgba(15,23,42,.10), 0 1px 2px rgba(15,23,42,.06); }
+  .flex { display:flex; } .flex-wrap { flex-wrap:wrap; }
+  .items-center { align-items:center; } .justify-between { justify-content:space-between; }
+  .gap-1 { gap:.25rem; } .gap-2 { gap:.5rem; } .gap-5 { gap:1.25rem; }
+  .grid { display:grid; } .gap-x-6 { column-gap:1.5rem; } .gap-y-3 { row-gap:.75rem; }
+  .space-y-1 > * + * { margin-top:.25rem; }
+  .space-y-5 > * + * { margin-top:1.25rem; }
+  .space-y-6 > * + * { margin-top:1.5rem; }
+  @media (min-width:768px){
+    .md\:p-6 { padding:1.5rem; } .md\:p-8 { padding:2rem; }
+    .md\:text-2xl { font-size:1.5rem; }
+    .md\:grid-cols-2 { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  }
+  @media (min-width:1024px){
+    .lg\:grid-cols-2 { grid-template-columns:repeat(2, minmax(0,1fr)); }
+    .lg\:grid-cols-3 { grid-template-columns:repeat(3, minmax(0,1fr)); }
+  }
+</style>
+</head>
+<body>
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+  <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <p class="text-xs font-bold tracking-widest text-violet-700 mb-2">AIFROMZERO &middot; DAY 72</p>
+    <h1 class="text-xl md:text-2xl font-black leading-tight mb-4">
+      &#9878;&#65039; Where a preference eval's variance lives &mdash; 4,000 human preference
+      judgements of an LLM feature that is <em>exactly as good as</em> the control. Treat every
+      rating as one independent row, which is what a spreadsheet does, and the test declares a
+      winner <strong>65.6%</strong> of the time. Cluster by customer: <strong>12.0%</strong>. By
+      rater: <strong>39.4%</strong>. By both: <strong>7.2%</strong>. One file, five standard errors
+      spanning <strong>3.82&times;</strong>, and on a single seed the same &minus;4.46pp verdict
+      carries a z of <strong>6.15</strong> or <strong>1.24</strong> depending only on which column
+      you decided was independent.
+      &#128308; The headline: everyone argues about the <em>formula</em> and the answer is in the
+      <em>sample</em>. Same 4,000 ratings, same $4,800, same estimand &mdash; cap how much of the
+      eval one customer may supply at <strong>8&times;</strong> its fair share and the estimate's
+      true standard deviation falls <strong>0.0307 &rarr; 0.0175</strong> and power rises
+      <strong>39.4% &rarr; 58.0%</strong>. Nothing was bought: the biggest customer went from
+      <strong>12.7%</strong> of the sample to <strong>1.6%</strong> and Kish's effective cluster
+      count from <strong>35.4</strong> of 500 customers to <strong>154.3</strong>. Equal-per-customer
+      sampling is worth <strong>4.51&times;</strong> the ratings &mdash; and it makes clustering
+      by customer <em>worse</em>, 12.0% &rarr; <strong>17.2%</strong>.
+      &#128308; The published small-cluster repair, Cameron&ndash;Gelbach&ndash;Miller's wild
+      cluster bootstrap-t, is exact on the axis it was written for and exactly blind to the other:
+      Zipf traffic with no rater panel, <strong>6.6% &rarr; 2.4%</strong> with the critical value
+      widened 1.96 &rarr; <strong>2.30</strong>; flat traffic with a real panel,
+      <strong>16.8% &rarr; 15.6%</strong>, critical value <strong>2.02</strong>. And the obvious
+      two-way extension &mdash; one sign per customer, one per rater, multiplied &mdash; is provably
+      wrong: its resampling variance is the sum of squared <em>cell</em> sums, the term the two-way
+      formula <em>subtracts</em>. Verified against the identity to <strong>1.0000</strong>, and
+      <strong>11.92&times;</strong> too small.
+      &#128308; More raters per request at a fixed budget makes the test <em>worse</em>: k = 1, 3, 6
+      moves power <strong>49.7% &rarr; 37.1% &rarr; 31.1%</strong> while item reliability climbs
+      0.512 &rarr; 0.721 &rarr; 0.823, and majority vote loses to averaging
+      (<strong>0.0402</strong> vs 0.0306).
+      &#128308; The 1/p&sup2; dilution rule is wrong here: at a 15% trigger rate the ratings needed
+      rise <strong>1.36&times;</strong>, not 44&times;.
+      &#128308; And the standard repair for dilution &mdash; analyse only the requests the flag says
+      fired &mdash; is a collider: log that flag off the treatment arm's own behaviour and a feature
+      worth nothing reads <strong>+12.93pp</strong> with a <strong>99.4%</strong> false-positive
+      rate, which a two-dimensional quadrature that simulates nothing predicts to within
+      <strong>0.49pp</strong>.
+      &#128308; mSPRT &mdash; always-valid inference, built so you may look at every observation
+      &mdash; spends <strong>43.0%</strong> at <em>one</em> look and 46.0% at ten. It is valid
+      against peeking and against nothing else.
+      &#128308; The LLM judge's bias, <strong>4.35pp</strong>, is larger than the true effect,
+      <strong>4.13pp</strong>; prediction-powered inference tuned over twenty
+      (&phi;,&nbsp;&lambda;) pairs never beats spending the whole budget on humans.
+      Nine designs at the same $4,800 and seven are invalid.
+      Pure vanilla JavaScript, one file, no build step.
+    </h1>
+    <div class="flex gap-2 flex-wrap" id="tabs">
+      <button data-tab="look" class="tab-active px-5 py-2 rounded-lg font-semibold text-sm">&#128200; MEASURE</button>
+      <button data-tab="understand" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">&#129504; UNDERSTAND</button>
+      <button data-tab="build" class="bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm">&#128296; BUILD</button>
+    </div>
+  </div>
+</header>
+
+<section id="look" class="tab-panel">
+  <div class="minh p-4 md:p-8 bg-slate-100">
+    <div class="max-w-6xl mx-auto space-y-5">
+
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+          <label class="text-sm">rating budget, human judgements <span id="vR" class="font-bold tabular-nums float-right">4,000</span>
+            <input id="sR" type="range" min="1000" max="12000" step="500" value="4000"></label>
+          <label class="text-sm">mean requests per customer <span id="vPU" class="font-bold tabular-nums float-right">8</span>
+            <input id="sPU" type="range" min="2" max="40" value="8"></label>
+          <label class="text-sm">traffic skew, 0 flat &rarr; 1 Zipf <span id="vSk" class="font-bold tabular-nums float-right">1.00</span>
+            <input id="sSk" type="range" min="0" max="100" value="100"></label>
+          <label class="text-sm">cap: max share per customer, &times; fair <span id="vCap" class="font-bold tabular-nums float-right">off</span>
+            <input id="sCap" type="range" min="0" max="20" value="0"></label>
+          <label class="text-sm">rating panel size <span id="vRa" class="font-bold tabular-nums float-right">24</span>
+            <input id="sRa" type="range" min="4" max="120" value="24"></label>
+          <label class="text-sm">&sigma; customer &mdash; does this traffic suit it <span id="vU" class="font-bold tabular-nums float-right">0.90</span>
+            <input id="sU" type="range" min="0" max="200" value="90"></label>
+          <label class="text-sm">&sigma; request &mdash; does this request suit it <span id="vI" class="font-bold tabular-nums float-right">0.80</span>
+            <input id="sI" type="range" min="0" max="200" value="80"></label>
+          <label class="text-sm">&sigma; rater &mdash; does this judge like the style <span id="vB" class="font-bold tabular-nums float-right">0.30</span>
+            <input id="sB" type="range" min="0" max="200" value="30"></label>
+          <label class="text-sm">within-rating noise <span id="vNo" class="font-bold tabular-nums float-right">1.00</span>
+            <input id="sNo" type="range" min="20" max="300" value="100"></label>
+          <label class="text-sm">tie threshold <span id="vTi" class="font-bold tabular-nums float-right">0.40</span>
+            <input id="sTi" type="range" min="0" max="150" value="40"></label>
+          <label class="text-sm">true quality gap &delta;, logits <span id="vD" class="font-bold tabular-nums float-right">0.22</span>
+            <input id="sD" type="range" min="0" max="80" value="22"></label>
+          <label class="text-sm">trigger rate &mdash; requests it changes <span id="vTr" class="font-bold tabular-nums float-right">100%</span>
+            <input id="sTr" type="range" min="5" max="100" value="100"></label>
+          <label class="text-sm">collider &kappa; &mdash; flag read off the outcome <span id="vCo" class="font-bold tabular-nums float-right">0.00</span>
+            <input id="sCo" type="range" min="0" max="300" value="0"></label>
+          <label class="text-sm">position bias toward the second answer <span id="vPo" class="font-bold tabular-nums float-right">0.00</span>
+            <input id="sPo" type="range" min="0" max="100" value="0"></label>
+          <label class="text-sm">Monte-Carlo worlds per estimate <span id="vW" class="font-bold tabular-nums float-right">500</span>
+            <input id="sW" type="range" min="200" max="2000" step="100" value="500"></label>
+        </div>
+        <p class="text-xs text-slate-500 mt-3" id="cfgNote"></p>
+      </div>
+
+      <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div class="bg-white rounded-2xl shadow p-5 border-l-4 border-red-500">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">A FEATURE WORTH NOTHING, SHIPPED</p>
+          <p class="text-4xl font-black tabular-nums text-red-700" id="bigNaive">&mdash;</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteNaive">computing&hellip;</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5 border-l-4 border-emerald-500">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">THE SAME FILE, CLUSTERED BOTH WAYS</p>
+          <p class="text-4xl font-black tabular-nums text-emerald-700" id="bigTwo">&mdash;</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteTwo">computing&hellip;</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5 border-l-4 border-sky-500">
+          <p class="text-xs font-bold tracking-wider text-slate-500 mb-1">CAPPING THE BIGGEST CUSTOMER IS WORTH</p>
+          <p class="text-4xl font-black tabular-nums text-sky-700" id="bigCap">&mdash;</p>
+          <p class="text-xs text-slate-500 mt-1" id="noteCap">computing&hellip;</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="seeds">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          ONE SPREADSHEET, FIVE VERDICTS &mdash; SIX A/A WORLDS, THE FEATURE CHANGES NOTHING</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>seed</th><th>measured lift</th><th>every rating<br>independent</th>
+            <th>by request</th><th>by customer</th><th>by rater</th><th>by customer<br>AND rater</th></tr></thead>
+          <tbody id="seedTbl"><tr><td class="pend" colspan="7">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="seedNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="aa">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE A/A TABLE &mdash; &delta; FORCED TO ZERO, SO EVERY REJECTION IS A MISTAKE</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>what you called independent</th><th>SE</th><th>&times; naive</th>
+            <th>95% CI half-width</th><th>SE / true SD</th><th>coverage</th><th>false-positive rate</th></tr></thead>
+          <tbody id="aaTbl"><tr><td class="pend" colspan="7">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="aaNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="ab">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE SAME FIVE, ON A FEATURE THAT REALLY IS BETTER</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>what you called independent</th><th>SE</th><th>coverage of the truth</th>
+            <th>power</th><th>what that power is worth</th></tr></thead>
+          <tbody id="abTbl"><tr><td class="pend" colspan="5">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="abNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="cap">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          &#128308; THE HEADLINE &mdash; SAME BUDGET, SAME BILL, SAME ESTIMAND: CAP THE BIGGEST CUSTOMER</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>cap, &times; fair share</th><th>biggest customer</th><th>effective clusters</th>
+            <th>variance-weighted<br>cluster size</th><th>true SD of the estimate</th>
+            <th>worth this &times;<br>the ratings</th><th>A/A: naive</th><th>A/A: by customer</th>
+            <th>A/A: two-way</th><th>power, two-way</th></tr></thead>
+          <tbody id="capTbl"><tr><td class="pend" colspan="10">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <div class="mt-3"><canvas id="cCap" width="640" height="280"></canvas></div>
+        <p class="text-xs text-slate-500 mt-2" id="capNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="deff">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE DESIGN EFFECT &mdash; THE TEXTBOOK FORMULA AGAINST WHAT ACTUALLY HAPPENS</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>traffic skew</th><th>customers</th><th>effective clusters</th>
+            <th>variance-weighted<br>cluster size</th><th>intraclass &rho;</th>
+            <th>1 + (m&#7497;&#7511;&#7511; &minus; 1)&rho;</th><th>from the SEs</th>
+            <th>TRUE</th><th>naive</th><th>by customer</th><th>two-way</th></tr></thead>
+          <tbody id="deffTbl"><tr><td class="pend" colspan="11">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <div class="mt-3"><canvas id="cDeff" width="640" height="270"></canvas></div>
+        <p class="text-xs text-slate-500 mt-2" id="deffNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="cross">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          TWO AXES, CROSSED &mdash; TURN UP THE RATER PANEL'S OWN VARIANCE AND WATCH WHICH COLUMN MOVES</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>&sigma; rater</th><th>rater intraclass &rho;</th><th>true SD</th>
+            <th>naive</th><th>by request</th><th>by customer</th><th>by rater</th><th>two-way</th></tr></thead>
+          <tbody id="crossTbl"><tr><td class="pend" colspan="8">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <div class="mt-3"><canvas id="cCross" width="640" height="270"></canvas></div>
+        <p class="text-xs text-slate-500 mt-2" id="crossNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="boot">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          THE PUBLISHED REPAIR &mdash; A WILD CLUSTER BOOTSTRAP, RUN ON BOTH DISEASES</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>which problem is switched on</th><th>effective clusters</th>
+            <th>z, by customer</th><th>bootstrap-t, by customer</th><th>mean bootstrap critical value</th>
+            <th>z, two-way</th><th>what the bootstrap repaired</th></tr></thead>
+          <tbody id="bootTbl"><tr><td class="pend" colspan="7">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="bootNote"></p>
+        <p class="text-xs font-bold tracking-wider text-slate-500 mt-3 mb-2">
+          AND THE OBVIOUS TWO-WAY EXTENSION, WHICH IS PROVABLY THE WRONG QUANTITY</p>
+        <pre id="prodTxt">computing&hellip;</pre>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="k">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          &#128308; MORE RATERS PER REQUEST, AT THE SAME BUDGET</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>raters per request</th><th>requests bought</th><th>item reliability</th>
+            <th>SE reported</th><th>true SD</th><th>power</th><th>false-positive rate</th></tr></thead>
+          <tbody id="kTbl"><tr><td class="pend" colspan="7">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="kNote"></p>
+        <p class="text-xs font-bold tracking-wider text-slate-500 mt-3 mb-2">
+          THE CLOSED FORM, VALIDATED WHERE IT HOLDS AND BROKEN WHERE IT DOES NOT</p>
+        <pre id="kTxt">computing&hellip;</pre>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="dil">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          &#128308; DILUTION &mdash; WHAT A PARTIAL TRIGGER RATE REALLY COSTS</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>trigger rate p</th><th>effect on everyone</th><th>effect where it fired</th>
+            <th>1/p</th><th>1/p&sup2;</th><th>naive: ratings for 80%</th><th>&times; full</th>
+            <th>two-way: ratings for 80%</th><th>&times; full</th></tr></thead>
+          <tbody id="dilTbl"><tr><td class="pend" colspan="9">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="dilNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="col">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          &#128308; THE COLLIDER &mdash; A TRIGGER FLAG LOGGED FROM THE TREATMENT'S OWN BEHAVIOUR, &delta; = 0</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>&kappa;</th><th>share of requests flagged</th>
+            <th>predicted by quadrature</th><th>measured on the flagged set</th>
+            <th>measured on everyone</th><th>false-positive rate</th></tr></thead>
+          <tbody id="colTbl"><tr><td class="pend" colspan="6">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="colNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="order">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          POSITION BIAS AND THE ORDER POLICY, AT THE SAME BUDGET</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>position bias</th><th>order policy</th><th>requests bought</th>
+            <th>truth</th><th>estimate</th><th>A/A bias</th><th>SE</th><th>power</th>
+            <th>false-positive rate</th></tr></thead>
+          <tbody id="ordTbl"><tr><td class="pend" colspan="9">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="ordNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="peek">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          &#128308; ALWAYS-VALID INFERENCE, RUN ON DATA THAT IS NOT INDEPENDENT</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>traffic &middot; test &middot; standard error</th><th>1 look: false positives</th>
+            <th>1 look: power</th><th>10 looks: false positives</th><th>10 looks: power</th>
+            <th>median stop</th><th>what the peeking cost</th></tr></thead>
+          <tbody id="peekTbl"><tr><td class="pend" colspan="7">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="peekNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="judge">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          &#128308; AN LLM JUDGE AT EQUAL DOLLARS &mdash; AND WHY MORE HUMANS STOP HELPING TOO</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>budget</th><th>human judgements</th><th>judge calls</th>
+            <th>human RMSE</th><th>judge RMSE</th><th>tuned PPI</th><th>PPI, &lambda; = 1</th>
+            <th>who wins</th></tr></thead>
+          <tbody id="judgeTbl"><tr><td class="pend" colspan="8">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <div class="mt-3"><canvas id="cJudge" width="640" height="270"></canvas></div>
+        <p class="text-xs text-slate-500 mt-2" id="judgeNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="front">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-3">
+          EVERY DESIGN ON THIS PAGE AT THE SAME NUMBER OF DOLLARS</p>
+        <div class="scrollx">
+        <table class="num w-full">
+          <thead><tr><th>design</th><th>requests</th><th>false-positive rate</th>
+            <th>valid?</th><th>power</th></tr></thead>
+          <tbody id="frontTbl"><tr><td class="pend" colspan="5">computing&hellip;</td></tr></tbody></table>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" id="frontNote"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5" data-mod="test">
+        <p class="text-xs font-bold tracking-wider text-slate-500 mb-2">SELF-TEST</p>
+        <pre id="tests">scroll here to run&hellip;</pre>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="understand" class="tab-panel hidden">
+  <div class="minh p-4 md:p-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+
+      <h2 class="text-2xl font-black">A preference judgement is not one measurement. It is a
+        collision between a customer, a request and a person, and only one of those three is in
+        the spreadsheet twice.</h2>
+
+      <p class="text-slate-600">
+        The eval looks simple. Ship the feature to half the traffic, take four thousand requests,
+        show a human the control's answer and the feature's answer side by side, and ask which is
+        better. Count the wins. You have four thousand numbers, each of them 0, &frac12; or 1, and
+        the average is 0.5 plus the lift. Every A/B testing tutorial ever written now tells you the
+        standard error of a mean: the sample standard deviation over the square root of four
+        thousand. Here that is <code>0.0073</code>, so a lift of a percentage point and a half is
+        significant, and you ship.
+      </p>
+
+      <p class="text-slate-600">
+        Run that with the feature turned off &mdash; the same model on both sides, a genuine A/A
+        test where every rating is a coin flip about nothing &mdash; and it ships
+        <strong>65.6%</strong> of the time. The estimate's real standard deviation across
+        independent repeats of the whole experiment is <code>0.0307</code>, four times the number
+        the formula reported. The formula is not approximately right. It is wrong by a factor.
+      </p>
+
+      <p class="text-slate-600">
+        The reason is that the four thousand rows are not four thousand facts. A customer whose
+        traffic happens to suit the feature contributes a run of requests that all lean the same
+        way. A rater who happens to like the feature's house style contributes a run of ratings
+        that all lean the same way. Those two runs <em>cross</em>: rater 11 judges requests from
+        hundreds of customers, and customer 3's requests are judged by most of the panel. There is
+        no way to slice the file into independent blocks, because the two groupings are not nested
+        inside one another. That is the whole subject of this page.
+      </p>
+
+      <h3 class="text-lg font-black">The design effect, and the number that is in nobody's config</h3>
+      <p class="text-slate-600">
+        The classical correction is one line. If observations come in clusters, the variance of the
+        mean is inflated by <code>1 + (m&#7497;&#7511;&#7511; &minus; 1)&rho;</code>, where &rho; is
+        the intraclass correlation and m&#7497;&#7511;&#7511; is the <em>variance-weighted</em>
+        cluster size &mdash; <code>&Sigma;n&sup2; / &Sigma;n</code>, not the average. That
+        distinction is the entire story. The customer intraclass correlation here is
+        <strong>0.1336</strong> and the mean requests per customer is <strong>8</strong>. Set the traffic to a Zipf law, which is what real traffic is, and
+        m&#7497;&#7511;&#7511; becomes <strong>112.9</strong>, fourteen times larger, without one
+        customer's mean changing. Nothing in the experiment's configuration mentions it.
+      </p>
+      <p class="text-slate-600">
+        The rater panel obeys the same arithmetic and nobody applies it there. Twenty-four raters
+        splitting four thousand ratings gives m&#7497;&#7511;&#7511; = 166.7, and even at a rater
+        intraclass correlation of <strong>0.0143</strong> &mdash; a number that looks like zero
+        &mdash; the design effect is <strong>3.38</strong>. The formula predicts the rater-clustered
+        standard error to <strong>0.0133</strong> against a measured <strong>0.0135</strong>. A
+        correlation of one and a half percent, multiplied by a hundred and sixty-six, is not small.
+      </p>
+
+      <h3 class="text-lg font-black">Why picking one axis does not work</h3>
+      <p class="text-slate-600">
+        Cluster by customer and the false-positive rate falls from 65.6% to <strong>12.0%</strong>.
+        Cluster by rater and it falls to <strong>39.4%</strong>. Neither reaches 5%, because each
+        estimator is correcting one source of dependence while treating the other as noise. The
+        two-way estimator of Cameron, Gelbach and Miller adds the two one-way variances and
+        subtracts the variance clustered on the intersection, which corrects the double count; it
+        reaches <strong>7.2%</strong>. What is left is not a second kind of dependence. It is that
+        five hundred customers, one of whom supplies an eighth of the sample, are worth
+        <strong>35.4</strong> clusters, and a cluster-robust variance estimate with thirty-five
+        effective clusters is biased downward.
+      </p>
+
+      <h3 class="text-lg font-black">The published repair, and what it is deaf to</h3>
+      <p class="text-slate-600">
+        The standard answer to too-few-clusters is the wild cluster bootstrap-t: impose the null,
+        flip the sign of every residual in a cluster together, do that a couple of hundred times,
+        and read the critical value off the resulting distribution instead of a normal table. It
+        works. On Zipf traffic with the rater panel switched off it takes 6.6% down to
+        <strong>2.4%</strong>, and you can watch it discover the problem &mdash; the critical value
+        it hands back is <strong>2.30</strong> where the normal table says 1.96. Switch the traffic
+        to flat and the rater panel on, and it takes 16.8% to <strong>15.6%</strong> with a
+        critical value of <strong>2.02</strong>. It repaired nothing, and it reported that
+        everything was fine, because the axis it was pointed at genuinely was fine. A method that
+        counts clusters cannot tell you that you chose the wrong thing to count.
+      </p>
+      <p class="text-slate-600">
+        The obvious extension &mdash; draw a sign for each customer, a sign for each rater, multiply
+        them &mdash; looks like it should give a two-way bootstrap, and it is provably the wrong
+        quantity. Two observations get correlated bootstrap weights only when the product of their
+        four signs has a non-zero expectation, and that happens only when they share
+        <em>both</em> labels. So the resampling variance of the numerator is the sum of squared
+        <em>cell</em> sums, which is the term the two-way formula <em>subtracts</em>. On the default
+        configuration that is <strong>11.92&times;</strong> smaller than the customer-level variance
+        it was supposed to reproduce, and the page checks the identity numerically rather than
+        asserting it.
+      </p>
+
+      <h3 class="text-lg font-black">The thing that actually works is not a formula</h3>
+      <p class="text-slate-600">
+        Every repair above is an argument about how to analyse a file that has already been
+        collected. The number that moves the result most is which rows are in the file. Cap how
+        much of the eval any one customer may contribute &mdash; sample eight hundred requests from
+        the head instead of taking whatever traffic offered &mdash; and at an identical four
+        thousand ratings and an identical bill the estimate's true standard deviation falls from
+        <code>0.0307</code> to <code>0.0175</code>, which is <strong>3.08&times;</strong> the
+        variance &mdash; three times the ratings you did not buy. Power against the same real effect
+        goes from <strong>39.4%</strong> to <strong>58.0%</strong>. Sample every customer equally
+        and it is <strong>4.51&times;</strong> and <strong>79.8%</strong>.
+      </p>
+      <p class="text-slate-600">
+        Two honest caveats, both declared rather than hidden. First: in this model a customer's tilt
+        toward the feature is drawn independently of how much traffic it sends, so re-weighting
+        customers does not move the population quantity being estimated &mdash; the truth stays
+        4.13pp at every cap. In a real system it would move, and the cap silently changes the
+        question from "averaged over traffic" toward "averaged over customers". Say which one you
+        meant. Second: capping makes clustering by customer <em>worse</em>, 12.0% to
+        <strong>17.2%</strong>, because once the traffic is flat the customer axis is no longer the
+        dominant one and the rater axis you were ignoring is all that is left.
+      </p>
+
+      <h3 class="text-lg font-black">Five things that follow, and four of them are backwards</h3>
+      <p class="text-slate-600">
+        <strong>More raters per request costs power.</strong> At a fixed rating budget, k raters per
+        request buys R/k requests. The sampling variance of the mean is
+        <code>(k&middot;between + within) / R</code>, which <em>rises</em> with k for any positive
+        between-request variance, so the item scores get more reliable &mdash; 0.512 to 0.823 &mdash;
+        and the experiment gets less sensitive, power 49.7% to 31.1%. Three raters and a majority
+        vote, the most common recommendation in the field, is the worst cell on the table: a
+        majority vote throws away the margin, and its standard error is <strong>0.0402</strong>
+        against <strong>0.0306</strong> for the same three ratings averaged. Extra raters pay only
+        when producing the A/B pair costs money of its own, and the optimum is a square root: here
+        you would need generation to cost <strong>2.65&times;</strong> a rating before k = 3 wins.
+      </p>
+      <p class="text-slate-600">
+        <strong>The 1/p&sup2; dilution rule does not apply.</strong> Everyone knows that if the
+        feature only changes p of requests, the diluted effect is p&delta; and you need 1/p&sup2;
+        the sample. That derivation assumes the untouched requests still carry variance. In a
+        preference comparison they do not: if the feature did not fire, the two answers are the same
+        text, and the rating is a forced tie with no noise in it at all. Dilution shrinks the effect
+        and the variance in the same proportion, so at p = 0.15 the ratings needed rise
+        <strong>6.76&times;</strong> under the naive standard error &mdash; that is 1/p, not
+        1/p&sup2; &mdash; and <strong>1.36&times;</strong> once the standard error is clustered,
+        because at that point the variance is dominated by the customer effect, which dilution
+        also mutes.
+      </p>
+      <p class="text-slate-600">
+        <strong>The standard fix for dilution is a collider.</strong> "Only analyse the requests
+        where the feature actually fired" is right when the flag is a property of the request,
+        decided before the experiment. It is catastrophic when the flag is logged from what the
+        treatment arm did, because then the flagged set has been selected on the very difference
+        you are about to measure. At &kappa; = 1 a feature worth exactly zero reads
+        <strong>+12.93pp</strong> on the flagged set with a <strong>99.4%</strong> false-positive
+        rate, and the trigger <em>rate</em> is held at 30% the whole way, so nothing in a
+        dashboard would look wrong. The size of the bias is predicted to half a basis point by a
+        two-dimensional Gaussian quadrature that runs no simulation at all.
+      </p>
+      <p class="text-slate-600">
+        <strong>Always-valid inference is valid against exactly one thing.</strong> Peeking is
+        real: on genuinely independent data a fixed-n z-test costs <strong>3.0%</strong> at one look
+        and <strong>14.0%</strong> at ten. The mSPRT of Johari, Pekelis and Walsh is the published
+        cure &mdash; a mixture likelihood ratio you may read at every observation. Point it at this
+        traffic with a naive standard error and it spends <strong>43.0%</strong> at <em>one</em>
+        look and 46.0% at ten, so almost none of its error is peeking at all; it was never the
+        disease here. Feed it the two-way standard error and it is honest again, <strong>2.0%</strong>
+        at one look and <strong>3.0%</strong> at ten &mdash; at 21.0% power, because an honest
+        sequential test on a dependent sample of four thousand mostly does not stop.
+      </p>
+      <p class="text-slate-600">
+        <strong>Randomising the order is free; rating both orders is not.</strong> A rater who
+        prefers whichever answer is shown second is a bias, not a variance: hold the control first
+        and the A/A estimate reads <strong>+6.91pp</strong> on a true effect of zero and the test
+        rejects 73.7% of the time. Flip a coin per rating and the bias is gone exactly &mdash;
+        <strong>0.35pp</strong>, inside the Monte-Carlo error &mdash; at no cost, because at a
+        position bias of zero the coin-flip design is bit-identical to the fixed one. Rating every
+        request twice, once in each order, removes the same bias and costs power &mdash;
+        <strong>43.7%</strong> against <strong>46.1%</strong> &mdash; because it halves the
+        requests it can buy.
+      </p>
+
+      <h3 class="text-lg font-black">And the cheap judge</h3>
+      <p class="text-slate-600">
+        A model judging the same pair costs a fortieth of a person, so at any budget you get forty
+        times as many judgements. Variance falls like 1/n; the judge's systematic preference for
+        the feature's style does not fall at all. The judge is estimating <strong>8.48pp</strong>
+        where the truth is <strong>4.13pp</strong>, a bias of <strong>4.35pp</strong> &mdash; bigger
+        than the thing being measured &mdash; so its error bottoms out at <strong>4.90pp</strong>
+        and forty thousand more calls do not move it. It wins anyway below about $150, because at $60 you can afford fifty
+        human judgements and fifty human judgements are worse than that. Prediction-powered
+        inference, which spends part of the budget on human labels and uses the judge to rectify the
+        rest, is the textbook answer to exactly this situation, and tuned over twenty
+        (&phi;,&nbsp;&lambda;) pairs it does not beat spending everything on humans at any of seven
+        budgets on this page. The reason is the same as everywhere else: the variance the judge
+        could cancel lives at the customer level, which the judge already shares, so there is little
+        left for it to explain.
+      </p>
+      <p class="text-slate-600">
+        The human column tells the same story in the other direction. Going from $2,400 to $4,800
+        &mdash; two thousand more human judgements &mdash; moves the RMSE from
+        <strong>2.79pp</strong> to <strong>2.75pp</strong>. You did not buy precision. You bought
+        more requests from the same handful of customers.
+      </p>
+
+      <h3 class="text-lg font-black">What to actually do</h3>
+      <ul class="list-disc pl-6 text-slate-600 space-y-1">
+        <li>Decide what a cluster is <em>before</em> you look at the file, and expect there to be
+          two of them: whoever sent the request and whoever judged it.</li>
+        <li>Report <code>&Sigma;n&sup2;/&Sigma;n</code> for both axes next to the sample size. It is
+          two lines of code and it is the number that decides the test.</li>
+        <li>Sample the eval set with a cap per customer. It is the only intervention here that makes
+          the test both more valid and more sensitive, and it costs nothing.</li>
+        <li>One rating per request unless generating the pair is expensive. If you do collect
+          several, average them; never take a majority vote.</li>
+        <li>Randomise presentation order per rating. Always. It is free.</li>
+        <li>Never define the analysis set from a flag the treatment arm wrote.</li>
+        <li>If you use a model judge, measure its bias against a human sample first; if the bias is
+          the size of your effect, extra judge calls are worthless.</li>
+      </ul>
+
+      <h3 class="text-lg font-black">What is simulated, and what is not</h3>
+      <p class="text-slate-600">
+        No language. A request is a number saying how well it suits the feature, a customer is a
+        number, a rater is a number, and a rating is a logistic comparison of the two answers with a
+        tie band around zero. Everything is deterministic given a seed. The population preference
+        &mdash; the quantity every design here is trying to estimate &mdash; is computed by Gaussian
+        quadrature rather than by simulation, so "power" and "false-positive rate" are measured
+        against a known truth instead of against another random number. Every rate on this page is
+        a Monte-Carlo estimate and every table states its Monte-Carlo error; the self-test checks
+        conservation laws, the closed forms, the declared corners, determinism, and the specific
+        claims quoted in the headline. A separate Node verifier re-runs the extracted engine against
+        independently written oracles &mdash; a different generator, forward simulators, exact
+        enumeration over sign patterns, and quadrature by a different rule.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="build" class="tab-panel hidden">
+  <div class="minh p-4 md:p-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+      <h2 class="text-2xl font-black">&#128296; How it is built</h2>
+
+      <h3 class="text-lg font-black">1 &middot; The traffic, which is the whole experiment</h3>
+      <p class="text-slate-600">
+        M requests are handed to U customers by a Zipf law and the largest-remainder method, so the
+        total is exactly M and the <em>mean</em> requests per customer is exactly the configured
+        number at every setting of the skew dial. Only the shape moves. Owners are then interleaved
+        through the stream by a fixed shuffle, because a large customer sends steadily rather than
+        in one block, and a page that let the big customer arrive first would be measuring an
+        ordering artefact. The variance-weighted cluster size <code>&Sigma;n&sup2;/&Sigma;n</code>
+        and Kish's effective cluster count <code>(&Sigma;n)&sup2;/&Sigma;n&sup2;</code> fall out of
+        that array and decide almost everything else.
+      </p>
+
+      <h3 class="text-lg font-black">2 &middot; A world, and a rating</h3>
+      <p class="text-slate-600">
+        A world draws one tilt per customer, one per request and one per rater, all normal. A rating
+        picks a rater uniformly, adds the customer tilt, the request tilt, the rater tilt, the
+        position term and a logistic noise draw, and returns 1, &frac12; or 0 according to whether
+        the total clears the tie band. When the feature did not fire on a request the two answers
+        are identical, so the rating is a forced tie: no noise, no position, no information and no
+        variance. That last clause is why the dilution numbers on this page are not the ones
+        everybody quotes, and it is a modelling choice worth disagreeing with out loud.
+      </p>
+
+      <h3 class="text-lg font-black">3 &middot; One standard-error function</h3>
+      <p class="text-slate-600">
+        There is a single cluster-robust routine. Give every observation its own cluster and it
+        <em>is</em> the naive standard error &mdash; that is not an approximation, it is an
+        identity, and the self-test checks it to machine precision. Clustering by request is the
+        same thing again whenever each request is rated once. So the five rows of the headline table
+        are one function called with five different keys, which is the point being made: the
+        argument is not about statistics, it is about which column of the same spreadsheet you
+        decided to call independent.
+      </p>
+      <p class="text-slate-600">
+        The two-way estimator adds the customer and rater variances and subtracts the variance
+        clustered on the customer&times;rater intersection. Those cells are sparse, so the ids are
+        compacted &mdash; through a flat lookup while the grid is small and a Map when the panel gets
+        big enough that a dense grid would be millions of slots. The result is floored at the larger
+        of the two one-way estimates, because a variance estimate smaller than a valid variance
+        estimate is not a repair.
+      </p>
+
+      <h3 class="text-lg font-black">4 &middot; The truth, without simulating anything</h3>
+      <p class="text-slate-600">
+        Everything a rating depends on except the logistic noise is normal, so the population
+        preference is a one-dimensional integral over the sum of the customer and rater tilts and
+        the request tilt, evaluated by Simpson's rule on a wide grid. When the trigger flag has been
+        selected on the outcome it becomes a two-dimensional integral with a tail-probability
+        weight, which is why the collider table can print a prediction next to a measurement and
+        have them agree to half a basis point. The normal CDF is West's double-precision rational
+        approximation and the inverse is Acklam's with one Halley step against it, so
+        <code>probit(ncdf(x))</code> returns x.
+      </p>
+
+      <h3 class="text-lg font-black">5 &middot; The bootstrap</h3>
+      <p class="text-slate-600">
+        The wild cluster bootstrap-t imposes the null, multiplies every residual in a cluster by a
+        shared Rademacher sign, and recomputes the t statistic. Only the cluster sums and counts are
+        needed, so a replication is O(number of clusters) rather than O(number of ratings), which is
+        what makes two hundred replications per world affordable inside a page. The product-weight
+        variant is included because it is the natural thing to try and it is wrong: the page
+        computes its exact resampling variance and the sum of squared cell sums and shows they are
+        the same number.
+      </p>
+
+      <h3 class="text-lg font-black">6 &middot; Rendering</h3>
+      <p class="text-slate-600">
+        Every table on this page is a few hundred to a few thousand simulated experiments, so the
+        modules compute lazily: an IntersectionObserver marks a card as wanted when it comes near
+        the viewport and a scheduler runs one module per animation frame, so the page stays
+        responsive while it fills in. Each module declares which configuration fields it actually
+        reads, so dragging a slider only invalidates the cards that depend on it. The results are
+        cached on that reduced key.
+      </p>
+
+      <h3 class="text-lg font-black">7 &middot; Verification</h3>
+      <p class="text-slate-600">
+        The self-test at the bottom of the MEASURE tab runs in the browser on every render: identities
+        (the naive standard error is the cluster-robust one at one observation per cluster; the mean
+        cluster size is invariant to the skew dial; the cap never moves the truth), the closed forms
+        against the simulator in the regime where they are valid, the declared corners (zero position
+        bias makes the fixed and swapped designs bit-identical; zero rater variance makes the two-way
+        estimator collapse onto the customer one), determinism, monotonicity of each sweep, and the
+        specific numbers quoted in the headline. A separate Node verifier re-runs the same extracted
+        engine against oracles written a different way &mdash; another generator, forward simulators
+        that draw a rating one at a time, exact enumeration over all sign patterns for the bootstrap
+        identity, and quadrature by a different rule.
+      </p>
+    </div>
+  </div>
+</section>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// An A/B test of an LLM feature whose metric is a human preference judgement. Nothing here
+// simulates language: an item is one request, a rating is one human comparing two answers to it,
+// and the only thing being simulated is where the variance in that judgement comes from and who it
+// is shared with. Everything is deterministic given a seed.
+
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function randn(rng){
+  let u = rng();
+  if (u < 1e-12) u = 1e-12;
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng());
+}
+function mean(a){ let s = 0; for (let i = 0; i < a.length; i++) s += a[i]; return a.length ? s / a.length : 0; }
+function sdev(a){
+  if (a.length < 2) return 0;
+  const m = mean(a); let s = 0;
+  for (let i = 0; i < a.length; i++){ const d = a[i] - m; s += d * d; }
+  return Math.sqrt(s / (a.length - 1));
+}
+function rmse(a, t){
+  let s = 0;
+  for (let i = 0; i < a.length; i++){ const d = a[i] - t; s += d * d; }
+  return Math.sqrt(s / Math.max(1, a.length));
+}
+// West's double-precision cumulative normal: the quadrature below needs a tail probability that is
+// right in the sixth decimal, not the third.
+function ncdf(z){
+  const c = Math.abs(z);
+  let e;
+  if (c > 37) e = 0;
+  else {
+    const x = Math.exp(-c * c / 2);
+    if (c < 7.07106781186547){
+      let b = 3.52624965998911e-02 * c + 0.700383064443688;
+      b = b * c + 6.37396220353165;  b = b * c + 33.912866078383;
+      b = b * c + 112.079291497871;  b = b * c + 221.213596169931;
+      b = b * c + 220.206867912376;
+      let d = 8.83883476483184e-02 * c + 1.75566716318264;
+      d = d * c + 16.064177579207;   d = d * c + 86.7807322029461;
+      d = d * c + 296.564248779674;  d = d * c + 637.333633378831;
+      d = d * c + 793.826512519948;  d = d * c + 440.413735824752;
+      e = x * b / d;
+    } else {
+      let b = c + 0.65;
+      b = c + 4 / b; b = c + 3 / b; b = c + 2 / b; b = c + 1 / b;
+      e = x / (b * 2.506628274631);
+    }
+  }
+  return z > 0 ? 1 - e : e;
+}
+function npdf(z){ return Math.exp(-z * z / 2) / 2.5066282746310002; }
+// Acklam's inverse normal plus one Halley step against ncdf, so probit(ncdf(x)) returns x
+function probit(p){
+  if (p <= 0) return -Infinity;
+  if (p >= 1) return Infinity;
+  const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+             1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+  const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+             6.680131188771972e+01, -1.328068155288572e+01];
+  const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+             -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+  const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+             3.754408661907416e+00];
+  let x;
+  if (p < 0.02425){
+    const q = Math.sqrt(-2 * Math.log(p));
+    x = (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+  } else if (p > 0.97575){
+    const q = Math.sqrt(-2 * Math.log(1 - p));
+    x = -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+  } else {
+    const q = p - 0.5, r = q * q;
+    x = (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+        (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+  }
+  const err = ncdf(x) - p, u = err * 2.5066282746310002 * Math.exp(x * x / 2);
+  return x - u / (1 + x * u / 2);
+}
+
+var METHODS = ['naive', 'item', 'user', 'rater', 'two'];
+var METHOD_LABEL = {
+  naive: 'every rating independent', item: 'clustered by request', user: 'clustered by customer',
+  rater: 'clustered by rater', two: 'clustered by customer AND rater'
+};
+
+var DEFAULTS = {
+  ratings: 4000,      // THE BUDGET. every design on this page buys exactly this many judgements
+  k: 1,               // ratings per item, so the item count is ratings / k
+  perUser: 8,         // MEAN requests per user. the skew dial never changes it
+  skew: 1,            // 0 = every user sends the same number, 1 = a Zipf head
+  skewMax: 0.95,      // the Zipf exponent at skew 1
+  raters: 24,         // the size of the rating panel
+  sigUser: 0.90,      // how much this user's traffic suits the feature (logit units)
+  sigItem: 0.80,      // how much this request suits it
+  sigRater: 0.30,     // how much this rater likes the style it produces
+  noise: 1.0,         // within-rating logistic noise
+  tie: 0.40,          // |z| below this and the rater calls it a tie
+  delta: 0.22,        // the TRUE quality gap on a request the feature actually changes
+  trigger: 1,         // fraction of requests where the feature changes the answer at all
+  collider: 0,        // how much the LOGGED trigger is read off the outcome it will be used to judge
+  position: 0,        // bias, in logit units, toward whichever answer is shown second
+  order: 'swap',      // 'fixed' = control always first, 'swap' = coin flip, 'both' = each item twice
+  agg: 'mean',        // how the k ratings of an item combine: 'mean' or 'majority'
+  crit: 1.959963985,  // the two-sided 95% critical value every method on this page uses
+  worlds: 400,        // how many independent worlds every number is averaged over
+  judgeBias: 0.30,    // the LLM judge's systematic preference for the feature's style
+  judgeNoise: 1.25,   // its own within-rating noise
+  judgeRho: 0.75,     // how much of a request's real quality the judge actually sees
+  costHuman: 1.20,    // dollars per human judgement
+  costJudge: 0.03,    // dollars per LLM judgement
+  costGen: 0,         // dollars to produce one A/B pair, separate from rating it
+  tau: 0.045,         // the mSPRT mixing scale, i.e. the effect size it is tuned for
+  looks: 20,          // how many times a continuously monitored test peeks
+  items: 0,           // override the item count (the judge panel needs a much bigger pool)
+  cap: 0,             // no user may contribute more than cap x the fair share; 0 = no cap
+  boot: 199           // wild-bootstrap replications
+};
+
+// ---- traffic ---------------------------------------------------------------------------------
+// M requests spread over U users by a Zipf law and the largest-remainder method, so the total is
+// exactly M and the MEAN cluster size is exactly perUser at every setting of the skew dial. Only
+// the SHAPE moves. The variance-weighted cluster size that falls out of it decides this whole page
+// and is in nobody's config.
+var TRAF_CACHE = {};
+function traffic(o){
+  const M = Math.max(8, o.items ? o.items : Math.round(o.ratings / o.k));
+  const U = Math.max(2, Math.round(M / o.perUser));
+  const al = o.skew * o.skewMax, cap = o.cap || 0;
+  const key = M + '|' + U + '|' + al + '|' + cap;
+  if (TRAF_CACHE[key]) return TRAF_CACHE[key];
+  const w = new Float64Array(U);
+  let sw = 0;
+  for (let u = 0; u < U; u++){ w[u] = Math.pow(u + 1, -al); sw += w[u]; }
+  // the cap is water-filling on the SHARES: nobody above cap x the fair share, and what they gave
+  // up is handed back to everyone still under the line, in proportion. The total never moves.
+  if (cap > 0){
+    const lim = cap / U, held = new Uint8Array(U);
+    for (let u = 0; u < U; u++) w[u] /= sw;
+    for (let pass = 0; pass < 60; pass++){
+      let over = 0, under = 0, hit = 0;
+      for (let u = 0; u < U; u++){
+        if (held[u]) continue;
+        if (w[u] > lim + 1e-15){ over += w[u] - lim; w[u] = lim; held[u] = 1; hit = 1; }
+        else under += w[u];
+      }
+      if (!hit || over < 1e-15 || under <= 0) break;
+      const f = (under + over) / under;
+      for (let u = 0; u < U; u++) if (!held[u]) w[u] *= f;
+    }
+    sw = 0;
+    for (let u = 0; u < U; u++) sw += w[u];
+  }
+  const n = new Int32Array(U), rem = [];
+  let tot = 0;
+  for (let u = 0; u < U; u++){
+    const ex = M * w[u] / sw, fl = Math.max(1, Math.floor(ex));
+    n[u] = fl; tot += fl;
+    rem.push([ex - Math.floor(ex), u]);
+  }
+  rem.sort(function(a, b){ return b[0] - a[0] || a[1] - b[1]; });
+  let need = M - tot, p = 0;
+  while (need > 0){ n[rem[p % U][1]]++; need--; p++; }
+  while (need < 0){ const u = rem[U - 1 - (p % U)][1]; if (n[u] > 1){ n[u]--; need++; } p++; }
+  // owners are interleaved through the stream: a big customer sends steadily, not in one block
+  const owner = new Int32Array(M);
+  let q = 0;
+  for (let u = 0; u < U; u++) for (let j = 0; j < n[u]; j++) owner[q++] = u;
+  const sh = mulberry32(911);
+  for (let i = M - 1; i > 0; i--){
+    const j = Math.floor(sh() * (i + 1));
+    const t = owner[i]; owner[i] = owner[j]; owner[j] = t;
+  }
+  let s1 = 0, s2 = 0;
+  for (let u = 0; u < U; u++){ s1 += n[u]; s2 += n[u] * n[u]; }
+  const out = { M: M, U: U, n: n, owner: owner, mBar: s1 / U, mEff: s2 / s1, biggest: n[0] / s1 };
+  TRAF_CACHE[key] = out;
+  return out;
+}
+
+// ---- one world -------------------------------------------------------------------------------
+function world(o, seed){
+  const tr = traffic(o);
+  const rng = mulberry32((seed | 0) * 2654435761 + 12345);
+  const g = new Float64Array(tr.U), e = new Float64Array(tr.M), b = new Float64Array(o.raters);
+  const trig = new Uint8Array(tr.M);
+  for (let u = 0; u < tr.U; u++) g[u] = o.sigUser * randn(rng);
+  for (let i = 0; i < tr.M; i++) e[i] = o.sigItem * randn(rng);
+  for (let r = 0; r < o.raters; r++) b[r] = o.sigRater * randn(rng);
+  // The LOGGED trigger. At collider 0 it is a property of the request, decided before the
+  // experiment ran. Above 0 it is read out of the treatment arm's own behaviour, so the triggered
+  // set has been selected on the very difference the analysis is about to measure.
+  const kap = o.collider, thr = Math.sqrt(1 + kap * kap) * probit(1 - o.trigger);
+  const always = (o.trigger >= 1 && kap === 0);
+  if (always) trig.fill(1);
+  else for (let i = 0; i < tr.M; i++){
+    const s = randn(rng);
+    const z = o.sigItem > 0 ? e[i] / o.sigItem : 0;
+    trig[i] = (s + kap * z > thr) ? 1 : 0;
+  }
+  return { tr: tr, M: tr.M, U: tr.U, g: g, e: e, b: b, trig: trig, seed: seed | 0 };
+}
+// the judge's own view of a request, drawn on its own stream so that asking for it never moves a
+// single human rating
+function jxOf(w){
+  if (w.jx) return w.jx;
+  const rng = mulberry32(w.seed * 2246822519 + 5077), x = new Float64Array(w.M);
+  for (let i = 0; i < w.M; i++) x[i] = randn(rng);
+  w.jx = x;
+  return x;
+}
+
+// ---- the ratings -----------------------------------------------------------------------------
+// z = fired * (delta + userTilt + itemTilt + raterTilt + position + logistic noise), and a rater
+// who cannot separate them says tie. When the feature did not fire the two answers are identical,
+// so the rating is a forced tie: no noise, no position, no information and NO VARIANCE - which is
+// why the dilution penalty measured on this page is not the one everybody quotes.
+function ratings(o, w, seed){
+  const R = w.M * o.k;
+  const rng = mulberry32((seed | 0) * 40503 + 7);
+  const x = new Float64Array(R), uid = new Int32Array(R), rid = new Int32Array(R);
+  const iid = new Int32Array(R);
+  const swap = o.order === 'swap', both = o.order === 'both';
+  let p = 0;
+  for (let i = 0; i < w.M; i++){
+    const u = w.tr.owner[i], base = o.delta + w.g[u] + w.e[i], fired = w.trig[i];
+    for (let j = 0; j < o.k; j++){
+      const r = (rng() * o.raters) | 0;
+      const flip = rng();
+      let uu = rng();
+      if (uu < 1e-12) uu = 1e-12; else if (uu > 1 - 1e-12) uu = 1 - 1e-12;
+      const s = both ? ((j & 1) ? -1 : 1) : (swap ? (flip < 0.5 ? 1 : -1) : 1);
+      let v = 0.5;
+      if (fired){
+        const z = base + w.b[r] + o.position * s + o.noise * Math.log(uu / (1 - uu));
+        v = z > o.tie ? 1 : (z < -o.tie ? 0 : 0.5);
+      }
+      x[p] = v; uid[p] = u; rid[p] = r; iid[p] = i; p++;
+    }
+  }
+  return { x: x, uid: uid, rid: rid, iid: iid, R: R, M: w.M, k: o.k };
+}
+// the k ratings of one item collapse to one item score, by mean or by majority vote
+function itemScores(o, rt){
+  const M = rt.M, k = rt.k, out = new Float64Array(M), ou = new Int32Array(M);
+  for (let i = 0; i < M; i++){
+    let s = 0;
+    for (let j = 0; j < k; j++) s += 2 * rt.x[i * k + j] - 1;
+    out[i] = o.agg === 'majority' ? (s > 0 ? 1 : (s < 0 ? 0 : 0.5)) : 0.5 + 0.5 * s / k;
+    ou[i] = rt.uid[i * k];
+  }
+  return { s: out, uid: ou, M: M };
+}
+// what an LLM judge says about the same items: it sees a rho-fraction of the request's real
+// quality, has no rater panel, its own noise, and a systematic pull toward the feature's style.
+function judgeScores(o, w, seed){
+  const M = w.M, rng = mulberry32((seed | 0) * 69069 + 31), jx = jxOf(w);
+  const x = new Float64Array(M);
+  const rho = o.judgeRho, side = Math.sqrt(Math.max(0, 1 - rho * rho)) * o.sigItem;
+  for (let i = 0; i < M; i++){
+    const u = w.tr.owner[i];
+    let uu = rng();
+    if (uu < 1e-12) uu = 1e-12; else if (uu > 1 - 1e-12) uu = 1 - 1e-12;
+    let v = 0.5;
+    if (w.trig[i]){
+      const z = o.delta + w.g[u] + rho * w.e[i] + side * jx[i] + o.judgeBias +
+                o.judgeNoise * Math.log(uu / (1 - uu));
+      v = z > o.tie ? 1 : (z < -o.tie ? 0 : 0.5);
+    }
+    x[i] = v;
+  }
+  return x;
+}
+
+// ---- standard errors -------------------------------------------------------------------------
+// One function. A cluster-robust standard error with every observation in its own cluster IS the
+// naive one, so the only thing separating the rows of the headline table is which column of the
+// same spreadsheet you decided to call independent.
+var BUF = {};
+function buf(name, n){
+  const b = BUF[name];
+  if (b && b.length >= n) return b;
+  return (BUF[name] = new Float64Array(n));
+}
+function clusterSE(x, key, G, n){
+  const N = n === undefined ? x.length : n;
+  let xb = 0;
+  for (let i = 0; i < N; i++) xb += x[i];
+  xb /= N;
+  const s = buf('cs', G);
+  for (let gg = 0; gg < G; gg++) s[gg] = 0;
+  for (let i = 0; i < N; i++) s[key[i]] += x[i] - xb;
+  let v = 0;
+  for (let gg = 0; gg < G; gg++) v += s[gg] * s[gg];
+  const c = G > 1 ? G / (G - 1) : 1;      // CR1
+  return Math.sqrt(v * c) / N;
+}
+var SEQ_CACHE = null, CELL = null, FLAT = null, SEEN = null;
+function seqIds(n){
+  if (!SEQ_CACHE || SEQ_CACHE.length < n){
+    SEQ_CACHE = new Int32Array(n);
+    for (let i = 0; i < n; i++) SEQ_CACHE[i] = i;
+  }
+  return SEQ_CACHE;
+}
+function effectOf(x, n){
+  const N = n === undefined ? x.length : n;
+  let s = 0;
+  for (let i = 0; i < N; i++) s += x[i];
+  return s / N - 0.5;
+}
+function seOf(rt, w, o, method, n){
+  const N = n === undefined ? rt.R : n;
+  if (method === 'naive') return clusterSE(rt.x, seqIds(N), N, N);
+  if (method === 'item')  return clusterSE(rt.x, rt.iid, rt.M, N);
+  if (method === 'user')  return clusterSE(rt.x, rt.uid, w.U, N);
+  if (method === 'rater') return clusterSE(rt.x, rt.rid, o.raters, N);
+  // two-way, Cameron-Gelbach-Miller: V_user + V_rater - V_(user x rater)
+  // the user x rater cells are sparse, so they are compacted to dense ids. A flat U*raters lookup
+  // is far faster than a Map but is 16 million slots the moment the panel gets big, so it is used
+  // only while the grid is small and only the touched slots are cleared afterwards.
+  if (!CELL || CELL.length < N) CELL = new Int32Array(N);
+  const cell = CELL;
+  let nc = 0;
+  const grid = w.U * o.raters;
+  if (grid <= 1 << 21){
+    if (!FLAT || FLAT.length < grid){ FLAT = new Int32Array(grid); FLAT.fill(-1); }
+    if (!SEEN || SEEN.length < N) SEEN = new Int32Array(N);
+    const seen = SEEN;
+    for (let i = 0; i < N; i++){
+      const key = rt.uid[i] * o.raters + rt.rid[i];
+      let v = FLAT[key];
+      if (v < 0){ v = nc++; FLAT[key] = v; seen[v] = key; }
+      cell[i] = v;
+    }
+    for (let v = 0; v < nc; v++) FLAT[seen[v]] = -1;
+  } else {
+    const map = new Map();
+    for (let i = 0; i < N; i++){
+      const key = rt.uid[i] * o.raters + rt.rid[i];
+      let v = map.get(key);
+      if (v === undefined){ v = nc++; map.set(key, v); }
+      cell[i] = v;
+    }
+  }
+  const vu = clusterSE(rt.x, rt.uid, w.U, N), vr = clusterSE(rt.x, rt.rid, o.raters, N);
+  const vc = clusterSE(rt.x, cell, nc, N);
+  // V_user + V_rater - V_cell can come out below either one-way piece, and a variance estimate
+  // smaller than a valid variance estimate is not a repair. Floor it at the larger of the two.
+  return Math.sqrt(Math.max(vu * vu + vr * vr - vc * vc, vu * vu, vr * vr));
+}
+function analyse(rt, w, o, method){
+  return { eff: effectOf(rt.x), se: seOf(rt, w, o, method) };
+}
+
+// ---- the published repair for too-few-clusters ------------------------------------------------
+// Cameron, Gelbach & Miller's wild cluster bootstrap-t: impose the null, flip the SIGN of every
+// residual in a cluster together, and read the critical value off the resulting t distribution
+// instead of a normal table. It is the standard answer when the cluster count is small, and it is
+// worth asking what it repairs here, because "small" is not the only way to be short of clusters.
+function clusterSums(rt, key, G, n){
+  const N = n === undefined ? rt.R : n;
+  let xb = 0;
+  for (let i = 0; i < N; i++) xb += rt.x[i];
+  xb /= N;
+  const S = new Float64Array(G), cnt = new Float64Array(G);
+  for (let i = 0; i < N; i++){ S[key[i]] += rt.x[i] - xb; cnt[key[i]]++; }
+  return { S: S, cnt: cnt, G: G, N: N, xb: xb };
+}
+function wildBoot(rt, w, o, mode, Bn, seed){
+  const key = mode === 'rater' ? rt.rid : rt.uid, G = mode === 'rater' ? o.raters : w.U;
+  const cs = clusterSums(rt, key, G);
+  const N = cs.N, c = G > 1 ? G / (G - 1) : 1;
+  let v0 = 0;
+  for (let g = 0; g < G; g++) v0 += cs.S[g] * cs.S[g];
+  const se0 = Math.sqrt(v0 * c) / N;
+  const tObs = se0 > 0 ? Math.abs(cs.xb - 0.5) / se0 : 0;
+  const rng = mulberry32((seed | 0) * 1103515245 + 12347), ts = new Float64Array(Bn);
+  const wt = new Float64Array(G);
+  for (let b = 0; b < Bn; b++){
+    let T = 0;
+    for (let g = 0; g < G; g++){ wt[g] = rng() < 0.5 ? -1 : 1; T += wt[g] * cs.S[g]; }
+    let v = 0;
+    for (let g = 0; g < G; g++){ const d = wt[g] * cs.S[g] - cs.cnt[g] / N * T; v += d * d; }
+    const se = Math.sqrt(v * c) / N;
+    ts[b] = se > 0 ? Math.abs(T / N) / se : 0;
+  }
+  const srt = Array.prototype.slice.call(ts).sort(function(a, b){ return a - b; });
+  const q = srt[Math.min(Bn - 1, Math.ceil(0.95 * (Bn + 1)) - 1)];
+  return { reject: tObs > q ? 1 : 0, tObs: tObs, crit: q, se: se0 };
+}
+// The obvious two-way extension - draw a sign for each user, a sign for each rater, MULTIPLY them -
+// is not a two-way bootstrap at all. E[w_u w_r w_u' w_r'] is 1 when the two observations share
+// both labels and 0 otherwise, so the resampling variance of the numerator is the sum of squared
+// CELL sums: the quantity the two-way formula SUBTRACTS. This returns both, so the page can show
+// they are equal rather than assert it.
+function productWeightVar(rt, w, o, Bn, seed){
+  const N = rt.R;
+  let xb = 0;
+  for (let i = 0; i < N; i++) xb += rt.x[i];
+  xb /= N;
+  const map = new Map(), cu = [], cr = [], cS = [];
+  for (let i = 0; i < N; i++){
+    const k = rt.uid[i] * o.raters + rt.rid[i];
+    let c = map.get(k);
+    if (c === undefined){ c = cS.length; map.set(k, c); cu.push(rt.uid[i]); cr.push(rt.rid[i]); cS.push(0); }
+    cS[c] += rt.x[i] - xb;
+  }
+  let cellVar = 0;
+  for (let c = 0; c < cS.length; c++) cellVar += cS[c] * cS[c];
+  const su = new Float64Array(w.U), sr = new Float64Array(o.raters);
+  for (let c = 0; c < cS.length; c++){ su[cu[c]] += cS[c]; sr[cr[c]] += cS[c]; }
+  let userVar = 0, raterVar = 0;
+  for (let g = 0; g < w.U; g++) userVar += su[g] * su[g];
+  for (let g = 0; g < o.raters; g++) raterVar += sr[g] * sr[g];
+  // and the same quantity measured, by actually drawing the weights
+  const rng = mulberry32((seed | 0) * 22695477 + 1), wu = new Float64Array(w.U), wr = new Float64Array(o.raters);
+  let s2 = 0;
+  for (let b = 0; b < Bn; b++){
+    for (let g = 0; g < w.U; g++) wu[g] = rng() < 0.5 ? -1 : 1;
+    for (let g = 0; g < o.raters; g++) wr[g] = rng() < 0.5 ? -1 : 1;
+    let T = 0;
+    for (let c = 0; c < cS.length; c++) T += wu[cu[c]] * wr[cr[c]] * cS[c];
+    s2 += T * T;
+  }
+  return { cells: cS.length, cellVar: cellVar, userVar: userVar, raterVar: raterVar,
+           measured: s2 / Bn, N: N };
+}
+
+// ---- the estimand, without simulating anything -----------------------------------------------
+// Everything a rating depends on except the logistic noise is normal, so the population preference
+// is a one-dimensional integral - two, when the logged trigger was selected on the outcome.
+function condWin(o, m){
+  const two = o.order !== 'fixed';
+  let a = 0;
+  for (let q = 0; q < (two ? 2 : 1); q++){
+    const mm = m + o.position * (q === 0 ? 1 : -1);
+    a += 0.5 * (1 / (1 + Math.exp((o.tie - mm) / o.noise)) -
+                1 / (1 + Math.exp((o.tie + mm) / o.noise)));
+  }
+  return 0.5 + a / (two ? 2 : 1);
+}
+function simpson(f, lo, hi, nn){
+  const n = nn % 2 ? nn + 1 : nn, h = (hi - lo) / n;
+  let s = f(lo) + f(hi);
+  for (let i = 1; i < n; i++) s += (i % 2 ? 4 : 2) * f(lo + i * h);
+  return s * h / 3;
+}
+function estimand(o){
+  if (o.trigger <= 0) return { trig: 0.5, all: 0.5 };
+  const Sg = Math.sqrt(o.sigUser * o.sigUser + o.sigRater * o.sigRater), se = o.sigItem;
+  let cond;
+  if (o.collider > 0 && o.trigger < 1){
+    const kap = o.collider, thr = Math.sqrt(1 + kap * kap) * probit(1 - o.trigger);
+    const inner = function(z){
+      const base = o.delta + se * z;
+      if (Sg <= 1e-9) return condWin(o, base);
+      return simpson(function(m){ return npdf(m) * condWin(o, base + Sg * m); }, -8, 8, 320);
+    };
+    const wz = function(z){ return npdf(z) * (1 - ncdf(thr - kap * z)); };
+    cond = simpson(function(z){ return wz(z) * inner(z); }, -8, 8, 320) /
+           simpson(wz, -8, 8, 320);
+  } else {
+    const S = Math.sqrt(Sg * Sg + se * se);
+    cond = S > 1e-9
+      ? simpson(function(m){ return npdf(m) * condWin(o, o.delta + S * m); }, -9, 9, 1200)
+      : condWin(o, o.delta);
+  }
+  return { trig: cond, all: 0.5 + o.trigger * (cond - 0.5) };
+}
+// the same integral for the judge: no rater panel, its own noise, and its own thumb on the scale
+function estimandJudge(o){
+  return estimand(Object.assign({}, o, { delta: o.delta + o.judgeBias, sigRater: 0,
+                                         noise: o.judgeNoise, position: 0, order: 'fixed' }));
+}
+// what a textbook predicts from the traffic shape and the measured correlation
+function deffPredict(mEff, icc){ return 1 + (mEff - 1) * icc; }
+// one-way ANOVA intraclass correlation of a rating vector over a cluster key
+function iccOf(x, key, G, n){
+  const N = n === undefined ? x.length : n;
+  const cnt = new Float64Array(G), sum = new Float64Array(G);
+  let gm = 0;
+  for (let i = 0; i < N; i++){ cnt[key[i]]++; sum[key[i]] += x[i]; gm += x[i]; }
+  gm /= N;
+  let ssb = 0, ssw = 0, live = 0, s2 = 0;
+  for (let gg = 0; gg < G; gg++){
+    if (!cnt[gg]) continue;
+    live++;
+    const m = sum[gg] / cnt[gg];
+    ssb += cnt[gg] * (m - gm) * (m - gm);
+    s2 += cnt[gg] * cnt[gg];
+  }
+  for (let i = 0; i < N; i++){ const m = sum[key[i]] / cnt[key[i]]; ssw += (x[i] - m) * (x[i] - m); }
+  const dfb = live - 1, dfw = N - live;
+  if (dfb <= 0 || dfw <= 0) return 0;
+  const msb = ssb / dfb, msw = ssw / dfw, kk = (N - s2 / N) / dfb;
+  const va = (msb - msw) / kk;
+  return va > 0 ? va / (va + msw) : 0;
+}
+
+// ---- a run of W independent worlds -----------------------------------------------------------
+function trial(o, W, seed0, methods){
+  const ms = methods || METHODS;
+  const nm = ms.length, est = [], rej = new Float64Array(nm), cov = new Float64Array(nm);
+  const seS = new Float64Array(nm);
+  const truth = estimand(o).all - 0.5;
+  let iccU = 0, iccR = 0, tieRate = 0, nS = Math.min(W, 24);
+  for (let s = 0; s < W; s++){
+    const w = world(o, (seed0 | 0) + s * 7919);
+    const rt = ratings(o, w, (seed0 | 0) + s * 7919);
+    const eff = effectOf(rt.x);
+    est.push(eff);
+    for (let q = 0; q < nm; q++){
+      const se = seOf(rt, w, o, ms[q]);
+      seS[q] += se;
+      if (Math.abs(eff) > o.crit * se) rej[q]++;
+      if (Math.abs(eff - truth) <= o.crit * se) cov[q]++;
+    }
+    if (s < nS){
+      iccU += iccOf(rt.x, rt.uid, w.U);
+      iccR += iccOf(rt.x, rt.rid, o.raters);
+      let t = 0;
+      for (let i = 0; i < rt.R; i++) if (rt.x[i] === 0.5) t++;
+      tieRate += t / rt.R;
+    }
+  }
+  const out = { truth: truth, estMean: mean(est), estSd: sdev(est), worlds: W, est: est,
+                iccUser: iccU / nS, iccRater: iccR / nS, tieRate: tieRate / nS, by: {} };
+  for (let q = 0; q < nm; q++){
+    const sm = seS[q] / W;
+    out.by[ms[q]] = { se: sm, reject: rej[q] / W, coverage: cov[q] / W,
+                      honesty: out.estSd > 0 ? sm / out.estSd : 0 };
+  }
+  return out;
+}
+
+// the Monte-Carlo standard error on a rate measured over W worlds, so a type I error of 7% can be
+// told apart from a type I error of 5% instead of being eyeballed
+function mcse(p, W){ return Math.sqrt(Math.max(p * (1 - p), 1e-12) / W); }
+// Kish's effective cluster count: (sum n)^2 / sum n^2. Five hundred users with one of them holding
+// an eighth of the traffic is not five hundred clusters.
+function gEff(n){
+  let s1 = 0, s2 = 0;
+  for (let i = 0; i < n.length; i++){ s1 += n[i]; s2 += n[i] * n[i]; }
+  return s2 > 0 ? s1 * s1 / s2 : 0;
+}
+// how each SE behaves as the rater panel's own variance is turned up: the interesting column is
+// the one that gets WORSE
+function crossStudy(o, vals, W, seed0){
+  const out = [];
+  for (let q = 0; q < vals.length; q++){
+    const oo = Object.assign({}, o, { sigRater: vals[q], delta: 0 });
+    const r = trial(oo, W, seed0, METHODS);
+    out.push({ sigRater: vals[q], iccUser: r.iccUser, iccRater: r.iccRater, estSd: r.estSd,
+               by: r.by, mcse: mcse(0.05, W) });
+  }
+  return out;
+}
+// the bootstrap, the z table, and the two-way formula on the SAME worlds
+function bootStudy(o, W, seed0, Bn){
+  const out = { zUser: 0, zTwo: 0, boot: 0, bootRater: 0, worlds: W, tRatio: 0 };
+  for (let s = 0; s < W; s++){
+    const sd = (seed0 | 0) + s * 7919;
+    const w = world(o, sd), rt = ratings(o, w, sd), eff = effectOf(rt.x);
+    if (Math.abs(eff) > o.crit * seOf(rt, w, o, 'user')) out.zUser++;
+    if (Math.abs(eff) > o.crit * seOf(rt, w, o, 'two')) out.zTwo++;
+    const b = wildBoot(rt, w, o, 'user', Bn, sd);
+    out.boot += b.reject;
+    out.tRatio += b.crit;
+  }
+  out.zUser /= W; out.zTwo /= W; out.boot /= W; out.tRatio /= W;
+  out.mcse = mcse(0.05, W);
+  return out;
+}
+// capping how much of the sample one customer may supply, at the SAME budget. The population
+// preference does not move - the user tilts are drawn independently of how much anyone sends - so
+// this is a change to the variance and to nothing else.
+function capStudy(o, caps, W, seed0){
+  const out = [], ms = ['naive', 'user', 'two'];
+  for (let q = 0; q < caps.length; q++){
+    const oo = Object.assign({}, o, { cap: caps[q] });
+    const tr = traffic(oo);
+    const a = trial(Object.assign({}, oo, { delta: 0 }), W, seed0, ms);
+    const b = trial(oo, W, (seed0 | 0) + 3124, ms);
+    out.push({ cap: caps[q], mEff: tr.mEff, gEff: gEff(tr.n), biggest: tr.biggest, users: tr.U,
+               estSd: a.estSd, aa: a.by, power: b.by, truth: b.truth, mcse: mcse(0.05, W) });
+  }
+  return out;
+}
+
+// ---- k raters per item, at a FIXED rating budget ---------------------------------------------
+// The trade nobody prices: k raters per item makes each item score more reliable and buys R/k
+// items with it. Reliability is measured against the item's own latent preference, which is a
+// small integral over the rating panel and the noise, not another simulation.
+var QN = null, QW = null;
+function quadNodes(){
+  if (QN) return;
+  const n = 96, lo = -8, hi = 8, h = (hi - lo) / n;
+  QN = new Float64Array(n + 1); QW = new Float64Array(n + 1);
+  let tot = 0;
+  for (let i = 0; i <= n; i++){
+    QN[i] = lo + i * h;
+    QW[i] = (i === 0 || i === n ? 1 : (i % 2 ? 4 : 2)) * npdf(QN[i]);
+    tot += QW[i];
+  }
+  for (let i = 0; i <= n; i++) QW[i] /= tot;
+}
+function itemLatent(o, w, i){
+  if (!w.trig[i]) return 0.5;
+  const m = o.delta + w.g[w.tr.owner[i]] + w.e[i];
+  if (o.sigRater <= 1e-9) return condWin(o, m);
+  quadNodes();
+  let a = 0;
+  for (let q = 0; q < QN.length; q++) a += QW[q] * condWin(o, m + o.sigRater * QN[q]);
+  return a;
+}
+function corr(a, b){
+  const n = a.length, ma = mean(a), mb = mean(b);
+  let sa = 0, sb = 0, sab = 0;
+  for (let i = 0; i < n; i++){
+    const da = a[i] - ma, db = b[i] - mb;
+    sa += da * da; sb += db * db; sab += da * db;
+  }
+  return sa > 0 && sb > 0 ? sab / Math.sqrt(sa * sb) : 0;
+}
+function kStudy(o, ks, W, seed0, method){
+  const truth = estimand(o).all - 0.5, out = [];
+  for (let q = 0; q < ks.length; q++){
+    const k = ks[q], oo = Object.assign({}, o, { k: k });
+    const est = [], rel = [];
+    let seS = 0, rejS = 0, rej0 = 0;
+    const o0 = Object.assign({}, oo, { delta: 0 });
+    for (let s = 0; s < W; s++){
+      const sd = (seed0 | 0) + s * 7919;
+      const w = world(oo, sd), rt = ratings(oo, w, sd), it = itemScores(oo, rt);
+      const eff = effectOf(it.s);
+      est.push(eff);
+      const se = clusterSE(it.s, it.uid, w.U);
+      seS += se;
+      if (Math.abs(eff) > o.crit * se) rejS++;
+      const w0 = world(o0, sd + 5), rt0 = ratings(o0, w0, sd + 5), it0 = itemScores(o0, rt0);
+      const se0 = clusterSE(it0.s, it0.uid, w0.U);
+      if (Math.abs(effectOf(it0.s)) > o.crit * se0) rej0++;
+      if (s < 4){
+        const lat = new Float64Array(w.M);
+        for (let i = 0; i < w.M; i++) lat[i] = itemLatent(oo, w, i);
+        rel.push(corr(it.s, lat));
+      }
+    }
+    out.push({ k: k, items: Math.round(o.ratings / k), reliability: mean(rel),
+               se: seS / W, trueSd: sdev(est), power: rejS / W, typeI: rej0 / W, truth: truth });
+  }
+  return out;
+}
+// the closed form the sweep is checked against: with M = R/k items the sampling variance of the
+// estimate is k*between/R + within/R, so it RISES with k for any positive between-item variance,
+// and with a per-pair generation cost the optimum is a square root.
+function kOptimum(between, within, costGen, costRate){
+  if (between <= 0 || costRate <= 0) return Infinity;
+  return Math.sqrt(within * costGen / (between * costRate));
+}
+function kVarPredict(between, within, R, k){ return (k * between + within) / R; }
+function varComponents(o, W, seed0, kBig){
+  const k = kBig || 6, oo = Object.assign({}, o, { k: k });
+  let b = 0, wi = 0;
+  for (let s = 0; s < W; s++){
+    const sd = (seed0 | 0) + s * 7919;
+    const w = world(oo, sd), rt = ratings(oo, w, sd);
+    let sw = 0, sb = 0, gm = 0;
+    const im = new Float64Array(w.M);
+    for (let i = 0; i < w.M; i++){
+      let m = 0;
+      for (let j = 0; j < k; j++) m += rt.x[i * k + j];
+      m /= k; im[i] = m; gm += m;
+      for (let j = 0; j < k; j++){ const d = rt.x[i * k + j] - m; sw += d * d; }
+    }
+    gm /= w.M;
+    for (let i = 0; i < w.M; i++){ const d = im[i] - gm; sb += d * d; }
+    const msw = sw / (w.M * (k - 1)), msb = sb / (w.M - 1);
+    wi += msw;
+    b += Math.max(0, msb - msw / k);
+  }
+  return { between: b / W, within: wi / W };
+}
+
+// ---- dilution: what a trigger rate really costs ----------------------------------------------
+function dilution(o, triggers, W, seed0, methods){
+  const ms = methods || ['naive', 'user', 'two'], out = [];
+  for (let q = 0; q < triggers.length; q++){
+    const p = triggers[q], oo = Object.assign({}, o, { trigger: p });
+    const r = trial(oo, W, seed0, ms);
+    const r0 = trial(Object.assign({}, oo, { delta: 0 }), W, seed0, ms);
+    const es = estimand(oo), row = { trigger: p, effAll: es.all - 0.5, effTrig: es.trig - 0.5, by: {} };
+    for (let a = 0; a < ms.length; a++){
+      const se = r.by[ms[a]].se;
+      row.by[ms[a]] = { se: se, power: r.by[ms[a]].reject, typeI: r0.by[ms[a]].reject,
+        // ratings for 80% power on the DILUTED metric, from this configuration's own SE
+        need: Math.round(o.ratings * Math.pow((1.959963985 + 0.8416212) * se /
+                                              Math.abs(es.all - 0.5), 2)) };
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+// ---- the collider: a trigger flag logged from the treatment's own behaviour -------------------
+function colliderScan(o, kaps, W, seed0, method){
+  const out = [];
+  for (let q = 0; q < kaps.length; q++){
+    const oo = Object.assign({}, o, { collider: kaps[q], delta: 0 });
+    const es = estimand(oo);
+    let rej = 0, sumT = 0, sumA = 0;
+    for (let s = 0; s < W; s++){
+      const sd = (seed0 | 0) + s * 7919;
+      const w = world(oo, sd), rt = ratings(oo, w, sd);
+      // the "recommended fix": analyse only the requests the flag says the feature fired on
+      let n = 0, acc = 0;
+      const xs = new Float64Array(rt.R), us = new Int32Array(rt.R);
+      for (let i = 0; i < rt.R; i++) if (w.trig[rt.iid[i]]){ xs[n] = rt.x[i]; us[n] = rt.uid[i]; n++; acc += rt.x[i]; }
+      const eff = n ? acc / n - 0.5 : 0;
+      const se = clusterSE(xs, us, w.U, n);
+      if (Math.abs(eff) > o.crit * se) rej++;
+      sumT += eff;
+      sumA += effectOf(rt.x);
+    }
+    out.push({ collider: kaps[q], predicted: es.trig - 0.5, measuredTrig: sumT / W,
+               measuredAll: sumA / W, falsePositive: rej / W });
+  }
+  return out;
+}
+
+// ---- peeking, and the published fix ----------------------------------------------------------
+// mSPRT (Johari, Pekelis & Walsh, Always Valid Inference): a mixture likelihood ratio that may be
+// read at every single observation. It is valid under the independence its derivation assumes.
+function msprtLambda(effect, sigma2, n, tau2){
+  const d = sigma2 + n * tau2;
+  if (d <= 0 || sigma2 <= 0) return 0;
+  return Math.sqrt(sigma2 / d) * Math.exp(n * n * tau2 * effect * effect / (2 * sigma2 * d));
+}
+function peekTrial(o, W, seed0, cfg){
+  // cfg: { test:'fixed'|'msprt', se:'naive'|'user'|'two', looks:n }
+  const L = cfg.looks || o.looks, alpha = 0.05, out = { reject: 0, stops: [], worlds: W };
+  for (let s = 0; s < W; s++){
+    const sd = (seed0 | 0) + s * 7919;
+    const w = world(o, sd), rt = ratings(o, w, sd);
+    let fired = 0, stop = rt.R;
+    for (let l = 1; l <= L; l++){
+      const n = Math.max(60, Math.round(rt.R * l / L));
+      const eff = effectOf(rt.x, n), se = seOf(rt, w, o, cfg.se, n);
+      let hit;
+      if (cfg.test === 'msprt'){
+        const sigma2 = n * se * se;                  // per-observation variance the SE implies
+        hit = msprtLambda(eff, sigma2, n, o.tau * o.tau) >= 1 / alpha;
+      } else hit = Math.abs(eff) > o.crit * se;
+      if (hit){ fired = 1; stop = n; break; }
+    }
+    out.reject += fired;
+    out.stops.push(stop);
+  }
+  out.rate = out.reject / W;
+  out.medianStop = out.stops.slice().sort(function(a, b){ return a - b; })[Math.floor(W / 2)];
+  return out;
+}
+
+// ---- position bias and the order policy ------------------------------------------------------
+function orderStudy(o, W, seed0, method){
+  const rows = [];
+  const designs = [
+    { name: 'fixed', order: 'fixed', k: 1 },
+    { name: 'swap',  order: 'swap',  k: 1 },
+    { name: 'both',  order: 'both',  k: 2 }
+  ];
+  for (let q = 0; q < designs.length; q++){
+    const d = designs[q];
+    const oo = Object.assign({}, o, { order: d.order, k: d.k, agg: 'mean' });
+    const truth = estimand(Object.assign({}, oo, { position: 0 })).all - 0.5;
+    const est = [], est0 = [];
+    let seS = 0, pow = 0, t1 = 0;
+    const o0 = Object.assign({}, oo, { delta: 0 });
+    for (let s = 0; s < W; s++){
+      const sd = (seed0 | 0) + s * 7919;
+      const w = world(oo, sd), rt = ratings(oo, w, sd), it = itemScores(oo, rt);
+      const eff = effectOf(it.s), se = clusterSE(it.s, it.uid, w.U);
+      est.push(eff); seS += se;
+      if (Math.abs(eff) > o.crit * se) pow++;
+      const w0 = world(o0, sd), rt0 = ratings(o0, w0, sd), it0 = itemScores(o0, rt0);
+      const e0 = effectOf(it0.s), s0 = clusterSE(it0.s, it0.uid, w0.U);
+      est0.push(e0);
+      if (Math.abs(e0) > o.crit * s0) t1++;
+    }
+    rows.push({ name: d.name, order: d.order, k: d.k, items: Math.round(o.ratings / d.k),
+                truth: truth, est: mean(est), bias: mean(est) - truth, se: seS / W,
+                trueSd: sdev(est), power: pow / W, typeI: t1 / W, biasAA: mean(est0) });
+  }
+  return rows;
+}
+
+// ---- the LLM judge, at equal DOLLARS ---------------------------------------------------------
+// A judge rating costs a fortieth of a human one, so at any budget you get forty times as many.
+// Variance falls like 1/n. The bias does not fall at all.
+function judgeStudy(o, budgets, W, seed0, phis, lams){
+  const truth = estimand(o).all - 0.5;
+  const jTruth = estimandJudge(o).all - 0.5;
+  const maxItems = Math.max.apply(null, budgets.map(function(d){
+    return Math.min(o.items || 40000, Math.floor(d / o.costJudge)); }));
+  const oo = Object.assign({}, o, { items: Math.max(400, maxItems), k: 1 });
+  const H = [], J = [];
+  for (let s = 0; s < W; s++){
+    const sd = (seed0 | 0) + s * 7919;
+    const w = world(oo, sd);
+    H.push(ratings(oo, w, sd).x);
+    J.push(judgeScores(oo, w, sd));
+  }
+  const rows = [];
+  for (let q = 0; q < budgets.length; q++){
+    const D = budgets[q];
+    const nh = Math.max(2, Math.min(oo.items, Math.floor(D / o.costHuman)));
+    const nj = Math.max(2, Math.min(oo.items, Math.floor(D / o.costJudge)));
+    const eh = [], ej = [];
+    for (let s = 0; s < W; s++){ eh.push(effectOf(H[s], nh)); ej.push(effectOf(J[s], nj)); }
+    // prediction-powered inference: label a share phi of the budget with humans and rectify
+    let best = null, vanilla = null;
+    for (let a = 0; a < phis.length; a++){
+      const phi = phis[a];
+      const nl = Math.max(2, Math.floor(D * phi / o.costHuman));
+      const np = Math.max(2, Math.min(oo.items, Math.floor(D * (1 - phi) / o.costJudge)));
+      if (nl > oo.items) continue;
+      for (let b = 0; b < lams.length; b++){
+        const lam = lams[b], es = [];
+        for (let s = 0; s < W; s++){
+          es.push(effectOf(H[s], nl) + lam * (effectOf(J[s], np) - effectOf(J[s], nl)));
+        }
+        const r = rmse(es, truth), rec = { phi: phi, lam: lam, nl: nl, nj: np, rmse: r };
+        if (!best || r < best.rmse) best = rec;
+        if (lam === 1 && (!vanilla || r < vanilla.rmse)) vanilla = rec;
+      }
+    }
+    rows.push({ budget: D, nh: nh, nj: nj, truth: truth, judgeTruth: jTruth,
+                humanRmse: rmse(eh, truth), judgeRmse: rmse(ej, truth),
+                judgeBiasMeasured: mean(ej) - truth, humanSd: sdev(eh), judgeSd: sdev(ej),
+                ppi: best, ppiVanilla: vanilla });
+  }
+  return { rows: rows, truth: truth, judgeTruth: jTruth };
+}
+
+// ---- the frontier: every design at the SAME number of dollars ---------------------------------
+function frontier(o, W, seed0){
+  const D = o.ratings * o.costHuman;
+  const designs = [
+    { id: 'naive',    label: 'rate every request once, treat every rating as independent',
+      k: 1, order: 'swap', se: 'naive', agg: 'mean', peek: 0 },
+    { id: 'peek',     label: 'the same, watched continuously and stopped when it goes green',
+      k: 1, order: 'swap', se: 'naive', agg: 'mean', peek: 1 },
+    { id: 'user',     label: 'clustered by customer',
+      k: 1, order: 'swap', se: 'user', agg: 'mean', peek: 0 },
+    { id: 'two',      label: 'clustered by customer AND rater',
+      k: 1, order: 'swap', se: 'two', agg: 'mean', peek: 0 },
+    { id: 'k3',       label: 'three raters per request, majority vote, clustered by customer',
+      k: 3, order: 'swap', se: 'user', agg: 'majority', peek: 0 },
+    { id: 'k3mean',   label: 'three raters per request, averaged, clustered by customer',
+      k: 3, order: 'swap', se: 'user', agg: 'mean', peek: 0 },
+    { id: 'both',     label: 'each request rated twice, once in each order, clustered by customer',
+      k: 2, order: 'both', se: 'user', agg: 'mean', peek: 0 },
+    { id: 'fixed',    label: 'control always shown first, clustered by customer',
+      k: 1, order: 'fixed', se: 'user', agg: 'mean', peek: 0 },
+    { id: 'msprt',    label: 'clustered by customer, monitored continuously with an mSPRT',
+      k: 1, order: 'swap', se: 'user', agg: 'mean', peek: 2 }
+  ];
+  const rows = [];
+  for (let q = 0; q < designs.length; q++){
+    const d = designs[q];
+    const oo = Object.assign({}, o, { k: d.k, order: d.order, agg: d.agg,
+                                      ratings: Math.round(D / o.costHuman) });
+    let power, typeI;
+    if (d.peek){
+      const cfg = { test: d.peek === 2 ? 'msprt' : 'fixed', se: d.se, looks: o.looks };
+      power = peekTrial(oo, W, seed0, cfg).rate;
+      typeI = peekTrial(Object.assign({}, oo, { delta: 0 }), W, seed0, cfg).rate;
+    } else if (d.k === 1 && d.agg === 'mean'){
+      power = trial(oo, W, seed0, [d.se]).by[d.se].reject;
+      typeI = trial(Object.assign({}, oo, { delta: 0 }), W, seed0, [d.se]).by[d.se].reject;
+    } else {
+      const one = function(dl){
+        const ooo = Object.assign({}, oo, { delta: dl });
+        let rej = 0;
+        for (let s = 0; s < W; s++){
+          const sd = (seed0 | 0) + s * 7919;
+          const w = world(ooo, sd), rt = ratings(ooo, w, sd), it = itemScores(ooo, rt);
+          const se = clusterSE(it.s, it.uid, w.U);
+          if (Math.abs(effectOf(it.s)) > o.crit * se) rej++;
+        }
+        return rej / W;
+      };
+      power = one(o.delta); typeI = one(0);
+    }
+    // "valid" is a claim about a measured rate, so it is judged against the Monte-Carlo error of
+    // the measurement, not against a round number somebody liked
+    const band = 0.05 + 2 * mcse(0.05, W);
+    rows.push({ id: d.id, label: d.label, dollars: D, ratings: Math.round(D / o.costHuman),
+                items: Math.round(D / o.costHuman / d.k), power: power, typeI: typeI,
+                band: band, valid: typeI <= band });
+  }
+  return rows;
+}
+function itemsOf(o){ return traffic(o).M; }
+// ===== ENGINE:END =====
+
+// ---------------------------------------------------------------- UI
+const $ = id => document.getElementById(id);
+const SEED = 2026, SEED2 = 2026 + 3124, BOOTREPS = 149, LOOKS = 10;
+const CAPS = [0, 16, 8, 4, 2, 1];
+const SKEWS = [0, 0.25, 0.5, 0.75, 1];
+const SIGRS = [0, 0.15, 0.3, 0.6, 1];
+const KS = [1, 2, 3, 6];
+const TRIGS = [1, 0.5, 0.3, 0.15];
+const KAPS = [0, 0.25, 0.5, 1, 2];
+const BUDGETS = [60, 150, 300, 600, 1200, 2400, 4800];
+const PHIS = [0.2, 0.4, 0.6, 0.8, 0.9], LAMS = [0.25, 0.5, 0.75, 1];
+const JUDGE_ITEMS = 12000;
+
+const p1 = x => x.toFixed(1);
+const p2 = x => x.toFixed(2);
+const p3 = x => x.toFixed(3);
+const p4 = x => x.toFixed(4);
+const pc = x => (100 * x).toFixed(1) + '%';
+const pp = x => (100 * x).toFixed(2) + 'pp';
+const kfmt = x => Math.round(x).toLocaleString('en-US');
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+// The sliders are an OVERLAY on DEFAULTS, never a replacement: a missing field is not an exception,
+// it is a silent NaN that turns every number on the page into garbage. The self-test checks for it.
+function opts(extra){
+  return Object.assign({}, DEFAULTS, {
+    ratings: +$('sR').value,
+    perUser: +$('sPU').value,
+    skew: +$('sSk').value / 100,
+    cap: +$('sCap').value,
+    raters: +$('sRa').value,
+    sigUser: +$('sU').value / 100,
+    sigItem: +$('sI').value / 100,
+    sigRater: +$('sB').value / 100,
+    noise: +$('sNo').value / 100,
+    tie: +$('sTi').value / 100,
+    delta: +$('sD').value / 100,
+    trigger: +$('sTr').value / 100,
+    collider: +$('sCo').value / 100,
+    position: +$('sPo').value / 100,
+    worlds: +$('sW').value
+  }, extra || {});
+}
+const WM = o => o.worlds;                              // the headline tables
+const WS = o => Math.max(60, Math.round(o.worlds / 3));  // the sweeps
+const WJ = o => Math.max(50, Math.round(o.worlds / 5));  // the judge panel
+const WF = o => Math.max(60, Math.round(o.worlds / 3.5)); // the frontier
+
+const FIELDS = ['ratings','perUser','skew','cap','raters','sigUser','sigItem','sigRater','noise',
+                'tie','delta','trigger','collider','position','worlds'];
+function keyOf(o, ign){
+  let s = '';
+  for (let i = 0; i < FIELDS.length; i++){
+    const f = FIELDS[i];
+    s += (ign && ign.indexOf(f) >= 0) ? '_' : ('' + o[f]);
+    s += '|';
+  }
+  return s;
+}
+const CACHE = new Map();
+function cached(id, o, ign, fn){
+  const key = id + '#' + keyOf(o, ign);
+  const hit = CACHE.get(key);
+  if (hit !== undefined) return hit;
+  const v = fn(o);
+  if (CACHE.size > 240) CACHE.clear();
+  CACHE.set(key, v);
+  return v;
+}
+// the Monte-Carlo error on a measured rate, quoted next to every rate on this page
+function band(W){ return 2 * mcse(0.05, W); }
+function verdict(x, W){
+  const cls = x > 0.05 + 2 * mcse(0.05, W) ? 'bad' : 'ok';
+  return '<span class="' + cls + '">' + pc(x) + '</span>';
+}
+
+// ---------------------------------------------------------------- canvas helper
+function axes(c, x0, y0, x1, y1){
+  const g = c.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, c.width, c.height);
+  g.fillStyle = '#0f172a';
+  g.fillRect(0, 0, c.width, c.height);
+  g.strokeStyle = '#334155'; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(x0, y0); g.lineTo(x0, y1); g.lineTo(x1, y1); g.stroke();
+  g.font = '11px ui-monospace, monospace';
+  return g;
+}
+function legend(g, items, x, y){
+  g.font = '11px -apple-system, sans-serif';
+  for (let i = 0; i < items.length; i++){
+    g.fillStyle = items[i][1];
+    g.fillRect(x, y + i * 15 - 8, 9, 9);
+    g.fillStyle = '#cbd5e1';
+    g.fillText(items[i][0], x + 14, y + i * 15);
+  }
+}
+
+// ---------------------------------------------------------------- modules
+const MODULES = [];
+function mod(id, ign, run, draw){ MODULES.push({ id: id, ign: ign, run: run, draw: draw }); }
+
+// --- one spreadsheet, five verdicts
+mod('seeds', ['delta','worlds'], function(o){
+  const oo = Object.assign({}, o, { delta: 0 }), rows = [];
+  const seeds = [2026, 7, 99, 41, 512, 8];
+  for (let s = 0; s < seeds.length; s++){
+    const w = world(oo, seeds[s]), rt = ratings(oo, w, seeds[s]);
+    const eff = effectOf(rt.x), cells = [];
+    for (let m = 0; m < METHODS.length; m++){
+      const se = seOf(rt, w, oo, METHODS[m]);
+      cells.push({ se: se, z: Math.abs(eff) / se, hit: Math.abs(eff) > oo.crit * se });
+    }
+    rows.push({ seed: seeds[s], eff: eff, cells: cells });
+  }
+  return rows;
+}, function(r, o){
+  let h = '';
+  for (let i = 0; i < r.length; i++){
+    h += '<tr><td>' + r[i].seed + '</td><td>' + pp(r[i].eff) + '</td>';
+    for (let c = 0; c < r[i].cells.length; c++){
+      const x = r[i].cells[c];
+      h += '<td class="' + (x.hit ? 'lose' : 'win') + '">' + p4(x.se) + '<br><span class="' +
+           (x.hit ? 'bad' : 'ok') + '">z ' + p2(x.z) + (x.hit ? ' &#10007;' : ' &#10003;') + '</span></td>';
+    }
+    h += '</tr>';
+  }
+  $('seedTbl').innerHTML = h;
+  const bad = r.reduce(function(a, x){ return a + (x.cells[0].hit ? 1 : 0); }, 0);
+  const good = r.reduce(function(a, x){ return a + (x.cells[4].hit ? 1 : 0); }, 0);
+  $('seedNote').innerHTML = 'Six worlds in which the feature changes nothing at all. Red is a ' +
+    'rejected null, which is always a mistake here. Every rating independent: <strong>' + bad +
+    ' of ' + r.length + '</strong> shipped. Clustered by customer and rater: <strong>' + good +
+    ' of ' + r.length + '</strong>. The <em>data</em> is identical in each row &mdash; the same ' +
+    kfmt(o.ratings) + ' ratings, the same measured lift &mdash; and only the denominator of z moved.';
+});
+
+// --- the A/A table
+mod('aa', ['delta'], function(o){
+  return trial(Object.assign({}, o, { delta: 0 }), WM(o), SEED, METHODS);
+}, function(r, o){
+  const W = WM(o), base = r.by.naive.se;
+  let h = '';
+  for (let m = 0; m < METHODS.length; m++){
+    const k = METHODS[m], x = r.by[k];
+    h += '<tr><td>' + METHOD_LABEL[k] + '</td><td>' + p4(x.se) + '</td><td>' + p2(x.se / base) +
+         '&times;</td><td>' + pp(1.959963985 * x.se) + '</td><td>' + p2(x.honesty) + '</td><td>' +
+         pc(x.coverage) + '</td><td>' + verdict(x.reject, W) + ' <span class="text-slate-500">&plusmn;' +
+         p1(100 * 2 * mcse(x.reject, W)) + '</span></td></tr>';
+  }
+  $('aaTbl').innerHTML = h;
+  const tr = traffic(Object.assign({}, o, { delta: 0 }));
+  const dU = deffPredict(tr.mEff, r.iccUser), dR = deffPredict(tr.M / o.raters, r.iccRater);
+  $('aaNote').innerHTML = 'True standard deviation of the estimate across ' + kfmt(W) +
+    ' independent repeats: <strong>' + p4(r.estSd) + '</strong>. The naive standard error is ' +
+    '<strong>' + p2(r.estSd / base) + '&times;</strong> too small, which is why the nominal 5% ' +
+    'test spends <strong>' + pc(r.by.naive.reject) + '</strong>. Ties: ' + pc(r.tieRate) +
+    '. Intraclass correlation by customer <strong>' + p4(r.iccUser) + '</strong>, by rater ' +
+    '<strong>' + p4(r.iccRater) + '</strong> &mdash; and the rater one is the one that looks like ' +
+    'zero. Design effect 1 + (m&#7497;&#7511;&#7511; &minus; 1)&rho; predicts the rater-clustered SE ' +
+    'at ' + p4(base * Math.sqrt(dR)) + ' against a measured ' + p4(r.by.rater.se) + ' (m&#7497;&#7511;&#7511; = ' +
+    p1(tr.M / o.raters) + ', deff ' + p2(dR) + '), and the customer one at ' + p4(base * Math.sqrt(dU)) +
+    ' against ' + p4(r.by.user.se) + ' (m&#7497;&#7511;&#7511; = ' + p1(tr.mEff) + ', deff ' + p2(dU) +
+    ') &mdash; the formula over-predicts once one customer is this big. Monte-Carlo error on each ' +
+    'rate is shown next to it.';
+  $('bigNaive').textContent = pc(r.by.naive.reject);
+  $('noteNaive').innerHTML = 'of ' + kfmt(W) + ' A/A experiments rejected a true null, ' +
+    'at a nominal 5%, treating every rating as an independent row';
+  $('bigTwo').textContent = pc(r.by.two.reject);
+  $('noteTwo').innerHTML = 'the same ' + kfmt(W) + ' files, clustered by customer AND rater ' +
+    '&mdash; what is left is ' + p1(gEff(tr.n)) + ' effective clusters out of ' + kfmt(tr.U) +
+    ' customers';
+});
+
+// --- power
+mod('ab', [], function(o){ return trial(o, WM(o), SEED2, METHODS); }, function(r, o){
+  const W = WM(o);
+  let h = '';
+  for (let m = 0; m < METHODS.length; m++){
+    const k = METHODS[m], x = r.by[k];
+    const honest = Math.abs(x.coverage - 0.95) < 0.03;
+    h += '<tr><td>' + METHOD_LABEL[k] + '</td><td>' + p4(x.se) + '</td><td>' + pc(x.coverage) +
+         '</td><td>' + pc(x.reject) + ' <span class="text-slate-500">&plusmn;' +
+         p1(100 * 2 * mcse(x.reject, W)) + '</span></td><td class="' + (honest ? 'ok' : 'bad') + '">' +
+         (honest ? 'real' : 'not power at all &mdash; it is the same mistake as the A/A table') +
+         '</td></tr>';
+  }
+  $('abTbl').innerHTML = h;
+  $('abNote').innerHTML = 'The population preference is <strong>' + pp(r.truth) + '</strong>, ' +
+    'computed by quadrature and not by simulation; the mean of ' + kfmt(W) + ' estimates is ' +
+    pp(r.estMean) + '. The naive row reports ' + pc(r.by.naive.reject) + ' power, which is not ' +
+    'power: it rejects at that rate whether or not the feature works. The honest number is ' +
+    '<strong>' + pc(r.by.two.reject) + '</strong> &mdash; that is what ' + kfmt(o.ratings) +
+    ' human judgements actually buy you against an effect this size.';
+});
+
+// --- THE HEADLINE: capping
+mod('cap', ['cap'], function(o){ return capStudy(o, CAPS, WM(o), SEED); }, function(r, o){
+  const W = WM(o), base = r[0];
+  let h = '';
+  for (let i = 0; i < r.length; i++){
+    const x = r[i], vx = Math.pow(base.estSd / x.estSd, 2);
+    h += '<tr' + (x.cap === 8 ? ' class="win"' : '') + '><td>' +
+         (x.cap === 0 ? 'no cap &mdash; take the traffic' : x.cap + '&times;' +
+          (x.cap === 1 ? ' (every customer equal)' : '')) + '</td><td>' + pc(x.biggest) +
+         '</td><td>' + p1(x.gEff) + '</td><td>' + p1(x.mEff) + '</td><td>' + p4(x.estSd) +
+         '</td><td><strong>' + p2(vx) + '&times;</strong></td><td>' + pc(x.aa.naive.reject) +
+         '</td><td>' + pc(x.aa.user.reject) + '</td><td>' + verdict(x.aa.two.reject, W) +
+         '</td><td><strong>' + pc(x.power.two.reject) + '</strong></td></tr>';
+  }
+  $('capTbl').innerHTML = h;
+  const c8 = r.filter(function(x){ return x.cap === 8; })[0] || r[2];
+  const c1 = r[r.length - 1];
+  $('capNote').innerHTML = 'Every row buys <strong>' + kfmt(o.ratings) + '</strong> ratings and ' +
+    'pays <strong>$' + kfmt(o.ratings * o.costHuman) + '</strong>. The population preference does ' +
+    'not move &mdash; a customer\'s tilt toward the feature is drawn independently of how much ' +
+    'traffic it sends, so re-weighting customers changes the variance and nothing else; the truth ' +
+    'is ' + pp(base.truth) + ' in every row. At a cap of 8&times; the biggest customer falls from ' +
+    pc(base.biggest) + ' of the sample to ' + pc(c8.biggest) + ', effective clusters rise from ' +
+    p1(base.gEff) + ' to ' + p1(c8.gEff) + ', the estimate\'s true standard deviation falls ' +
+    p4(base.estSd) + ' &rarr; ' + p4(c8.estSd) + ' (worth <strong>' +
+    p2(Math.pow(base.estSd / c8.estSd, 2)) + '&times;</strong> the ratings) and power rises ' +
+    pc(base.power.two.reject) + ' &rarr; <strong>' + pc(c8.power.two.reject) + '</strong>. ' +
+    'Sampling every customer equally is worth <strong>' + p2(Math.pow(base.estSd / c1.estSd, 2)) +
+    '&times;</strong>. &#128308; And clustering by customer gets <em>worse</em> as you cap, ' +
+    pc(base.aa.user.reject) + ' &rarr; ' + pc(c1.aa.user.reject) + ', because once the traffic is ' +
+    'flat the customer axis is no longer the dominant one. Rates carry &plusmn;' +
+    p1(100 * band(W)) + 'pp of Monte-Carlo error at ' + kfmt(W) + ' worlds.';
+  $('bigCap').textContent = p2(Math.pow(base.estSd / c8.estSd, 2)) + '×';
+  $('noteCap').innerHTML = 'the ratings, at an identical budget and bill &mdash; capping any one ' +
+    'customer at 8&times; its fair share of the eval set';
+  // chart: true SD (bars) and power (line) against the cap
+  const c = $('cCap'), g = axes(c, 46, 16, 620, 236);
+  const n = r.length, bw = (620 - 46) / n;
+  const sdMax = Math.max.apply(null, r.map(function(x){ return x.estSd; })) * 1.15;
+  for (let i = 0; i < n; i++){
+    const hgt = (236 - 16) * r[i].estSd / sdMax;
+    g.fillStyle = r[i].cap === 8 ? '#38bdf8' : '#1e40af';
+    g.fillRect(46 + i * bw + bw * 0.18, 236 - hgt, bw * 0.64, hgt);
+    g.fillStyle = '#94a3b8'; g.font = '11px ui-monospace, monospace';
+    g.textAlign = 'center';
+    g.fillText(r[i].cap === 0 ? 'none' : r[i].cap + '×', 46 + i * bw + bw / 2, 252);
+    g.fillStyle = '#e2e8f0';
+    g.fillText(p4(r[i].estSd), 46 + i * bw + bw / 2, 236 - hgt - 5);
+  }
+  g.strokeStyle = '#4ade80'; g.lineWidth = 2; g.beginPath();
+  for (let i = 0; i < n; i++){
+    const y = 236 - (236 - 16) * r[i].power.two.reject;
+    if (i) g.lineTo(46 + i * bw + bw / 2, y); else g.moveTo(46 + i * bw + bw / 2, y);
+  }
+  g.stroke();
+  g.fillStyle = '#4ade80';
+  for (let i = 0; i < n; i++){
+    const y = 236 - (236 - 16) * r[i].power.two.reject;
+    g.beginPath(); g.arc(46 + i * bw + bw / 2, y, 3, 0, 7); g.fill();
+    g.fillText(pc(r[i].power.two.reject), 46 + i * bw + bw / 2, y - 8);
+  }
+  g.textAlign = 'right'; g.fillStyle = '#64748b';
+  for (let q = 0; q <= 4; q++) g.fillText(p2(sdMax * q / 4), 42, 240 - (236 - 16) * q / 4);
+  g.textAlign = 'left';
+  legend(g, [['true SD of the estimate (bars, left)', '#1e40af'],
+             ['power, two-way SE (line, 0–100%)', '#4ade80']], 60, 30);
+  g.fillStyle = '#94a3b8'; g.textAlign = 'center';
+  g.fillText('cap on one customer’s share of the eval set, × fair share', 333, 268);
+  g.textAlign = 'left';
+});
+
+// --- the design effect
+mod('deff', ['skew','delta'], function(o){
+  const W = WS(o), out = [];
+  for (let i = 0; i < SKEWS.length; i++){
+    const oo = Object.assign({}, o, { delta: 0, skew: SKEWS[i] });
+    const r = trial(oo, W, SEED, ['naive', 'user', 'two']), t = traffic(oo);
+    out.push({ skew: SKEWS[i], U: t.U, gEff: gEff(t.n), mEff: t.mEff, icc: r.iccUser,
+               pred: deffPredict(t.mEff, r.iccUser),
+               fromSE: Math.pow(r.by.user.se / r.by.naive.se, 2),
+               real: Math.pow(r.estSd / r.by.naive.se, 2), by: r.by });
+  }
+  return out;
+}, function(r, o){
+  const W = WS(o);
+  let h = '';
+  for (let i = 0; i < r.length; i++){
+    const x = r[i];
+    h += '<tr><td>' + p2(x.skew) + (x.skew === 0 ? ' (flat)' : x.skew === 1 ? ' (Zipf)' : '') +
+         '</td><td>' + kfmt(x.U) + '</td><td>' + p1(x.gEff) + '</td><td>' + p1(x.mEff) + '</td><td>' +
+         p4(x.icc) + '</td><td>' + p2(x.pred) + '</td><td>' + p2(x.fromSE) + '</td><td><strong>' +
+         p2(x.real) + '</strong></td><td>' + pc(x.by.naive.reject) + '</td><td>' +
+         pc(x.by.user.reject) + '</td><td>' + verdict(x.by.two.reject, W) + '</td></tr>';
+  }
+  $('deffTbl').innerHTML = h;
+  const lo = r[0], hi = r[r.length - 1];
+  $('deffNote').innerHTML = 'The mean requests per customer is <strong>' + p1(o.perUser) +
+    '</strong> in every row and the customer count is the same &mdash; only the shape changes. The ' +
+    'variance-weighted cluster size goes ' + p1(lo.mEff) + ' &rarr; <strong>' + p1(hi.mEff) +
+    '</strong> and effective clusters ' + p1(lo.gEff) + ' &rarr; <strong>' + p1(hi.gEff) +
+    '</strong>. The textbook formula tracks the measured design effect to within ' +
+    p1(100 * Math.abs(r[2].pred / r[2].fromSE - 1)) + '% up to a skew of 0.5 and over-predicts by ' +
+    p1(100 * (hi.pred / hi.fromSE - 1)) + '% at full Zipf. &#128308; But the column that matters is ' +
+    'the last one: the TRUE design effect &mdash; the real variance of the estimate over the naive ' +
+    'one &mdash; is ' + p2(lo.real) + ' even at perfectly flat traffic, where the customer formula ' +
+    'says ' + p2(lo.pred) + '. That gap is the rater panel, which the customer design effect cannot ' +
+    'see, and it is why the two-way column is the only one that stays near 5% across the whole row.';
+  const c = $('cDeff'), g = axes(c, 46, 14, 620, 226);
+  const all = r.map(function(x){ return Math.max(x.pred, x.real, x.fromSE); });
+  const yMax = Math.max.apply(null, all) * 1.1;
+  const X = i => 46 + (620 - 46) * i / (r.length - 1);
+  const Y = v => 226 - (226 - 14) * v / yMax;
+  const series = [['1 + (mᵉᶠᶠ − 1)ρ, textbook', '#fbbf24', 'pred'],
+                  ['measured from the two SEs', '#38bdf8', 'fromSE'],
+                  ['TRUE, from the estimate’s own spread', '#f87171', 'real']];
+  for (let s = 0; s < series.length; s++){
+    g.strokeStyle = series[s][1]; g.lineWidth = 2; g.beginPath();
+    for (let i = 0; i < r.length; i++){
+      const y = Y(r[i][series[s][2]]);
+      if (i) g.lineTo(X(i), y); else g.moveTo(X(i), y);
+    }
+    g.stroke();
+    g.fillStyle = series[s][1];
+    for (let i = 0; i < r.length; i++){ g.beginPath(); g.arc(X(i), Y(r[i][series[s][2]]), 3, 0, 7); g.fill(); }
+  }
+  g.fillStyle = '#64748b'; g.textAlign = 'right'; g.font = '11px ui-monospace, monospace';
+  for (let q = 0; q <= 4; q++) g.fillText(p1(yMax * q / 4) + '×', 42, 230 - (226 - 14) * q / 4);
+  g.textAlign = 'center';
+  for (let i = 0; i < r.length; i++) g.fillText(p2(r[i].skew), X(i), 242);
+  g.fillStyle = '#94a3b8';
+  g.fillText('traffic skew, 0 = every customer identical, 1 = Zipf', 333, 260);
+  g.textAlign = 'left';
+  legend(g, series.map(function(s){ return [s[0], s[1]]; }), 60, 30);
+});
+
+// --- the crossed axis
+mod('cross', ['sigRater','delta'], function(o){
+  return crossStudy(Object.assign({}, o, { delta: 0 }), SIGRS, WS(o), SEED);
+}, function(r, o){
+  const W = WS(o);
+  let h = '';
+  for (let i = 0; i < r.length; i++){
+    const x = r[i];
+    h += '<tr><td>' + p2(x.sigRater) + (x.sigRater === 0 ? ' (no rater effect)' : '') +
+         '</td><td>' + p4(x.iccRater) + '</td><td>' + p4(x.estSd) + '</td>';
+    for (let m = 0; m < METHODS.length; m++) h += '<td>' + verdict(x.by[METHODS[m]].reject, W) + '</td>';
+    h += '</tr>';
+  }
+  $('crossTbl').innerHTML = h;
+  const lo = r[0], hi = r[r.length - 1];
+  $('crossNote').innerHTML = 'Read the rater column downwards: it goes <strong>' +
+    pc(lo.by.rater.reject) + ' &rarr; ' + pc(hi.by.rater.reject) + '</strong>, which is the right ' +
+    'direction &mdash; clustering by rater helps exactly when there is a rater effect to absorb. ' +
+    'Now read the customer column: <strong>' + pc(lo.by.user.reject) + ' &rarr; ' +
+    pc(hi.by.user.reject) + '</strong>. It gets worse for a reason that has nothing to do with ' +
+    'customers. Neither one-way estimator is wrong; each is answering about one axis while the ' +
+    'other is loose. Only the two-way column is flat, and the naive column does not move at all ' +
+    '&mdash; it was never measuring anything. Rates carry &plusmn;' + p1(100 * band(W)) + 'pp.';
+  const c = $('cCross'), g = axes(c, 46, 14, 620, 226);
+  const X = i => 46 + (620 - 46) * i / (r.length - 1);
+  const Y = v => 226 - (226 - 14) * Math.min(1, v / 0.75);
+  const series = [['every rating independent', '#f87171', 'naive'],
+                  ['clustered by customer', '#fbbf24', 'user'],
+                  ['clustered by rater', '#38bdf8', 'rater'],
+                  ['clustered by both', '#4ade80', 'two']];
+  g.strokeStyle = '#475569'; g.setLineDash([4, 4]); g.beginPath();
+  g.moveTo(46, Y(0.05)); g.lineTo(620, Y(0.05)); g.stroke(); g.setLineDash([]);
+  g.fillStyle = '#64748b'; g.fillText('nominal 5%', 560, Y(0.05) - 4);
+  for (let s = 0; s < series.length; s++){
+    g.strokeStyle = series[s][1]; g.lineWidth = 2; g.beginPath();
+    for (let i = 0; i < r.length; i++){
+      const y = Y(r[i].by[series[s][2]].reject);
+      if (i) g.lineTo(X(i), y); else g.moveTo(X(i), y);
+    }
+    g.stroke();
+    g.fillStyle = series[s][1];
+    for (let i = 0; i < r.length; i++){ g.beginPath(); g.arc(X(i), Y(r[i].by[series[s][2]].reject), 3, 0, 7); g.fill(); }
+  }
+  g.fillStyle = '#64748b'; g.textAlign = 'right'; g.font = '11px ui-monospace, monospace';
+  for (let q = 0; q <= 3; q++) g.fillText(pc(0.75 * q / 3), 42, 230 - (226 - 14) * q / 3);
+  g.textAlign = 'center';
+  for (let i = 0; i < r.length; i++) g.fillText(p2(r[i].sigRater), X(i), 242);
+  g.fillStyle = '#94a3b8';
+  g.fillText('σ rater — how much a judge’s own taste moves the verdict', 333, 260);
+  g.textAlign = 'left';
+  legend(g, series.map(function(s){ return [s[0], s[1]]; }), 300, 30);
+});
+
+// --- the wild cluster bootstrap
+mod('boot', ['delta'], function(o){
+  const W = WS(o), base = Object.assign({}, o, { delta: 0 });
+  const variants = [
+    ['both switched on &mdash; the default', {}],
+    ['Zipf traffic, no rater panel', { sigRater: 0 }],
+    ['flat traffic, real rater panel', { skew: 0 }],
+    ['neither &mdash; genuinely independent', { skew: 0, sigRater: 0 }]
+  ];
+  const rows = [];
+  for (let i = 0; i < variants.length; i++){
+    const oo = Object.assign({}, base, variants[i][1]);
+    const r = bootStudy(oo, W, SEED, BOOTREPS), t = traffic(oo);
+    rows.push({ name: variants[i][0], gEff: gEff(t.n), r: r });
+  }
+  const w0 = world(base, SEED), rt0 = ratings(base, w0, SEED);
+  return { rows: rows, prod: productWeightVar(rt0, w0, base, 4000, SEED) };
+}, function(res, o){
+  const W = WS(o);
+  let h = '';
+  for (let i = 0; i < res.rows.length; i++){
+    const x = res.rows[i], r = x.r;
+    const moved = r.zUser - r.boot;
+    h += '<tr><td>' + x.name + '</td><td>' + p1(x.gEff) + '</td><td>' + pc(r.zUser) + '</td><td>' +
+         verdict(r.boot, W) + '</td><td>' + p2(r.tRatio) + '</td><td>' + verdict(r.zTwo, W) +
+         '</td><td class="' + (moved > 0.02 ? 'ok' : 'bad') + '">' +
+         (moved > 0.02 ? p1(100 * moved) + 'pp of it' : 'nothing (' + p1(100 * moved) + 'pp)') +
+         '</td></tr>';
+  }
+  $('bootTbl').innerHTML = h;
+  const zipf = res.rows[1], flat = res.rows[2];
+  $('bootNote').innerHTML = 'Cameron, Gelbach and Miller’s wild cluster bootstrap-t, ' +
+    BOOTREPS + ' Rademacher replications per world, clustered by customer. Row 2 is its home ' +
+    'ground &mdash; a Zipf head and nothing else wrong &mdash; and it works: <strong>' +
+    pc(zipf.r.zUser) + ' &rarr; ' + pc(zipf.r.boot) + '</strong>, with the critical value widened ' +
+    'from 1.96 to <strong>' + p2(zipf.r.tRatio) + '</strong>. Row 3 has flat traffic, so there is ' +
+    'no cluster shortage at all, and the whole problem is the crossed rater axis: the bootstrap ' +
+    'takes <strong>' + pc(flat.r.zUser) + ' &rarr; ' + pc(flat.r.boot) + '</strong> and hands back ' +
+    'a critical value of <strong>' + p2(flat.r.tRatio) + '</strong> &mdash; it looked, found ' +
+    'nothing wrong, and was right about the question it asked. A method that counts clusters ' +
+    'cannot tell you that you counted the wrong thing.';
+  const P = res.prod;
+  $('prodTxt').textContent =
+    'draw one sign per customer and one per rater, multiply them, resample:\n' +
+    '  E[w_u w_r w_u′ w_r′] is 1 only when BOTH labels match, so\n' +
+    '  Var(numerator) = sum of squared CELL sums  — the term the two-way formula SUBTRACTS\n\n' +
+    '  cells (customer × rater, non-empty) : ' + kfmt(P.cells) + '\n' +
+    '  sum of squared cell sums              : ' + P.cellVar.toFixed(3) + '\n' +
+    '  measured over 4,000 sign draws        : ' + P.measured.toFixed(3) +
+    '   (ratio ' + (P.measured / P.cellVar).toFixed(4) + ')\n' +
+    '  sum of squared CUSTOMER sums          : ' + P.userVar.toFixed(3) + '\n' +
+    '  sum of squared RATER sums             : ' + P.raterVar.toFixed(3) + '\n\n' +
+    '  the product-weight bootstrap targets a variance ' + (P.userVar / P.cellVar).toFixed(2) +
+    '× smaller than the customer-level\n' +
+    '  one it was meant to reproduce, so it over-rejects rather than repairing anything.';
+});
+
+// --- k raters per request
+mod('k', [], function(o){
+  const W = WS(o);
+  const vc = varComponents(o, 20, SEED, 6);
+  const rows = kStudy(o, KS, W, SEED);
+  const ind = Object.assign({}, o, { skew: 0, sigUser: 0, perUser: 1, sigRater: 0 });
+  const vi = varComponents(ind, 20, SEED, 6);
+  const indRows = kStudy(ind, KS, W, SEED);
+  const maj = kStudy(Object.assign({}, o, { agg: 'majority' }), [3], W, SEED)[0];
+  return { vc: vc, rows: rows, vi: vi, ind: ind, indRows: indRows, maj: maj,
+           mean3: rows[KS.indexOf(3)] };
+}, function(res, o){
+  const W = WS(o);
+  let h = '';
+  for (let i = 0; i < res.rows.length; i++){
+    const x = res.rows[i];
+    h += '<tr' + (x.k === 1 ? ' class="win"' : '') + '><td>' + x.k + '</td><td>' + kfmt(x.items) +
+         '</td><td>' + p3(x.reliability) + '</td><td>' + p4(x.se) + '</td><td>' + p4(x.trueSd) +
+         '</td><td><strong>' + pc(x.power) + '</strong></td><td>' + verdict(x.typeI, W) + '</td></tr>';
+  }
+  h += '<tr><td>3, majority vote</td><td>' + kfmt(res.maj.items) + '</td><td>' +
+       p3(res.maj.reliability) + '</td><td class="bad">' + p4(res.maj.se) + '</td><td>' +
+       p4(res.maj.trueSd) + '</td><td>' + pc(res.maj.power) + '</td><td>' +
+       verdict(res.maj.typeI, W) + '</td></tr>';
+  $('kTbl').innerHTML = h;
+  const one = res.rows[0], six = res.rows[res.rows.length - 1];
+  $('kNote').innerHTML = 'Every row spends the same <strong>' + kfmt(o.ratings) + '</strong> ' +
+    'ratings, so k raters per request buys ' + kfmt(o.ratings) + '/k requests. Item reliability ' +
+    '&mdash; the correlation between the item score and the request’s own latent preference, ' +
+    'itself a quadrature and not another simulation &mdash; climbs <strong>' + p3(one.reliability) +
+    ' &rarr; ' + p3(six.reliability) + '</strong> and power falls <strong>' + pc(one.power) +
+    ' &rarr; ' + pc(six.power) + '</strong>. &#128308; Three raters and a majority vote, which is ' +
+    'the most common recommendation in the field, is the worst cell here: the same three ratings ' +
+    'averaged report an SE of ' + p4(res.mean3.se) + ' and the majority vote ' +
+    '<strong>' + p4(res.maj.se) + '</strong>, because a vote throws away the margin.';
+  const vc = res.vc, vi = res.vi;
+  const kStar = kOptimum(vc.between, vc.within, 1, 1);
+  const need3 = 9 * vc.between / vc.within;
+  let t = 'the closed form: with M = R/k requests the sampling variance of the estimate is\n' +
+    '    (k · between + within) / R          — it RISES with k for any positive between-request variance\n\n' +
+    'validated in the regime where its assumption holds (one request per customer, no rater effect):\n' +
+    '  between = ' + p4(vi.between) + '   within = ' + p4(vi.within) + '\n';
+  for (let i = 0; i < res.indRows.length; i++){
+    const x = res.indRows[i];
+    const pr = Math.sqrt(kVarPredict(vi.between, vi.within, res.ind.ratings, x.k));
+    t += '    k=' + x.k + '  predicted SD ' + p4(pr) + '   measured ' + p4(x.trueSd) +
+         '   ratio ' + p3(x.trueSd / pr) + '\n';
+  }
+  t += '\nand on the real traffic, where it is an independence formula like every other:\n' +
+    '  between = ' + p4(vc.between) + '   within = ' + p4(vc.within) + '\n' +
+    '    k=1  predicted SD ' + p4(Math.sqrt(kVarPredict(vc.between, vc.within, o.ratings, 1))) +
+    '   measured ' + p4(one.trueSd) + '   ratio ' +
+    p2(one.trueSd / Math.sqrt(kVarPredict(vc.between, vc.within, o.ratings, 1))) + '  ← out by a factor\n\n' +
+    'k* = sqrt(within · costGen / (between · costRate)):\n' +
+    '    generating a pair costs the same as rating it  →  k* = ' + p2(kStar) +
+    ' (so k = ' + Math.max(1, Math.round(kStar)) + ')\n' +
+    '    k* = 3 needs generation to cost               →  ' + p2(need3) + '× a rating\n' +
+    '    generation free (the usual case)              →  k* = 1, always';
+  $('kTxt').textContent = t;
+});
+
+// --- dilution
+mod('dil', ['trigger'], function(o){ return dilution(o, TRIGS, WS(o), SEED); }, function(r, o){
+  const base = r[0];
+  let h = '';
+  for (let i = 0; i < r.length; i++){
+    const x = r[i];
+    h += '<tr><td>' + pc(x.trigger) + '</td><td>' + pp(x.effAll) + '</td><td>' + pp(x.effTrig) +
+         '</td><td>' + p2(1 / x.trigger) + '&times;</td><td>' + p2(1 / (x.trigger * x.trigger)) +
+         '&times;</td><td>' + kfmt(x.by.naive.need) + '</td><td>' +
+         p2(x.by.naive.need / base.by.naive.need) + '&times;</td><td>' + kfmt(x.by.two.need) +
+         '</td><td><strong>' + p2(x.by.two.need / base.by.two.need) + '&times;</strong></td></tr>';
+  }
+  $('dilTbl').innerHTML = h;
+  const last = r[r.length - 1];
+  $('dilNote').innerHTML = 'The textbook rule says that a feature which only fires on p of ' +
+    'requests dilutes the effect to p&delta; and costs you <strong>1/p&sup2;</strong> the sample. ' +
+    'That derivation assumes the untouched requests still carry variance. In a preference ' +
+    'comparison they do not: if the feature did not fire, the two answers are the same text, and ' +
+    'the rating is a forced tie with no noise in it. So at p = ' + pc(last.trigger) + ' the naive ' +
+    'column costs <strong>' + p2(last.by.naive.need / base.by.naive.need) + '&times;</strong> ' +
+    '&mdash; that is 1/p (' + p2(1 / last.trigger) + '), not 1/p&sup2; (' +
+    p2(1 / (last.trigger * last.trigger)) + ') &mdash; and the honest column costs <strong>' +
+    p2(last.by.two.need / base.by.two.need) + '&times;</strong>, because by then the variance is ' +
+    'dominated by the customer effect, which dilution mutes as well. The effect where the feature ' +
+    'fired is ' + pp(base.effTrig) + ' at every trigger rate, by construction.';
+});
+
+// --- the collider
+mod('col', ['trigger','collider','delta'], function(o){
+  return colliderScan(Object.assign({}, o, { trigger: 0.3 }), KAPS, WS(o), SEED);
+}, function(r, o){
+  const W = WS(o);
+  let h = '';
+  for (let i = 0; i < r.length; i++){
+    const x = r[i];
+    h += '<tr><td>' + p2(x.collider) + (x.collider === 0 ? ' (flag decided before the test)' : '') +
+         '</td><td>30.0%</td><td>' + pp(x.predicted) + '</td><td><strong>' + pp(x.measuredTrig) +
+         '</strong></td><td>' + pp(x.measuredAll) + '</td><td>' + verdict(x.falsePositive, W) +
+         '</td></tr>';
+  }
+  $('colTbl').innerHTML = h;
+  const one = r[3];
+  $('colNote').innerHTML = 'The true quality gap is <strong>zero</strong> in every row: the ' +
+    'feature is worth nothing. &kappa; is how much the LOGGED trigger flag is read off the ' +
+    'treatment arm’s own behaviour rather than being a property of the request. The share of ' +
+    'requests flagged is held at exactly 30% the whole way, so no dashboard would look wrong. At ' +
+    '&kappa; = ' + p2(one.collider) + ' the recommended analysis &mdash; restrict to the requests ' +
+    'where the feature fired &mdash; reads <strong>' + pp(one.measuredTrig) + '</strong> and ' +
+    'rejects <strong>' + pc(one.falsePositive) + '</strong> of the time. The prediction column is ' +
+    'a two-dimensional Gaussian quadrature with a tail-probability weight and runs no simulation ' +
+    'at all; it agrees to ' + pp(Math.abs(one.measuredTrig - one.predicted)) + '. Note the ' +
+    'all-requests column: the bias is there too, diluted by p, so keeping everyone does not save ' +
+    'you either &mdash; it only makes the lie smaller.';
+});
+
+// --- order and position
+mod('order', [], function(o){
+  const W = WS(o), pos = o.position > 0 ? [0, o.position] : [0, 0.35], out = [];
+  for (let i = 0; i < pos.length; i++){
+    const rows = orderStudy(Object.assign({}, o, { position: pos[i] }), W, SEED);
+    for (let q = 0; q < rows.length; q++){ rows[q].pos = pos[i]; out.push(rows[q]); }
+  }
+  return out;
+}, function(r, o){
+  const W = WS(o), LBL = { fixed: 'control always first', swap: 'coin flip per rating',
+                           both: 'each request rated in both orders' };
+  let h = '';
+  for (let i = 0; i < r.length; i++){
+    const x = r[i], bad = Math.abs(x.biasAA) > 0.01;
+    h += '<tr><td>' + p2(x.pos) + '</td><td>' + LBL[x.name] + '</td><td>' + kfmt(x.items) +
+         '</td><td>' + pp(x.truth) + '</td><td>' + pp(x.est) + '</td><td class="' +
+         (bad ? 'bad' : 'ok') + '">' + pp(x.biasAA) + '</td><td>' + p4(x.se) + '</td><td>' +
+         pc(x.power) + '</td><td>' + verdict(x.typeI, W) + '</td></tr>';
+  }
+  $('ordTbl').innerHTML = h;
+  const n = r.length, f = r[n - 3], s = r[n - 2], b = r[n - 1];
+  $('ordNote').innerHTML = 'A rater who prefers whichever answer is shown second is a bias, not a ' +
+    'variance, and no amount of data removes it. At a position bias of ' + p2(f.pos) + ' logits, ' +
+    'holding the control first makes an A/A test read <strong>' + pp(f.biasAA) + '</strong> on a ' +
+    'true effect of zero and reject <strong>' + pc(f.typeI) + '</strong> of the time. Flipping a ' +
+    'coin per rating removes it exactly &mdash; <strong>' + pp(s.biasAA) + '</strong>, inside the ' +
+    'Monte-Carlo error &mdash; and costs nothing: at zero position bias the two designs are ' +
+    'bit-identical, which the self-test checks. Rating every request in both orders removes the ' +
+    'same bias and costs power (' + pc(b.power) + ' against ' + pc(s.power) + '), because it ' +
+    'halves the requests.';
+});
+
+// --- always-valid inference
+mod('peek', [], function(o){
+  const W = Math.max(50, Math.round(o.worlds / 5));
+  const iid = Object.assign({}, o, { skew: 0, sigUser: 0, sigRater: 0, perUser: 1 });
+  const specs = [
+    ['independent data &middot; fixed-n z &middot; naive SE', iid, 'fixed', 'naive'],
+    ['this traffic &middot; fixed-n z &middot; naive SE', o, 'fixed', 'naive'],
+    ['this traffic &middot; fixed-n z &middot; two-way SE', o, 'fixed', 'two'],
+    ['this traffic &middot; mSPRT &middot; naive SE', o, 'msprt', 'naive'],
+    ['this traffic &middot; mSPRT &middot; two-way SE', o, 'msprt', 'two']
+  ];
+  const out = [];
+  for (let i = 0; i < specs.length; i++){
+    const cfgO = specs[i][1], cell = { name: specs[i][0] };
+    for (let q = 0; q < 2; q++){
+      const L = q ? LOOKS : 1;
+      const cfg = { looks: L, test: specs[i][2], se: specs[i][3] };
+      const a = peekTrial(Object.assign({}, cfgO, { delta: 0 }), W, SEED, cfg);
+      const b = peekTrial(cfgO, W, SEED2, cfg);
+      cell[q ? 'many' : 'one'] = { typeI: a.rate, power: b.rate, stop: b.medianStop };
+    }
+    out.push(cell);
+  }
+  return { rows: out, W: W };
+}, function(res, o){
+  const W = res.W;
+  let h = '';
+  for (let i = 0; i < res.rows.length; i++){
+    const x = res.rows[i], cost = x.many.typeI - x.one.typeI;
+    h += '<tr><td>' + x.name + '</td><td>' + verdict(x.one.typeI, W) + '</td><td>' +
+         pc(x.one.power) + '</td><td>' + verdict(x.many.typeI, W) + '</td><td>' + pc(x.many.power) +
+         '</td><td>' + kfmt(x.many.stop) + '</td><td>' + p1(100 * cost) + 'pp</td></tr>';
+  }
+  $('peekTbl').innerHTML = h;
+  const iid = res.rows[0], bad = res.rows[3], good = res.rows[4];
+  $('peekNote').innerHTML = 'Peeking is a real problem: on genuinely independent data a fixed-n ' +
+    'z-test costs <strong>' + pc(iid.one.typeI) + '</strong> at one look and <strong>' +
+    pc(iid.many.typeI) + '</strong> at ' + LOOKS + '. The mSPRT of Johari, Pekelis and Walsh is ' +
+    'the published cure &mdash; a mixture likelihood ratio you are allowed to read at every ' +
+    'observation &mdash; and its guarantee is derived under independence. Point it at this traffic ' +
+    'with a naive standard error and it spends <strong>' + pc(bad.one.typeI) + '</strong> at ONE ' +
+    'look and ' + pc(bad.many.typeI) + ' at ' + LOOKS + ': almost none of its error is peeking, ' +
+    'so almost none of it is the thing the method was built to fix. Feed it the two-way SE and it ' +
+    'is honest again, <strong>' + pc(good.one.typeI) + '</strong> at one look and <strong>' +
+    pc(good.many.typeI) + '</strong> at ' + LOOKS + ' &mdash; at ' + pc(good.many.power) +
+    ' power, because an honest sequential test on a dependent sample of ' + kfmt(o.ratings) +
+    ' mostly does not stop. Rates carry &plusmn;' + p1(100 * band(W)) + 'pp at ' + kfmt(W) +
+    ' worlds.';
+});
+
+// --- the LLM judge at equal dollars
+mod('judge', [], function(o){
+  return judgeStudy(Object.assign({}, o, { items: JUDGE_ITEMS }), BUDGETS, WJ(o), SEED, PHIS, LAMS);
+}, function(res, o){
+  let h = '';
+  for (let i = 0; i < res.rows.length; i++){
+    const x = res.rows[i];
+    const best = Math.min(x.humanRmse, x.judgeRmse, x.ppi.rmse);
+    const who = best === x.humanRmse ? 'humans only' : best === x.judgeRmse ? 'the judge' : 'PPI';
+    h += '<tr><td>$' + kfmt(x.budget) + '</td><td>' + kfmt(x.nh) + '</td><td>' + kfmt(x.nj) +
+         '</td><td class="' + (best === x.humanRmse ? 'win' : '') + '">' + pp(x.humanRmse) +
+         '</td><td class="' + (best === x.judgeRmse ? 'win' : '') + '">' + pp(x.judgeRmse) +
+         '</td><td class="' + (best === x.ppi.rmse ? 'win' : '') + '">' + pp(x.ppi.rmse) +
+         ' <span class="text-slate-500">&phi;' + x.ppi.phi + ' &lambda;' + x.ppi.lam + '</span></td><td>' +
+         pp(x.ppiVanilla.rmse) + '</td><td>' + who + '</td></tr>';
+  }
+  $('judgeTbl').innerHTML = h;
+  const first = res.rows[0], last = res.rows[res.rows.length - 1];
+  const prev = res.rows[res.rows.length - 2];
+  $('judgeNote').innerHTML = 'The judge costs $' + o.costJudge.toFixed(2) + ' a call against $' +
+    o.costHuman.toFixed(2) + ' for a person, so every budget buys ' +
+    Math.round(o.costHuman / o.costJudge) + '&times; as many. Its variance falls like 1/n; its ' +
+    'systematic preference for the feature’s style does not fall at all. The judge is ' +
+    'estimating <strong>' + pp(res.judgeTruth) + '</strong> where the truth is <strong>' +
+    pp(res.truth) + '</strong> &mdash; a bias of ' + pp(res.judgeTruth - res.truth) +
+    ', <strong>' + p2((res.judgeTruth - res.truth) / res.truth) + '&times;</strong> the effect it ' +
+    'is measuring &mdash; so its error floors at ' + pp(last.judgeRmse) + ' and stays there. It ' +
+    'still wins at $' + kfmt(first.budget) + ', because ' + kfmt(first.nh) + ' human judgements ' +
+    'are worse than that. &#128308; Prediction-powered inference, tuned over ' +
+    (PHIS.length * LAMS.length) + ' (&phi;,&nbsp;&lambda;) pairs, never beats spending the whole ' +
+    'budget on humans at any budget on this table &mdash; the variance it could cancel lives at ' +
+    'the customer level, which the judge already shares. &#128308; And the human column tells the ' +
+    'same story: $' + kfmt(prev.budget) + ' &rarr; $' + kfmt(last.budget) + ' is ' +
+    kfmt(last.nh - prev.nh) + ' more human judgements and moves the error ' + pp(prev.humanRmse) +
+    ' &rarr; ' + pp(last.humanRmse) + '. You did not buy precision, you bought more requests from ' +
+    'the same customers.';
+  const c = $('cJudge'), g = axes(c, 52, 14, 620, 224);
+  const rs = res.rows;
+  const yMax = Math.max.apply(null, rs.map(function(x){ return Math.max(x.humanRmse, x.judgeRmse, x.ppi.rmse); })) * 1.1;
+  const lo = Math.log(rs[0].budget), hi = Math.log(rs[rs.length - 1].budget);
+  const X = b => 52 + (620 - 52) * (Math.log(b) - lo) / (hi - lo);
+  const Y = v => 224 - (224 - 14) * v / yMax;
+  const series = [['humans only', '#4ade80', function(x){ return x.humanRmse; }],
+                  ['the LLM judge', '#f87171', function(x){ return x.judgeRmse; }],
+                  ['prediction-powered, tuned', '#fbbf24', function(x){ return x.ppi.rmse; }]];
+  for (let s = 0; s < series.length; s++){
+    g.strokeStyle = series[s][1]; g.lineWidth = 2; g.beginPath();
+    for (let i = 0; i < rs.length; i++){
+      const y = Y(series[s][2](rs[i]));
+      if (i) g.lineTo(X(rs[i].budget), y); else g.moveTo(X(rs[i].budget), y);
+    }
+    g.stroke();
+    g.fillStyle = series[s][1];
+    for (let i = 0; i < rs.length; i++){ g.beginPath(); g.arc(X(rs[i].budget), Y(series[s][2](rs[i])), 3, 0, 7); g.fill(); }
+  }
+  g.strokeStyle = '#475569'; g.setLineDash([4, 4]); g.beginPath();
+  g.moveTo(52, Y(Math.abs(res.judgeTruth - res.truth))); g.lineTo(620, Y(Math.abs(res.judgeTruth - res.truth)));
+  g.stroke(); g.setLineDash([]);
+  g.fillStyle = '#64748b'; g.font = '11px ui-monospace, monospace';
+  g.fillText('the judge’s bias — the floor it can never go below', 300, Y(Math.abs(res.judgeTruth - res.truth)) - 5);
+  g.textAlign = 'right';
+  for (let q = 0; q <= 4; q++) g.fillText(pp(yMax * q / 4), 48, 228 - (224 - 14) * q / 4);
+  g.textAlign = 'center';
+  for (let i = 0; i < rs.length; i++) g.fillText('$' + kfmt(rs[i].budget), X(rs[i].budget), 240);
+  g.fillStyle = '#94a3b8';
+  g.fillText('budget for the whole experiment', 336, 258);
+  g.textAlign = 'left';
+  legend(g, series.map(function(s){ return [s[0], s[1]]; }), 320, 30);
+});
+
+// --- the frontier
+mod('front', [], function(o){
+  return frontier(Object.assign({}, o, { position: o.position > 0 ? o.position : 0.35 }),
+                  WF(o), SEED);
+}, function(r, o){
+  let h = '';
+  for (let i = 0; i < r.length; i++){
+    const x = r[i];
+    h += '<tr class="' + (x.valid ? 'win' : 'lose') + '"><td>' + x.label + '</td><td>' +
+         kfmt(x.items) + '</td><td>' + pc(x.typeI) + '</td><td class="' + (x.valid ? 'ok' : 'bad') +
+         '">' + (x.valid ? 'yes' : 'no') + '</td><td>' + (x.valid ? '<strong>' + pc(x.power) +
+         '</strong>' : '<span class="text-slate-500">' + pc(x.power) + ' &mdash; meaningless</span>') +
+         '</td></tr>';
+  }
+  $('frontTbl').innerHTML = h;
+  const ok = r.filter(function(x){ return x.valid; });
+  const bestPower = ok.length ? Math.max.apply(null, ok.map(function(x){ return x.power; })) : 0;
+  $('frontNote').innerHTML = 'Every row spends <strong>$' + kfmt(r[0].dollars) + '</strong> and ' +
+    'buys <strong>' + kfmt(r[0].ratings) + '</strong> human judgements; the position bias is set ' +
+    'to ' + p2(o.position > 0 ? o.position : 0.35) + ' logits so the order policies have something ' +
+    'to do. "Valid" means the measured false-positive rate is not significantly above 5% given ' +
+    kfmt(WF(o)) + ' worlds, so the bar is ' + pc(r[0].band) + '. <strong>' + ok.length + ' of ' +
+    r.length + '</strong> designs clear it, and the best power among them is <strong>' +
+    pc(bestPower) + '</strong>. A design that reports 90% power and a 60% false-positive rate is ' +
+    'not a powerful test; it is a coin that mostly says yes. This table is the honest answer to ' +
+    '"is ' + kfmt(r[0].ratings) + ' ratings enough": at this effect size, not really &mdash; and ' +
+    'the cap table above is the cheapest way to change that.';
+});
+
+// --- self-test
+mod('test', [], function(o){ return selfTest(o); }, function(txt){ $('tests').textContent = txt; });
+
+// ---------------------------------------------------------------- scheduler
+// Every table here is hundreds to thousands of simulated experiments, so a card computes when it
+// comes near the viewport and one module runs per animation frame: the page stays responsive and
+// fills in as you read down it.
+const STATE = {};
+for (let i = 0; i < MODULES.length; i++) STATE[MODULES[i].id] = { want: false, key: null, busy: false };
+let queue = [], running = false;
+
+// One module per turn of the event loop. Deliberately NOT gated on requestAnimationFrame: a page
+// opened in a background tab never gets a frame, and a scheduler that waits for one latches and
+// never renders anything at all.
+function pump(){
+  if (running) return;
+  const next = queue.shift();
+  if (!next) return;
+  running = true;
+  setTimeout(function(){
+    try {
+      const o = opts(), m = next;
+      const key = m.id + '#' + keyOf(o, m.ign);
+      if (STATE[m.id].key !== key){
+        const res = cached(m.id, o, m.ign, m.run);
+        m.draw(res, o);
+        STATE[m.id].key = key;
+      }
+    } catch (e){
+      const el = document.querySelector('[data-mod="' + next.id + '"]');
+      if (el) el.insertAdjacentHTML('beforeend',
+        '<p class="text-xs bad mt-2">' + esc(e && e.message ? e.message : e) + '</p>');
+    }
+    running = false;
+    pump();
+  }, 0);
+}
+function want(id){
+  const m = MODULES.filter(function(x){ return x.id === id; })[0];
+  if (!m) return;
+  const o = opts(), key = m.id + '#' + keyOf(o, m.ign);
+  if (STATE[m.id].key === key) return;
+  if (queue.indexOf(m) < 0) queue.push(m);
+  pump();
+}
+function arm(id){ STATE[id].want = true; want(id); }
+const io = new IntersectionObserver(function(entries){
+  for (let i = 0; i < entries.length; i++)
+    if (entries[i].isIntersecting) arm(entries[i].target.getAttribute('data-mod'));
+}, { rootMargin: '320px 0px' });
+for (const el of document.querySelectorAll('[data-mod]')) io.observe(el);
+// A fallback that does not depend on the observer firing: a tab that is never painted gets no
+// IntersectionObserver callbacks at all, and a card stuck on "computing" forever is worse than a
+// fifteen-element bounding-box scan on scroll.
+function sweep(){
+  const h = window.innerHeight || 800;
+  for (const el of document.querySelectorAll('[data-mod]')){
+    const r = el.getBoundingClientRect();
+    if (r.top < h + 320 && r.bottom > -320) arm(el.getAttribute('data-mod'));
+  }
+}
+window.addEventListener('scroll', sweep, { passive: true });
+setTimeout(sweep, 1200);
+
+function renderLabels(){
+  const o = opts();
+  $('vR').textContent = kfmt(o.ratings);
+  $('vPU').textContent = o.perUser;
+  $('vSk').textContent = p2(o.skew);
+  $('vCap').textContent = o.cap === 0 ? 'off' : o.cap + '×';
+  $('vRa').textContent = o.raters;
+  $('vU').textContent = p2(o.sigUser);
+  $('vI').textContent = p2(o.sigItem);
+  $('vB').textContent = p2(o.sigRater);
+  $('vNo').textContent = p2(o.noise);
+  $('vTi').textContent = p2(o.tie);
+  $('vD').textContent = p2(o.delta);
+  $('vTr').textContent = pc(o.trigger);
+  $('vCo').textContent = p2(o.collider);
+  $('vPo').textContent = p2(o.position);
+  $('vW').textContent = kfmt(o.worlds);
+  const t = traffic(o);
+  $('cfgNote').innerHTML = kfmt(t.M) + ' requests from <strong>' + kfmt(t.U) + '</strong> ' +
+    'customers, judged by a panel of ' + o.raters + '. Mean requests per customer <strong>' +
+    p1(t.mBar) + '</strong>; variance-weighted cluster size <strong>' + p1(t.mEff) +
+    '</strong>; effective clusters <strong>' + p1(gEff(t.n)) + '</strong>; the biggest customer ' +
+    'is <strong>' + pc(t.biggest) + '</strong> of the sample. The population preference is ' +
+    '<strong>' + pp(estimand(o).all - 0.5) + '</strong>, by quadrature.';
+}
+let timer = null;
+function schedule(){
+  renderLabels();
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(function(){
+    queue = [];
+    for (let i = 0; i < MODULES.length; i++) if (STATE[MODULES[i].id].want) want(MODULES[i].id);
+  }, 200);
+}
+for (const id of ['sR','sPU','sSk','sCap','sRa','sU','sI','sB','sNo','sTi','sD','sTr','sCo','sPo','sW']){
+  $(id).addEventListener('input', schedule);
+}
+for (const b of document.querySelectorAll('#tabs button')){
+  b.onclick = function(){
+    for (const x of document.querySelectorAll('#tabs button')){
+      x.className = 'bg-slate-100 px-5 py-2 rounded-lg font-semibold text-sm';
+    }
+    b.className = 'tab-active px-5 py-2 rounded-lg font-semibold text-sm';
+    for (const s of document.querySelectorAll('.tab-panel')) s.classList.add('hidden');
+    $(b.dataset.tab).classList.remove('hidden');
+  };
+}
+renderLabels();
+STATE['seeds'].want = true; STATE['aa'].want = true;
+want('seeds'); want('aa');
+
+
+// ---------------------------------------------------------------- self-test
+// Identities, closed forms in the regime where they hold, declared corners, determinism, and the
+// specific claims quoted in the headline. Anything that only "looks right" is not checked here.
+function selfTest(cfg){
+  let n = 0; const bad = [];
+  const ok = (c, l) => { n++; if (!c) bad.push(l); };
+  const B = Object.assign({}, cfg);
+  const A = Object.assign({}, B, { delta: 0 });
+  const lines = [];
+
+  // 1. the overlay is complete: a missing field is a silent NaN, not an exception
+  {
+    let miss = 0;
+    for (const f in DEFAULTS) if (B[f] === undefined || (typeof DEFAULTS[f] === 'number' && !isFinite(B[f]) && typeof B[f] === 'number')) miss++;
+    ok(miss === 0, miss + ' configuration fields are missing from the slider overlay');
+    ok(isFinite(estimand(B).all), 'the population preference is not a finite number');
+    lines.push('  config overlay    : ' + Object.keys(DEFAULTS).length + ' fields, none missing or NaN');
+  }
+
+  // 2. THE identity: a cluster-robust SE with one observation per cluster IS the naive SE
+  {
+    const w = world(A, 2026), rt = ratings(A, w, 2026);
+    let xb = 0;
+    for (let i = 0; i < rt.R; i++) xb += rt.x[i];
+    xb /= rt.R;
+    let ss = 0;
+    for (let i = 0; i < rt.R; i++) ss += (rt.x[i] - xb) * (rt.x[i] - xb);
+    const plain = Math.sqrt(ss / (rt.R - 1) / rt.R);
+    const naive = seOf(rt, w, A, 'naive');
+    ok(Math.abs(naive / plain - 1) < 1e-12,
+       'the naive SE is not the textbook SE of a mean: ' + naive + ' vs ' + plain);
+    ok(Math.abs(seOf(rt, w, A, 'item') - naive) < 1e-15,
+       'clustering by request is not the naive SE even though each request is rated once');
+    // adding a constant to every rating cannot change any SE
+    const shifted = { x: rt.x.map(function(v){ return v + 0.25; }), uid: rt.uid, rid: rt.rid,
+                      iid: rt.iid, R: rt.R, M: rt.M, k: rt.k };
+    for (const m of METHODS)
+      ok(Math.abs(seOf(shifted, w, A, m) - seOf(rt, w, A, m)) < 1e-14,
+         'shifting every rating by a constant moved the ' + m + ' SE');
+    lines.push('  SE identities     : naive = textbook to ' +
+               Math.abs(naive / plain - 1).toExponential(1) + ', by-request identical, all 5 ' +
+               'shift-invariant');
+  }
+
+  // 3. the traffic construction: only the SHAPE moves
+  {
+    for (const sk of [0, 0.4, 1]) for (const cp of [0, 8, 1]){
+      const t = traffic(Object.assign({}, B, { skew: sk, cap: cp }));
+      let tot = 0, mn = 1e9;
+      for (let u = 0; u < t.U; u++){ tot += t.n[u]; mn = Math.min(mn, t.n[u]); }
+      ok(tot === t.M, 'skew ' + sk + ' cap ' + cp + ': the requests do not add up (' + tot +
+         ' vs ' + t.M + ')');
+      ok(Math.abs(t.mBar - t.M / t.U) < 1e-9, 'the mean cluster size moved at skew ' + sk);
+      ok(mn >= 1, 'a customer was given fewer than one request');
+      ok(t.mEff >= t.mBar - 1e-9, 'the variance-weighted cluster size is below the mean');
+    }
+    const flat = traffic(Object.assign({}, B, { skew: 0 })), zipf = traffic(Object.assign({}, B, { skew: 1 }));
+    ok(zipf.mEff > flat.mEff, 'the Zipf traffic is not more concentrated than the flat traffic');
+    ok(Math.abs(gEff(flat.n) - flat.U) < 1e-6, 'flat traffic does not give U effective clusters');
+    ok(gEff(zipf.n) < zipf.U / 3, 'the Zipf head did not cost effective clusters');
+    // capping is monotone in both directions
+    let prevG = 0, prevBig = 1;
+    for (const cp of [0, 16, 8, 4, 2, 1]){
+      const t = traffic(Object.assign({}, B, { cap: cp }));
+      const g = gEff(t.n);
+      ok(cp === 0 || (g > prevG - 1e-9 && t.biggest < prevBig + 1e-9),
+         'the cap at ' + cp + 'x is not monotone: gEff ' + p1(g) + ' after ' + p1(prevG));
+      prevG = g; prevBig = t.biggest;
+    }
+    lines.push('  traffic           : totals exact, mean invariant at 9 (skew, cap) settings, ' +
+               'effective clusters ' + p1(gEff(zipf.n)) + ' of ' + zipf.U + ' at Zipf, ' +
+               'capping monotone');
+  }
+
+  // 4. the cap does not move the estimand, which is what makes the headline table a fair comparison
+  {
+    const base = estimand(B).all;
+    for (const cp of [0, 16, 8, 4, 2, 1])
+      ok(Math.abs(estimand(Object.assign({}, B, { cap: cp })).all - base) < 1e-15,
+         'capping moved the population preference at ' + cp + 'x');
+    lines.push('  cap vs estimand   : the truth is ' + pp(base - 0.5) + ' at all 6 caps, to 1e-15');
+  }
+
+  // 5. determinism, and one dial not moving another
+  {
+    const a = world(A, 7), b = world(A, 7), c = world(A, 8);
+    let same = 1, diff = 0;
+    for (let i = 0; i < a.M; i++){ if (a.e[i] !== b.e[i]) same = 0; if (a.e[i] !== c.e[i]) diff = 1; }
+    ok(same === 1, 'the same seed produced two different worlds');
+    ok(diff === 1, 'two different seeds produced the same world');
+    const r1 = ratings(A, a, 7), r2 = ratings(A, a, 7);
+    let rsame = 1;
+    for (let i = 0; i < r1.R; i++) if (r1.x[i] !== r2.x[i]) rsame = 0;
+    ok(rsame === 1, 'the same seed produced two different rating files');
+    // asking for the judge's view must not move a single human rating
+    const w2 = world(A, 7);
+    judgeScores(A, w2, 7);
+    const r3 = ratings(A, w2, 7);
+    let untouched = 1;
+    for (let i = 0; i < r1.R; i++) if (r1.x[i] !== r3.x[i]) untouched = 0;
+    ok(untouched === 1, 'drawing the judge’s view changed the human ratings');
+    lines.push('  determinism       : same seed identical, different seeds differ, judge stream ' +
+               'independent of the human one');
+  }
+
+  // 6. declared corners
+  {
+    const zeroPos = Object.assign({}, B, { position: 0 });
+    const f = orderStudy(zeroPos, 12, 2026)[0], s = orderStudy(zeroPos, 12, 2026)[1];
+    ok(Math.abs(f.est - s.est) < 1e-15 && Math.abs(f.se - s.se) < 1e-15,
+       'at zero position bias the fixed and coin-flip designs are not identical');
+    const noRater = Object.assign({}, A, { sigRater: 0 });
+    const w = world(noRater, 2026), rt = ratings(noRater, w, noRater.delta === 0 ? 2026 : 2026);
+    const u = seOf(rt, w, noRater, 'user'), t2 = seOf(rt, w, noRater, 'two');
+    ok(t2 >= u - 1e-12 && t2 / u < 1.10,
+       'with no rater effect the two-way SE is not close to the customer one: ' + p4(t2) + ' vs ' + p4(u));
+    const noTrig = Object.assign({}, A, { trigger: 0 });
+    const w3 = world(noTrig, 2026), rt3 = ratings(noTrig, w3, 2026);
+    let allTie = 1;
+    for (let i = 0; i < rt3.R; i++) if (rt3.x[i] !== 0.5) allTie = 0;
+    ok(allTie === 1, 'a feature that never fires produced a non-tie');
+    ok(Math.abs(effectOf(rt3.x)) < 1e-15, 'a feature that never fires produced a non-zero effect');
+    ok(Math.abs(estimand(noTrig).all - 0.5) < 1e-15, 'the estimand of a feature that never fires is not zero');
+    lines.push('  declared corners  : position 0 makes fixed = swap bit-for-bit, sigma_rater 0 ' +
+               'collapses two-way onto by-customer, trigger 0 is all ties');
+  }
+
+  // 7. the numerics the quadrature rests on
+  {
+    let worst = 0;
+    for (const x of [-3.5, -1, -0.2, 0, 0.7, 2.2, 4]) worst = Math.max(worst, Math.abs(probit(ncdf(x)) - x));
+    ok(worst < 1e-9, 'probit(ncdf(x)) does not return x: off by ' + worst.toExponential(2));
+    let sym = 0;
+    for (const x of [0.3, 1.1, 2.5, 5]) sym = Math.max(sym, Math.abs(ncdf(x) + ncdf(-x) - 1));
+    ok(sym < 1e-14, 'the normal CDF is not symmetric: off by ' + sym.toExponential(2));
+    ok(Math.abs(simpson(npdf, -12, 12, 2000) - 1) < 1e-10, 'the normal density does not integrate to 1');
+    // condWin is monotone and centred
+    ok(Math.abs(condWin(B, 0) - 0.5) < 1e-14, 'a zero quality gap does not give a 50% preference');
+    let mono = 1;
+    for (let m = -2; m < 2; m += 0.25) if (condWin(B, m + 0.25) <= condWin(B, m)) mono = 0;
+    ok(mono === 1, 'the preference is not increasing in the quality gap');
+    lines.push('  numerics          : probit(ncdf(x)) to ' + worst.toExponential(1) +
+               ', CDF symmetric to ' + sym.toExponential(1) + ', density integrates to 1');
+  }
+
+  // 8. the estimand against the simulator it is supposed to predict
+  {
+    const r = trial(B, 60, 5150, ['naive']);
+    const err = Math.abs(r.estMean - r.truth), tol = 4 * r.estSd / Math.sqrt(60);
+    ok(err < tol + 1e-6, 'the quadrature disagrees with the simulator: ' + pp(r.estMean) +
+       ' vs ' + pp(r.truth));
+    lines.push('  estimand          : quadrature ' + pp(r.truth) + ' vs 60 simulated worlds ' +
+               pp(r.estMean) + ' (' + pp(err) + ' apart, tolerance ' + pp(tol) + ')');
+  }
+
+  // 9. the design effect predicts the RATER standard error, where the cluster sizes are equal
+  {
+    const r = trial(A, 80, 2026, ['naive', 'rater']);
+    const t = traffic(A);
+    const pred = r.by.naive.se * Math.sqrt(deffPredict(t.M / B.raters, r.iccRater));
+    ok(Math.abs(pred / r.by.rater.se - 1) < 0.12,
+       'the design effect misses the rater SE: predicted ' + p4(pred) + ', measured ' + p4(r.by.rater.se));
+    lines.push('  design effect     : rater SE predicted ' + p4(pred) + ' vs measured ' +
+               p4(r.by.rater.se) + ' from an intraclass correlation of ' + p4(r.iccRater));
+  }
+
+  // 10. the bootstrap: right axis repaired, wrong axis untouched, and the product weights are wrong
+  {
+    const zipf = Object.assign({}, A, { sigRater: 0 }), flat = Object.assign({}, A, { skew: 0 });
+    const bz = bootStudy(zipf, 60, 2026, 99), bf = bootStudy(flat, 60, 2026, 99);
+    ok(bz.tRatio > 2.05, 'the bootstrap did not widen the critical value on Zipf traffic: ' + p2(bz.tRatio));
+    ok(bf.tRatio < 2.12, 'the bootstrap widened the critical value on flat traffic, where the ' +
+       'cluster count is fine: ' + p2(bf.tRatio));
+    ok(bz.boot <= bz.zUser + 0.02, 'the bootstrap did not help on its own axis');
+    ok(bf.boot > bf.zUser - 0.06, 'the bootstrap unexpectedly repaired the crossed axis');
+    const w = world(A, 2026), rt = ratings(A, w, 2026);
+    const P = productWeightVar(rt, w, A, 3000, 2026);
+    ok(Math.abs(P.measured / P.cellVar - 1) < 0.08,
+       'the product-weight resampling variance is not the cell variance: ratio ' +
+       p3(P.measured / P.cellVar));
+    ok(P.userVar > 3 * P.cellVar, 'the cell variance is not far below the customer variance');
+    lines.push('  bootstrap         : critical value ' + p2(bz.tRatio) + ' on Zipf vs ' +
+               p2(bf.tRatio) + ' on flat; product weights reproduce the cell variance to ' +
+               p3(P.measured / P.cellVar) + ', which is ' + p2(P.userVar / P.cellVar) + 'x too small');
+  }
+
+  // 11. the k closed form, in the regime where its assumption is true
+  {
+    const ind = Object.assign({}, B, { skew: 0, sigUser: 0, perUser: 1, sigRater: 0 });
+    const vi = varComponents(ind, 12, 2026, 6);
+    let worst = 0;
+    for (const r of kStudy(ind, [1, 3], 60, 2026)){
+      const pr = Math.sqrt(kVarPredict(vi.between, vi.within, ind.ratings, r.k));
+      worst = Math.max(worst, Math.abs(r.trueSd / pr - 1));
+      ok(Math.abs(r.trueSd / pr - 1) < 0.18,
+         'the k closed form misses at k=' + r.k + ': predicted ' + p4(pr) + ', measured ' + p4(r.trueSd));
+    }
+    ok(kVarPredict(vi.between, vi.within, 4000, 3) > kVarPredict(vi.between, vi.within, 4000, 1),
+       'the closed form does not rise with k, which is the whole claim');
+    ok(kOptimum(vi.between, vi.within, 0, 1) === 0, 'free generation does not give k* = 0');
+    ok(kOptimum(0, vi.within, 1, 1) === Infinity, 'zero between-request variance does not make k* infinite');
+    lines.push('  k closed form     : within ' + p1(100 * worst) + '% of the simulator where ' +
+               'items are independent, and rises with k by construction');
+  }
+
+  // 12. dilution and the collider hold their invariants
+  {
+    const rows = dilution(B, [1, 0.3], 50, 2026, ['naive']);
+    ok(Math.abs(rows[0].effTrig - rows[1].effTrig) < 1e-12,
+       'the effect where the feature fired moved with the trigger rate');
+    ok(Math.abs(rows[1].effAll - 0.3 * rows[1].effTrig) < 1e-12,
+       'the diluted effect is not p times the triggered effect');
+    // the collider holds the FLAGGED SHARE fixed while it moves the selection
+    for (const kap of [0, 0.5, 2]){
+      const oo = Object.assign({}, A, { trigger: 0.3, collider: kap });
+      const w = world(oo, 99);
+      let f = 0;
+      for (let i = 0; i < w.M; i++) f += w.trig[i];
+      ok(Math.abs(f / w.M - 0.3) < 0.035,
+         'the collider at kappa=' + kap + ' changed the flagged share to ' + pc(f / w.M));
+    }
+    const cs = colliderScan(Object.assign({}, A, { trigger: 0.3 }), [0, 1], 60, 2026);
+    ok(Math.abs(cs[0].predicted) < 0.004, 'an unselected flag is not unbiased: ' + pp(cs[0].predicted));
+    ok(cs[1].predicted > 0.05 && Math.abs(cs[1].measuredTrig - cs[1].predicted) < 0.012,
+       'the collider quadrature disagrees with the measurement: ' + pp(cs[1].predicted) + ' vs ' +
+       pp(cs[1].measuredTrig));
+    lines.push('  dilution/collider : triggered effect invariant, diluted effect exactly p times ' +
+               'it, flagged share held at 30% across kappa, quadrature within ' +
+               pp(Math.abs(cs[1].measuredTrig - cs[1].predicted)));
+  }
+
+  // 13. the mSPRT statistic behaves like a likelihood ratio
+  {
+    ok(msprtLambda(0, 0.25, 1000, 0.002) < 1, 'the mSPRT fires on a zero effect');
+    let mono = 1, prev = -1;
+    for (const e of [0, 0.01, 0.02, 0.05, 0.1]){
+      const v = msprtLambda(e, 0.25, 1000, 0.002);
+      if (v < prev) mono = 0;
+      prev = v;
+    }
+    ok(mono === 1, 'the mSPRT statistic is not increasing in the effect');
+    ok(msprtLambda(0.05, 0.25, 0, 0.002) <= 1.0000001, 'the mSPRT fires before any data arrives');
+    lines.push('  mSPRT             : below 1 at a zero effect, monotone in the effect, inert at n = 0');
+  }
+
+  // 14. the intraclass correlation, against a synthetic file whose answer is known
+  {
+    const G = 40, m = 25, x = new Float64Array(G * m), key = new Int32Array(G * m);
+    const rng = mulberry32(4242);
+    for (let g = 0; g < G; g++){
+      const a = randn(rng);
+      for (let j = 0; j < m; j++){ x[g * m + j] = a + randn(rng); key[g * m + j] = g; }
+    }
+    const got = iccOf(x, key, G);
+    ok(Math.abs(got - 0.5) < 0.12, 'the intraclass correlation of a half-and-half file reads ' + p3(got));
+    lines.push('  intraclass rho    : a file built with equal between and within variance reads ' +
+               p3(got) + ' against a true 0.5');
+  }
+
+  // 15. the claims the page actually makes, on the current settings
+  {
+    const r = trial(A, Math.min(300, Math.max(120, Math.round(cfg.worlds / 2))), 2026, METHODS);
+    const W = Math.min(300, Math.max(120, Math.round(cfg.worlds / 2)));
+    ok(r.by.naive.reject > r.by.two.reject,
+       'the naive test is no longer worse than the two-way one');
+    ok(r.by.naive.se < r.estSd, 'the naive SE is no longer below the estimate’s real spread');
+    ok(r.by.two.se >= r.by.user.se - 1e-12 && r.by.two.se >= r.by.rater.se - 1e-12,
+       'the two-way SE fell below a one-way SE, which the floor is supposed to prevent');
+    ok(r.by.naive.coverage < r.by.two.coverage, 'the naive interval covers better than the two-way one');
+    lines.push('  headline          : naive ' + pc(r.by.naive.reject) + ' vs two-way ' +
+               pc(r.by.two.reject) + ' over ' + W + ' worlds (Monte-Carlo error ' +
+               p1(100 * band(W)) + 'pp), naive SE ' + p4(r.by.naive.se) + ' against a real spread of ' +
+               p4(r.estSd));
+  }
+
+  lines.unshift((bad.length ? 'FAIL' : 'PASS') + '  ' + (n - bad.length) + ' / ' + n +
+                ' assertions' + (bad.length ? '' : ' — every one green'));
+  for (let i = 0; i < bad.length; i++) lines.push('  FAILED: ' + bad[i]);
+  return lines.join('\n');
+}
+
+</script>
+</body>
+</html>
