@@ -1,0 +1,928 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIFromZero &middot; Day 74 &mdash; Benchmark contamination: the filter says clean, the score is still wrong</title>
+<style>
+:root{
+  --bg:#f7fafc; --card:#ffffff; --ink:#0d1620; --dim:#44566b; --line:#dfe7ee;
+  --accent:#0e7490; --accent-soft:#cffafe; --good:#046c4e; --bad:#b42318; --warn:#b45309;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55}
+header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.wrap{max-width:1100px;margin:0 auto;padding:18px 20px}
+.kicker{font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--accent);margin:0 0 8px}
+h1{font-size:20px;line-height:1.35;margin:0 0 10px;font-weight:800}
+h2{font-size:17px;margin:26px 0 10px;font-weight:800}
+h3{font-size:14px;margin:18px 0 6px;font-weight:700;color:var(--dim)}
+p{margin:0 0 12px}
+.lede{color:var(--dim);font-size:14px}
+.tabs{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 15px;font-size:13px;
+     font-weight:700;cursor:pointer;color:var(--dim)}
+.tab[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+main{max-width:1100px;margin:0 auto;padding:8px 20px 70px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+.scrollx{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;font-family:var(--mono)}
+th,td{border-bottom:1px solid var(--line);padding:6px 9px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{color:var(--dim);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+tr.win td{background:#ecfdf5}
+tr.ctrl td{background:#fef2f2}
+tr.mid td{background:#fffbeb}
+code,kbd{font-family:var(--mono);font-size:12.5px;background:#f1f5f9;border-radius:4px;padding:1px 5px}
+.big{font-size:26px;font-weight:800;font-family:var(--mono)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px}
+.stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:#fff}
+.stat .lab{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+.flag{border-left:4px solid var(--accent);background:var(--accent-soft);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+.flag.bad{border-color:var(--bad);background:#fef2f2}
+.flag.good{border-color:var(--good);background:#ecfdf5}
+.flag.warn{border-color:var(--warn);background:#fffbeb}
+.pill{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.pill.ok{background:#dcfce7;color:var(--good)}
+.pill.no{background:#fee2e2;color:var(--bad)}
+#selftest{position:fixed;right:14px;bottom:14px;background:#0d1620;color:#e2e8f0;font-family:var(--mono);
+  font-size:11.5px;padding:8px 12px;border-radius:8px;z-index:40;max-width:340px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+.panel[hidden]{display:none}
+.muted{color:var(--dim);font-size:13px}
+ul{margin:0 0 12px 18px;padding:0}
+li{margin:0 0 6px}
+input[type=number]{width:100%;font-family:var(--mono);font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:6px}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <p class="kicker">AIFROMZERO &middot; DAY 74</p>
+    <h1>&#129515; Benchmark contamination &mdash; the number a decontamination report prints is the n-gram overlap it happened to look for, and there is a whole band of rewrites that keeps every point of the score inflation while taking that number to zero.</h1>
+    <p class="lede">A four-choice benchmark whose honest score is exactly <code>1/4</code>. A training corpus that contains copies of some items. A model that answers from memory when it has seen a long enough contiguous stretch. Nothing here simulates language: the engine simulates the <strong>overlap arithmetic</strong> &mdash; which stretches of an item survive a rewrite, which lengths an n-gram filter can look for without flagging a clean benchmark, and what the gap between those two numbers does to a published score.</p>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true"  data-p="look">&#128064; LOOK</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="understand">&#129504; UNDERSTAND</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="build">&#128296; BUILD</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="panel" id="p-look">
+    <div class="card">
+      <h2>The scoreboard</h2>
+      <p class="muted" id="mScope">running&hellip;</p>
+      <div class="scrollx"><table id="tMain"></table></div>
+      <div class="flag bad" id="fHead"></div>
+    </div>
+
+    <div class="card">
+      <h2>The two numbers, side by side</h2>
+      <div class="grid">
+        <div class="stat"><div class="lab">reported contamination</div><div class="big" id="sFlag">&mdash;</div><div class="muted">what a 13-gram decontamination pass finds after the rewrite</div></div>
+        <div class="stat"><div class="lab">score inflation that survives</div><div class="big" id="sInfl">&mdash;</div><div class="muted">percentage points, same corpus, same benefit</div></div>
+        <div class="stat"><div class="lab">filter recall on items that helped</div><div class="big" id="sRecall">&mdash;</div><div class="muted">of the items the model answered from memory</div></div>
+      </div>
+      <div class="flag" id="fPair"></div>
+    </div>
+
+    <div class="card">
+      <h2>The filter length is a window, and it is not where the convention sits</h2>
+      <p class="muted">One corpus &mdash; items rewritten every few tokens before being copied in &mdash; measured by every filter length from the shortest to the longest. <code>flagged</code> is what the report prints. <code>false flags</code> counts clean items the filter deleted. <code>after filter</code> is the score you publish once the flagged items are dropped, against a truth of <code>0.2500</code>.</p>
+      <div class="scrollx"><table id="tN"></table></div>
+      <div class="flag bad" id="fWindow"></div>
+      <div class="flag warn" id="fShrink"></div>
+    </div>
+
+    <div class="card">
+      <h2>The evasion band</h2>
+      <p class="muted">Now hold the filter at the conventional length and vary how aggressively the copy was rewritten. <code>run</code> is the longest untouched stretch a rewrite leaves behind &mdash; the only thing either the model or the filter can actually see.</p>
+      <div class="scrollx"><table id="tE"></table></div>
+      <div class="flag bad" id="fBand"></div>
+    </div>
+
+    <div class="card">
+      <h2>The corpus decides the floor</h2>
+      <p class="muted">A filter cannot use a short n: on a big corpus a short n-gram appears somewhere by chance, so a short filter deletes a clean benchmark. That floor is arithmetic, and it moves with corpus size. The closed form is validated against the simulator at the sizes this page can actually run, then extrapolated.</p>
+      <div class="scrollx"><table id="tDens"></table></div>
+      <div class="scrollx"><table id="tNmin"></table></div>
+      <div class="flag bad" id="fFloor"></div>
+      <p class="muted">A filter length is chosen once and then meets whatever corpus the <em>next</em> model was trained on. If that size is only known to an order of magnitude, the false-flag rate the length actually delivers is an average over the range &mdash; a composite-Simpson integral of the closed form over <code>log&#8321;&#8320;(tokens)</code>, not a point evaluation.</p>
+      <div class="scrollx"><table id="tQuad"></table></div>
+      <div class="flag warn" id="fQuad"></div>
+    </div>
+
+    <div class="card">
+      <h2>The control</h2>
+      <div class="flag good" id="fCtrl"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="p-understand" hidden>
+    <div class="card">
+      <h2>What is actually being measured</h2>
+      <p>Every quantity on this page comes out of four declared objects and nothing else.</p>
+      <ul>
+        <li><strong>An item</strong> is <code>k</code> integer tokens drawn uniformly from an alphabet of <code>v</code>. It is a four-choice question, so a model with no knowledge of it scores exactly <code>1/4</code> in expectation. Tokens are uniform by declaration &mdash; real text is not, and the direction that pushes every number is stated below.</li>
+        <li><strong>A corpus</strong> is a pile of documents. Some of them are copies of benchmark items, optionally <em>rewritten</em>: every <code>e</code>-th token replaced by a different token. <code>e = 0</code> means a verbatim copy.</li>
+        <li><strong>Memorisation length <code>L</code></strong> is the declared abstraction: the shortest contiguous stretch of an item the model must have seen in the corpus for it to answer that item from memory rather than guessing. This page does not claim a value of <code>L</code> for any real model. It shows what happens across the whole range, which is the point &mdash; <code>L</code> is a property of the model and nobody publishes it.</li>
+        <li><strong>Filter length <code>n</code></strong> is what a decontamination pass looks for: flag an item if it shares any <code>n</code> consecutive tokens with any corpus document. <code>n</code> is a convention. GPT-3 used 13, other reports use 8, or 50 characters.</li>
+      </ul>
+      <p>Everything follows from one asymmetry: a rewrite every <code>e</code> tokens leaves untouched runs of length <code>e&minus;1</code>. The model benefits when <code>e&minus;1 &ge; L</code>. The filter catches it when <code>n &le; e&minus;1</code>. Those two inequalities involve different numbers, and only one of them is set by the person publishing the score.</p>
+      <div class="flag" id="fIdent"></div>
+    </div>
+
+    <div class="card">
+      <h2>The degeneracy that bounds <code>L</code> from below</h2>
+      <p>The obvious escape is to say the model needs only a very short run, so a short filter would catch everything. Measure it: on a corpus containing <em>no copies at all</em>, how often does an item contain a run of length <code>L</code> that appears somewhere by chance?</p>
+      <div class="scrollx"><table id="tL"></table></div>
+      <div class="flag warn" id="fDegen"></div>
+    </div>
+
+    <div class="card">
+      <h2>The closed form, and exactly where it lies</h2>
+      <p>The chance that a clean item of length <code>k</code> collides with a corpus holding <code>C</code> distinct n-grams is written, everywhere, as if the item&rsquo;s windows were independent draws:</p>
+      <p><code>P(flag) = 1 &minus; (1 &minus; C/v&#8319;)<sup>k&minus;n+1</sup></code></p>
+      <p>The windows are not independent &mdash; consecutive windows share <code>n&minus;1</code> tokens &mdash; and neither are the corpus&rsquo;s grams. So the formula is an approximation, and the honest question is how big the error is. For a <em>single</em> pattern the exact answer is computable: build the KMP automaton for the pattern and count, in exact integer arithmetic, how many length-<code>k</code> strings avoid it.</p>
+      <div class="scrollx"><table id="tExact"></table></div>
+      <div class="flag" id="fExact"></div>
+      <div class="flag" id="fDensity"></div>
+    </div>
+
+    <div class="card">
+      <h2>What a filter does to the error bar</h2>
+      <p>Dropping flagged items does not only change the score, it changes how many items are left to measure it with. On <code>m</code> items a purely guessing model&rsquo;s observed score is <code>Binomial(m, 1/4)/m</code>, and because <code>1/4</code> is a dyadic rational the whole distribution is exact integer arithmetic: <code>P(X &ge; a) = &Sigma; C(m,j)&middot;3<sup>m&minus;j</sup> / 4<sup>m</sup></code>.</p>
+      <div class="scrollx"><table id="tBinom"></table></div>
+      <div class="flag bad" id="fBinom"></div>
+    </div>
+
+    <div class="card">
+      <h2>Four things that went against the build</h2>
+      <div class="flag" id="fN1"></div>
+      <div class="flag" id="fN2"></div>
+      <div class="flag" id="fN3"></div>
+      <div class="flag" id="fN4"></div>
+    </div>
+
+    <div class="card">
+      <h2>What the measurements actually support</h2>
+      <ul>
+        <li>An n-gram flag rate is a <strong>lower bound</strong> on contamination, never a certificate. Publishing it as &ldquo;we found 0.3% contamination&rdquo; states the filter&rsquo;s reach, not the corpus&rsquo;s contents.</li>
+        <li>The filter length and the surviving item count belong next to the score. Both change the number, and one of them changes its error bar.</li>
+        <li>The only design on this page whose reported number is the true number is the one that needs no detector: a benchmark whose items were created after the corpus was collected. Its inflation is bounded by the accidental-overlap floor, which is itself computable in advance.</li>
+        <li>Uniform tokens make this page <em>optimistic</em>. Real text is heavily skewed, so a fixed <code>n</code> collides far more often than the uniform closed form says, which pushes the usable filter length up &mdash; the same direction as a bigger corpus, and the same consequence.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="panel" id="p-build" hidden>
+    <div class="card">
+      <h2>Run it yourself</h2>
+      <p class="muted">Everything between <code>ENGINE:BEGIN</code> and <code>ENGINE:END</code> in this file is pure &mdash; no DOM, no network, no clock, no <code>Math.random</code>. The generator is the same 31-bit LCG the rest of this series uses, drawn from the <strong>high</strong> bits: its low bit alternates on every step, so <code>% n</code> on an even bound would be perfectly uniform and perfectly predictable. Grams are indexed as exact packed integers rather than hashes, so a match is a match.</p>
+      <div class="grid">
+        <div class="stat"><label class="lab" for="inV">alphabet v</label><input id="inV" type="number" value="64" min="8" max="128" step="8"></div>
+        <div class="stat"><label class="lab" for="inK">item length k</label><input id="inK" type="number" value="48" min="12" max="96"></div>
+        <div class="stat"><label class="lab" for="inN">benchmark items</label><input id="inN" type="number" value="600" min="50" max="3000" step="50"></div>
+        <div class="stat"><label class="lab" for="inC">contamination %</label><input id="inC" type="number" value="30" min="0" max="100"></div>
+        <div class="stat"><label class="lab" for="inE">rewrite every e (0 = verbatim)</label><input id="inE" type="number" value="8" min="0" max="48"></div>
+        <div class="stat"><label class="lab" for="inL">memorisation length L</label><input id="inL" type="number" value="5" min="2" max="16"></div>
+        <div class="stat"><label class="lab" for="inF">filter length n</label><input id="inF" type="number" value="13" min="2" max="16"></div>
+        <div class="stat"><label class="lab" for="inB">background documents</label><input id="inB" type="number" value="400" min="50" max="6000" step="50"></div>
+      </div>
+      <p><button class="tab" id="btnRun" aria-selected="true">re-run</button> <span class="muted" id="runNote"></span></p>
+      <div class="scrollx"><table id="tRun"></table></div>
+    </div>
+    <div class="card">
+      <h2>The invariants this page checks on load</h2>
+      <p class="muted">Bounds and identities only &mdash; nothing is compared against a number written down by hand.</p>
+      <ul class="muted" id="ulChecks"></ul>
+    </div>
+  </section>
+</main>
+
+<div id="selftest">running&hellip;</div>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// Pure. No DOM, no network, no clock, no Math.random.
+
+var MULT = 1103515245, INC = 12345, MASK = 0x7FFFFFFF, SCALE = 2147483648;
+
+function Lcg(seed){ this.state = seed >>> 0; }
+Lcg.prototype.nextInt = function(){
+  this.state = Number((BigInt(MULT) * BigInt(this.state) + BigInt(INC)) & BigInt(MASK));
+  return this.state;
+};
+// Uniform in [0, n) from the HIGH bits. Not "% n": this LCG has an odd multiplier
+// AND an odd increment, so its low bit flips every step and "% n" for even n
+// alternates parity forever while staying perfectly uniform. Not a bitwise shift
+// either - JS coerces bitwise operands to 32 bits and nextInt()*n overflows that.
+Lcg.prototype.below = function(n){ return Math.floor((this.nextInt() * n) / SCALE); };
+
+// Largest run of tokens that packs into one EXACT double: v^c <= 2^53.
+function chunkFor(v){ var c = 0, p = 1; while (p * v <= 9007199254740992){ p *= v; c++; } return c; }
+function packSeg(seq, i, len, v){ var a = 0, j; for (j = 0; j < len; j++) a = a * v + seq[i + j]; return a; }
+
+// An exact n-gram index. Grams are stored as one or two packed integers, never a
+// hash and never a string: a lookup that says "present" means the tokens match.
+function GramIndex(docs, n, v){
+  var CH = chunkFor(v), lo = Math.min(n, CH), hi = n - lo, d, i, doc, a, b, inner;
+  if (hi > CH) throw new Error("n=" + n + " exceeds two packed chunks for v=" + v);
+  this.n = n; this.v = v; this.lo = lo; this.hi = hi; this.map = new Map(); this.size = 0;
+  for (d = 0; d < docs.length; d++){
+    doc = docs[d];
+    for (i = 0; i + n <= doc.length; i++){
+      a = packSeg(doc, i, lo, v);
+      if (hi === 0){
+        if (!this.map.has(a)){ this.map.set(a, null); this.size++; }
+      } else {
+        b = packSeg(doc, i + lo, hi, v);
+        inner = this.map.get(a);
+        if (inner === undefined){ inner = new Set(); this.map.set(a, inner); }
+        if (!inner.has(b)){ inner.add(b); this.size++; }
+      }
+    }
+  }
+}
+GramIndex.prototype.hits = function(seq){
+  var n = this.n, lo = this.lo, hi = this.hi, v = this.v, i, a, inner;
+  for (i = 0; i + n <= seq.length; i++){
+    a = packSeg(seq, i, lo, v);
+    if (hi === 0){ if (this.map.has(a)) return true; }
+    else { inner = this.map.get(a); if (inner !== undefined && inner.has(packSeg(seq, i + lo, hi, v))) return true; }
+  }
+  return false;
+};
+
+function makeBenchmark(seed, nItems, k, v){
+  var r = new Lcg(seed), items = [], i, j, s;
+  for (i = 0; i < nItems; i++){ s = []; for (j = 0; j < k; j++) s.push(r.below(v)); items.push(s); }
+  return items;
+}
+// A copy with every e-th token replaced by a DIFFERENT token, so the untouched
+// runs are exactly e-1 long. e <= 0 is a verbatim copy.
+function editedCopy(item, e, v, r){
+  var out = item.slice(), i, t;
+  if (e <= 0) return out;
+  for (i = e - 1; i < out.length; i += e){ t = r.below(v - 1); out[i] = (t >= item[i]) ? t + 1 : t; }
+  return out;
+}
+function buildCorpus(seed, items, cfg){
+  var r = new Lcg(seed), docs = [], copied = [], i, j, s, isCopy;
+  for (i = 0; i < items.length; i++){
+    isCopy = r.below(1000) < cfg.contamPer1000;
+    copied.push(isCopy);
+    if (isCopy) docs.push(editedCopy(items[i], cfg.editEvery, cfg.v, r));
+  }
+  for (i = 0; i < cfg.bgDocs; i++){ s = []; for (j = 0; j < cfg.k; j++) s.push(r.below(cfg.v)); docs.push(s); }
+  return { docs: docs, copied: copied, v: cfg.v, k: cfg.k, cache: {} };
+}
+function gramIndex(corpus, n){
+  if (!corpus.cache[n]) corpus.cache[n] = new GramIndex(corpus.docs, n, corpus.v);
+  return corpus.cache[n];
+}
+
+// One measurement. A memorised item is answered correctly; every other item is a
+// 1-in-4 guess drawn from a dedicated stream, so "truth" is the same benchmark
+// measured by a model that never saw the corpus.
+function analyse(items, corpus, L, n, guessSeed){
+  var mem = gramIndex(corpus, L), det = gramIndex(corpus, n), g = new Lcg(guessSeed), i, N = items.length;
+  var nMem = 0, nDet = 0, nCopy = 0, acc = 0, ff = 0, miss = 0, caught = 0;
+  var meas = 0, truth = 0, keptN = 0, keptC = 0, flagN = 0, flagC = 0, liftedByMem = 0;
+  for (i = 0; i < N; i++){
+    var m = mem.hits(items[i]), d = det.hits(items[i]), gu = g.below(4) === 0;
+    var correct = m ? 1 : (gu ? 1 : 0);
+    if (m) nMem++;
+    if (d) nDet++;
+    if (corpus.copied[i]) nCopy++;
+    if (m && !corpus.copied[i]) acc++;
+    if (d && !corpus.copied[i]) ff++;
+    if (m && !d) miss++;
+    if (m && d) caught++;
+    if (m && !gu) liftedByMem++;
+    meas += correct; truth += gu ? 1 : 0;
+    if (d){ flagN++; flagC += correct; } else { keptN++; keptC += correct; }
+  }
+  var clean = N - nCopy;
+  return { N: N, L: L, n: n, docs: corpus.docs.length, tokens: corpus.docs.length * corpus.k,
+    detGrams: det.size, memGrams: mem.size,
+    copyRate: nCopy / N, flagRate: nDet / N, memRate: nMem / N,
+    accRate: clean ? acc / clean : 0, ffRate: clean ? ff / clean : 0,
+    missRate: nMem ? miss / nMem : 0, recall: nMem ? caught / nMem : 1,
+    measured: meas / N, truth: truth / N, inflation: (meas - truth) / N,
+    liftedByMem: liftedByMem, nMem: nMem, nCopy: nCopy, nDet: nDet,
+    keptN: keptN, keptFrac: keptN / N, decon: keptN ? keptC / keptN : 0,
+    flagN: flagN, flaggedScore: flagN ? flagC / flagN : 0 };
+}
+
+var DEFAULTS = { nItems: 600, k: 48, v: 64, contamPer1000: 300, editEvery: 0, bgDocs: 400, L: 5, n: 13 };
+function withDefaults(o){
+  var c = {}, key;
+  for (key in DEFAULTS) c[key] = DEFAULTS[key];
+  for (key in o) c[key] = o[key];
+  return c;
+}
+function worldSeeds(s){
+  return { itemSeed: 20260829 + s * 104729, corpusSeed: 777767 + s * 99991, guessSeed: 31337 + s * 7919 };
+}
+// Builds a benchmark + corpus for one world and returns both, so a caller can
+// re-measure the SAME world at many L and n without rebuilding it.
+function makeWorld(over, s){
+  var c = withDefaults(over), sd = worldSeeds(s || 0);
+  var items = makeBenchmark(sd.itemSeed, c.nItems, c.k, c.v);
+  return { items: items, corpus: buildCorpus(sd.corpusSeed, items, c), cfg: c, guessSeed: sd.guessSeed };
+}
+function measure(w, L, n){ return analyse(w.items, w.corpus, L, n, w.guessSeed); }
+
+// Average a measurement over W independent worlds; also returns the per-world spread.
+function overWorlds(over, L, n, W){
+  var keys = ["flagRate","memRate","accRate","ffRate","missRate","recall","measured","truth",
+              "inflation","keptFrac","decon","copyRate","flaggedScore"];
+  var acc = {}, i, j, k2, r, lo = null, hi = null, each = [];
+  for (j = 0; j < keys.length; j++) acc[keys[j]] = 0;
+  for (i = 0; i < W; i++){
+    r = measure(makeWorld(over, i), L, n);
+    each.push(r);
+    for (j = 0; j < keys.length; j++) acc[keys[j]] += r[keys[j]];
+    if (lo === null || r.inflation < lo) lo = r.inflation;
+    if (hi === null || r.inflation > hi) hi = r.inflation;
+  }
+  var out = { worlds: W, inflationLo: lo, inflationHi: hi, keptNLast: each[W-1].keptN, each: each };
+  for (k2 = 0; k2 < keys.length; k2++) out[keys[k2]] = acc[keys[k2]] / W;
+  return out;
+}
+
+// ---- closed forms ----
+// chance a CLEAN item of length k collides with a corpus holding C distinct n-grams
+function pFlagClosed(v, n, k, C){
+  var pos = k - n + 1;
+  if (pos <= 0) return 0;
+  var q = C / Math.pow(v, n);
+  if (q >= 1) return 1;
+  return -Math.expm1(pos * Math.log1p(-q));
+}
+// shortest filter length whose false-flag rate on a clean benchmark stays under tol
+function nMinClosed(v, k, corpusTokens, tol){
+  var n;
+  for (n = 1; n <= k; n++){
+    if (pFlagClosed(v, n, k, Math.min(corpusTokens, Math.pow(v, n))) <= tol) return n;
+  }
+  return k;
+}
+// the independence estimate for ONE pattern
+function pContainIndep(v, k, n){
+  if (k < n) return 0;
+  return -Math.expm1((k - n + 1) * Math.log1p(-Math.pow(v, -n)));
+}
+// If the corpus size is only known to an order of magnitude, the false-flag rate a
+// filter length will actually deliver is an average over that range. Composite
+// Simpson over log10(tokens); steps is rounded up to an even number.
+function expectedFlagLogUniform(v, n, k, loTokens, hiTokens, steps){
+  var a = Math.log10(loTokens), b = Math.log10(hiTokens), m = steps + (steps % 2), i, x, wgt, s = 0;
+  var h = (b - a) / m;
+  for (i = 0; i <= m; i++){
+    x = a + i * h;
+    wgt = (i === 0 || i === m) ? 1 : (i % 2 === 1 ? 4 : 2);
+    s += wgt * pFlagClosed(v, n, k, Math.min(Math.pow(10, x), Math.pow(v, n)));
+  }
+  return (h / 3) * s / (b - a);
+}
+
+// ---- exact integer arithmetic ----
+function kmpFail(pat){
+  var n = pat.length, f = new Array(n), i, j = 0;
+  f[0] = 0;
+  for (i = 1; i < n; i++){
+    while (j > 0 && pat[i] !== pat[j]) j = f[j - 1];
+    if (pat[i] === pat[j]) j++;
+    f[i] = j;
+  }
+  return f;
+}
+// EXACT number of length-k strings over an alphabet of v that never contain pat
+function countAvoiding(v, k, pat){
+  var n = pat.length, f = kmpFail(pat), step = [], vec = [], s, c, q, nx, i, nv, tot;
+  for (s = 0; s < n; s++){
+    step.push(new Array(v));
+    for (c = 0; c < v; c++){
+      q = s;
+      while (q > 0 && c !== pat[q]) q = f[q - 1];
+      step[s][c] = (c === pat[q]) ? q + 1 : 0;
+    }
+  }
+  for (s = 0; s < n; s++) vec.push(s === 0 ? 1n : 0n);
+  for (i = 0; i < k; i++){
+    nv = new Array(n).fill(0n);
+    for (s = 0; s < n; s++){
+      if (vec[s] === 0n) continue;
+      for (c = 0; c < v; c++){ nx = step[s][c]; if (nx < n) nv[nx] += vec[s]; }
+    }
+    vec = nv;
+  }
+  tot = 0n;
+  for (s = 0; s < n; s++) tot += vec[s];
+  return tot;
+}
+function powBig(b, e){ var r = 1n, i; for (i = 0; i < e; i++) r *= BigInt(b); return r; }
+function bigRatio(num, den){ return Number((num * 1000000000000000n) / den) / 1e15; }
+function pContainExact(v, k, pat){
+  var tot = powBig(v, k);
+  return bigRatio(tot - countAvoiding(v, k, pat), tot);
+}
+// EXACT tail of Binomial(m, 1/4): P(X >= a) = sum C(m,j) 3^(m-j) / 4^m
+function binomTailQuarter(m, a){
+  if (a <= 0) return 1;
+  if (a > m) return 0;
+  var pow3 = [1n], j, c = 1n, num = 0n;
+  for (j = 1; j <= m; j++) pow3.push(pow3[j - 1] * 3n);
+  for (j = 0; j <= m; j++){
+    if (j >= a) num += c * pow3[m - j];
+    c = c * BigInt(m - j) / BigInt(j + 1);
+  }
+  return bigRatio(num, 1n << BigInt(2 * m));
+}
+// exact two-sided P(|observed score - 1/4| >= d) on m items
+function binomTwoSidedExact(m, d){
+  if (m <= 0) return 1;
+  var hi = Math.ceil((0.25 + d) * m), lo = Math.floor((0.25 - d) * m);
+  var upper = binomTailQuarter(m, hi);
+  var lower = lo >= 0 ? 1 - binomTailQuarter(m, lo + 1) : 0;
+  return upper + lower;
+}
+// standard normal CDF, Abramowitz & Stegun 7.1.26 (|err| < 1.5e-7)
+function normCdf(z){
+  var s = z < 0 ? -1 : 1, x = Math.abs(z) / Math.SQRT2, t = 1 / (1 + 0.3275911 * x);
+  var y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return 0.5 * (1 + s * y);
+}
+function normTwoSided(m, d){ return m > 0 ? 2 * (1 - normCdf(d / Math.sqrt(0.1875 / m))) : 1; }
+
+// ---- sweeps ----
+function sweepN(over, L, nLo, nHi, s){
+  var w = makeWorld(over, s || 0), out = [], n;
+  for (n = nLo; n <= nHi; n++) out.push(measure(w, L, n));
+  return out;
+}
+function sweepE(over, L, n, eList, s){
+  var out = [], i, o, w;
+  for (i = 0; i < eList.length; i++){
+    o = withDefaults(over); o.editEvery = eList[i];
+    w = makeWorld(o, s || 0);
+    out.push({ e: eList[i], run: eList[i] > 0 ? eList[i] - 1 : o.k,
+               conv: measure(w, L, n), tight: measure(w, L, L) });
+  }
+  return out;
+}
+function sweepL(over, lList, n, s){
+  var o = withDefaults(over); o.contamPer1000 = 0;
+  var w = makeWorld(o, s || 0), out = [], i;
+  for (i = 0; i < lList.length; i++) out.push(measure(w, lList[i], n));
+  return out;
+}
+function densitySweep(over, bgList, nList, s){
+  var out = [], i, j, o, w, row, r;
+  for (i = 0; i < bgList.length; i++){
+    o = withDefaults(over); o.contamPer1000 = 0; o.bgDocs = bgList[i];
+    w = makeWorld(o, s || 0);
+    row = { bgDocs: bgList[i], tokens: w.corpus.docs.length * o.k, cells: [] };
+    for (j = 0; j < nList.length; j++){
+      r = measure(w, 5, nList[j]);
+      row.cells.push({ n: nList[j], sim: r.ffRate, closed: pFlagClosed(o.v, nList[j], o.k, r.detGrams), grams: r.detGrams });
+    }
+    out.push(row);
+  }
+  return out;
+}
+// ===== ENGINE:END =====
+
+/* ---------- presentation ---------- */
+var CHECKS = [], FAILED = 0;
+function ok(cond, label){ CHECKS.push({ pass: !!cond, label: label }); if (!cond) FAILED++; }
+function pct(x){ return (100 * x).toFixed(2) + "%"; }
+function pct1(x){ return (100 * x).toFixed(1) + "%"; }
+function pp(x){ return (100 * x).toFixed(2) + "pp"; }
+function f4(x){ return x.toFixed(4); }
+function tbl(el, head, rows){
+  var h = "<thead><tr>" + head.map(function(c){ return "<th>" + c + "</th>"; }).join("") + "</tr></thead><tbody>";
+  h += rows.map(function(r){
+    return "<tr class=\"" + (r.cls || "") + "\">" + r.cells.map(function(c){ return "<td>" + c + "</td>"; }).join("") + "</tr>";
+  }).join("");
+  document.getElementById(el).innerHTML = h + "</tbody>";
+}
+function set(id, html){ document.getElementById(id).innerHTML = html; }
+
+var W = 5, TRUE_SCORE = 0.25, L0 = 5, N_CONV = 13, E0 = 8;
+var S = {};
+
+/* --- stage 1: the scoreboard, averaged over W worlds --- */
+function stage1(){
+  S.verb  = overWorlds({ editEvery: 0 },  L0, N_CONV, W);
+  S.e8    = overWorlds({ editEvery: E0 }, L0, N_CONV, W);
+  S.e8t   = overWorlds({ editEvery: E0 }, L0, L0,     W);
+  S.e8s   = overWorlds({ editEvery: E0 }, L0, 3,      W);
+  S.clean = overWorlds({ contamPer1000: 0 }, L0, N_CONV, W);
+
+  var rows = [
+    { lab: "verbatim copies &middot; 13-gram filter", r: S.verb },
+    { lab: "rewritten every " + E0 + " &middot; 13-gram filter", r: S.e8, cls: "ctrl" },
+    { lab: "rewritten every " + E0 + " &middot; filter at n=" + L0, r: S.e8t, cls: "win" },
+    { lab: "rewritten every " + E0 + " &middot; filter at n=3", r: S.e8s, cls: "mid" },
+    { lab: "fresh benchmark &middot; NO filter (control)", r: S.clean, cls: "win" }
+  ];
+  tbl("tMain", ["design", "reported contamination", "measured score", "guess-only score", "raw inflation", "score after filter", "inflation left after the filter", "items kept"],
+    rows.map(function(x){
+      return { cls: x.cls, cells: [x.lab, pct(x.r.flagRate), f4(x.r.measured), f4(x.r.truth),
+               pp(x.r.inflation), f4(x.r.decon), pp(x.r.decon - TRUE_SCORE), pct1(x.r.keptFrac)] };
+    }));
+
+  set("mScope", "A " + DEFAULTS.nItems + "-item four-choice benchmark, " + DEFAULTS.k +
+    " tokens per item over an alphabet of " + DEFAULTS.v + ", against a corpus of " +
+    S.verb.each[0].docs.toLocaleString() + " documents (" + S.verb.each[0].tokens.toLocaleString() +
+    " tokens). Contamination " + (DEFAULTS.contamPer1000 / 10) + "% of items, memorisation length L=" + L0 +
+    ". Every number is the mean of " + W + " independent worlds, computed in your browser on load. A model that saw none of this scores exactly 0.2500 in expectation; the <em>guess-only</em> column is what these particular draws realised.");
+
+  set("fHead", "<strong>&#128308; Same corpus, same contamination rate, same memorisation length, same benefit. One token in " + E0 +
+    " rewritten before the copy went into the corpus.</strong> The 13-gram decontamination pass goes from finding <strong>" + pct(S.verb.flagRate) +
+    "</strong> to finding <strong>" + pct(S.e8.flagRate) + "</strong>, and the inflation it leaves behind goes from <strong>" +
+    pp(S.verb.decon - TRUE_SCORE) + "</strong> to <strong>" + pp(S.e8.decon - TRUE_SCORE) +
+    "</strong>. The report that says the benchmark is clean is attached to the score furthest from the truth on this page: <strong>" +
+    f4(S.e8.decon) + "</strong> against <strong>0.2500</strong>. Across the " + W + " worlds the surviving inflation ranges " +
+    pp(S.e8.inflationLo) + " to " + pp(S.e8.inflationHi) + ", so this is not one seed.");
+
+  document.getElementById("sFlag").textContent   = pct(S.e8.flagRate);
+  document.getElementById("sInfl").textContent   = pp(S.e8.inflation);
+  document.getElementById("sRecall").textContent = pct(S.e8.recall);
+  set("fPair", "The filter&rsquo;s recall on the items that actually helped the model is <strong>" + pct(S.e8.recall) +
+    "</strong>. Its recall on <em>verbatim</em> copies is <strong>" + pct(S.verb.recall) +
+    "</strong>, which is the number that makes a 13-gram filter look like a solved problem. The difference between those two rows is " +
+    "not a better filter or a worse one &mdash; it is the same filter meeting a rewrite.");
+
+  /* bounds and identities, not constants */
+  ["verb","e8","e8t","e8s","clean"].forEach(function(kk){
+    var r = S[kk];
+    ok(r.flagRate >= 0 && r.flagRate <= 1, "the flag rate is a rate in " + kk);
+    ok(r.memRate  >= 0 && r.memRate  <= 1, "the memorised rate is a rate in " + kk);
+    ok(r.decon    >= 0 && r.decon    <= 1, "the post-filter score is a score in " + kk);
+    ok(Math.abs(r.keptFrac - (1 - r.flagRate)) < 1e-12, "kept + flagged = every item in " + kk);
+    r.each.forEach(function(e){
+      ok(Math.abs(e.inflation - (e.measured - e.truth)) < 1e-12, "inflation is measured minus truth in " + kk);
+      ok(Math.abs(e.inflation * e.N - e.liftedByMem) < 1e-9, "every point of inflation is an item answered from memory that would have been guessed wrong, in " + kk);
+    });
+  });
+  ok(S.verb.recall > S.e8.recall, "the rewrite costs the filter recall on the items that helped");
+  ok(S.clean.inflation < S.e8.inflation, "a corpus with no copies inflates less than one with rewritten copies");
+  ok(Math.abs(S.e8.decon - S.e8.measured) < 1e-12, "a filter that flags nothing cannot change the score");
+}
+
+/* --- stage 2: the filter-length window --- */
+function stage2(){
+  var sw = sweepN({ editEvery: E0 }, L0, 3, 16, 0);
+  S.sw = sw;
+  var errs = sw.map(function(r){ return Math.abs(r.decon - TRUE_SCORE); });
+  var bestI = 0, i;
+  for (i = 1; i < sw.length; i++) if (errs[i] < errs[bestI]) bestI = i;
+  tbl("tN", ["filter n", "flagged", "false flags (clean items)", "recall on items that helped", "items kept", "score after filter", "error vs 0.2500"],
+    sw.map(function(r, ix){
+      var cls = r.n === N_CONV ? "ctrl" : (ix === bestI ? "win" : (r.ffRate > 0.05 ? "mid" : ""));
+      return { cls: cls, cells: [r.n, pct1(r.flagRate), pct(r.ffRate), pct1(r.recall),
+               pct1(r.keptFrac), f4(r.decon), pp(errs[ix])] };
+    }));
+
+  var lo = null, hi = null;
+  for (i = 0; i < sw.length; i++){
+    if (sw[i].recall > 0.99 && sw[i].ffRate <= 0.01){ if (lo === null) lo = sw[i].n; hi = sw[i].n; }
+  }
+  var conv = sw[N_CONV - 3];
+  set("fWindow", lo === null
+    ? "<strong>&#128308; No filter length works here at all.</strong> Every n short enough to see a run of " + (E0 - 1) +
+      " tokens flags more than 1% of a clean benchmark, and every n long enough to leave a clean benchmark alone cannot see the run. " +
+      "The window is empty, which is the same failure as sitting outside it &mdash; only without a length to argue about."
+    : "<strong>&#128308; The filter lengths that work form a window: n = " + lo + " to " + hi +
+    ".</strong> Below it the filter deletes a clean benchmark; above it the filter cannot see a run of " + (E0 - 1) +
+    " tokens at all. The window&rsquo;s lower edge is set by the corpus (a shorter gram appears by chance) and its upper edge by the rewrite (" +
+    "n must not exceed the longest untouched run). <strong>The convention sits at n=" + N_CONV +
+    "</strong>, outside it, where the filter flags " + pct(conv.flagRate) + " and publishes " + f4(conv.decon) + ".");
+
+  var worst = sw[0];
+  set("fShrink", "<strong>And the low end is not a safe direction either.</strong> At n=" + worst.n +
+    " the filter flags " + pct1(worst.flagRate) + " of the benchmark &mdash; " + pct(worst.ffRate) +
+    " of the items it deletes were never copied &mdash; leaving " + worst.keptN + " items of " + worst.N +
+    ". Its published score is " + f4(worst.decon) + ", and the inflation is gone because the benchmark is gone. " +
+    "A decontamination pass that removes all the contamination and most of the evidence has not measured anything.");
+
+  for (i = 1; i < sw.length; i++){
+    ok(sw[i].flagRate <= sw[i-1].flagRate + 1e-12,
+       "a longer filter can never flag more items than a shorter one (n=" + sw[i].n + ")");
+  }
+  sw.forEach(function(r){
+    if (r.n <= L0) ok(r.missRate === 0, "at n <= L every memorised item is necessarily flagged (n=" + r.n + ")");
+    ok(r.keptN + r.flagN === r.N, "flagged and kept partition the benchmark at n=" + r.n);
+  });
+  ok(lo !== null && hi !== null, "a usable filter window exists for these parameters");
+  ok(hi < E0, "the window closes strictly below the rewrite interval");
+  ok(N_CONV > hi, "the conventional filter length sits above the window");
+}
+
+/* --- stage 3: the evasion band --- */
+function stage3(){
+  var es = sweepE({}, L0, N_CONV, [0, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 24], 0);
+  S.es = es;
+  tbl("tE", ["rewrite every e", "longest run", "answered from memory", "flagged at n=13", "score after the 13-gram filter", "flagged at n=5", "score after the n=5 filter"],
+    es.map(function(x){
+      var evades = x.conv.memRate > 0.05 && x.conv.flagRate < 0.05;
+      return { cls: evades ? "ctrl" : (x.conv.memRate < 0.05 ? "" : "win"),
+        cells: [x.e === 0 ? "0 (verbatim)" : x.e, x.run, pct1(x.conv.memRate), pct1(x.conv.flagRate),
+                f4(x.conv.decon), pct1(x.tight.flagRate), f4(x.tight.decon)] };
+    }));
+  var band = es.filter(function(x){ return x.conv.memRate > 0.05 && x.conv.flagRate < 0.05; });
+  var dead = es.filter(function(x){ return x.conv.memRate < 0.05; });
+  set("fBand", "<strong>&#128308; Rewriting harder is not monotonically safer for the person publishing the score, and not monotonically better for the person evading.</strong> " +
+    "Rewrite every " + dead.map(function(x){ return x.e; }).join(", ") + " tokens and the runs are shorter than L=" + L0 +
+    ", so the copy stops helping: inflation collapses to the accidental floor. Rewrite every " +
+    band.map(function(x){ return x.e; }).join(", ") + " and the copy helps <em>and</em> the 13-gram filter sees nothing &mdash; " +
+    "the published score in that band runs up to <strong>" + f4(Math.max.apply(null, band.map(function(x){ return x.conv.decon; }))) +
+    "</strong>. Rewrite every 14 or more and the untouched runs are longer than 13 again, so the convention catches it. " +
+    "<strong>The evasion band is exactly the interval between the model&rsquo;s memorisation length and the filter&rsquo;s n</strong> &mdash; " +
+    "one number nobody measures and one number chosen by convention. The n=5 columns show the same corpus is not hard to catch; it is only hard to catch by accident.");
+
+  es.forEach(function(x){
+    ok(x.tight.missRate === 0, "the n=L filter never misses a memorised item at e=" + x.e);
+    ok(x.conv.memRate >= 0 && x.conv.memRate <= 1, "memorised rate is a rate at e=" + x.e);
+    if (x.e > 0) ok(x.run === x.e - 1, "a rewrite every e leaves runs of e-1 at e=" + x.e);
+  });
+  ok(band.length > 0, "there exists a band of rewrite rates that both helps and evades the convention");
+  ok(dead.length > 0, "there exists a band of rewrite rates that stops helping at all");
+}
+
+/* --- stage 4: the corpus floor --- */
+function stage4(){
+  var ds = densitySweep({}, [400, 1500, 5000], [3, 4, 5], 0);
+  S.ds = ds;
+  var head = ["corpus tokens"], nList = [3, 4, 5], i;
+  for (i = 0; i < nList.length; i++) head.push("n=" + nList[i] + " simulated", "n=" + nList[i] + " closed form");
+  tbl("tDens", head, ds.map(function(row){
+    var cells = [row.tokens.toLocaleString()];
+    row.cells.forEach(function(c){ cells.push(pct(c.sim), pct(c.closed)); });
+    return { cells: cells };
+  }));
+
+  var toks = [1e4, 1e5, 1e6, 1e8, 1e10, 1e12, 1e13];
+  tbl("tNmin", ["corpus tokens", "shortest filter with under 1% false flags", "widest rewrite it can still catch"],
+    toks.map(function(t){
+      var nm = nMinClosed(DEFAULTS.v, DEFAULTS.k, t, 0.01);
+      return { cls: nm > 5 ? "mid" : "", cells: [t.toExponential(0), "n = " + nm, "every " + (nm + 1) + " tokens or wider"] };
+    }));
+
+  var QLO = 1e6, QHI = 1e12, QMID = Math.sqrt(QLO * QHI);
+  S.quad = [4, 5, 6, 7, 8, 9].map(function(n){
+    var cap = Math.pow(DEFAULTS.v, n);
+    return { n: n,
+      lo:   pFlagClosed(DEFAULTS.v, n, DEFAULTS.k, Math.min(QLO, cap)),
+      hi:   pFlagClosed(DEFAULTS.v, n, DEFAULTS.k, Math.min(QHI, cap)),
+      mid:  pFlagClosed(DEFAULTS.v, n, DEFAULTS.k, Math.min(QMID, cap)),
+      mean: expectedFlagLogUniform(DEFAULTS.v, n, DEFAULTS.k, QLO, QHI, 512) };
+  });
+  tbl("tQuad", ["filter n", "false flags at 10^6 tokens", "at 10^12 tokens", "geometric-midpoint value", "mean over the range (Simpson)", "mean / midpoint"],
+    S.quad.map(function(q){
+      return { cls: q.mean > 0.01 ? "ctrl" : "win",
+        cells: ["n = " + q.n, pct(q.lo), pct(q.hi), pct(q.mid), pct(q.mean),
+                (q.mid > 0 ? (q.mean / q.mid).toFixed(2) + "x" : "&mdash;")] };
+    }));
+  var qPick = S.quad.filter(function(q){ return q.mean <= 0.01; })[0];
+  var qMidOk = S.quad.filter(function(q){ return q.mid <= 0.01; })[0];
+  var qRatios = S.quad.filter(function(q){ return q.mid > 0; }).map(function(q){ return q.mean / q.mid; });
+  set("fQuad", "<strong>&#9888; Sizing the filter at the middle of the range is not sizing it for the range, and the error does not even have a fixed sign.</strong> " +
+    "The mean-over-the-range against the midpoint value runs from <strong>" + Math.min.apply(null, qRatios).toFixed(2) +
+    "x</strong> to <strong>" + Math.max.apply(null, qRatios).toFixed(2) +
+    "x</strong>. Where the rate is already saturated the curve is concave in log-size and the midpoint <em>over</em>-states; " +
+    "where the rate is small &mdash; which is the only regime in which the length is usable at all &mdash; it is convex and the midpoint badly <em>under</em>-states. " +
+    "Concretely: the shortest length that keeps the midpoint under 1% is n = " + (qMidOk ? qMidOk.n : "&mdash;") +
+    ", and the shortest that keeps the <em>average</em> under 1% is n = " + (qPick ? qPick.n : "&mdash;") +
+    " &mdash; a wider rewrite you can no longer catch, bought by nothing but one integral standing in for one point evaluation of the same formula.");
+  S.quad.forEach(function(q){
+    ok(q.mean >= q.lo - 1e-12 && q.mean <= q.hi + 1e-12, "the integral lies between the endpoint values at n=" + q.n);
+    ok(q.mean >= 0 && q.mean <= 1, "the integral is a probability at n=" + q.n);
+    ok(q.mid >= q.lo - 1e-12 && q.mid <= q.hi + 1e-12, "the midpoint value lies between the endpoint values at n=" + q.n);
+    if (q.hi <= 0.2) ok(q.mean >= q.mid - 1e-12, "in the small-rate regime the mean exceeds the midpoint at n=" + q.n);
+    ok(q.lo <= q.hi + 1e-12, "a bigger corpus never lowers the false-flag rate at n=" + q.n);
+  });
+
+  var small = nMinClosed(DEFAULTS.v, DEFAULTS.k, 1e4, 0.01), big = nMinClosed(DEFAULTS.v, DEFAULTS.k, 1e13, 0.01);
+  set("fFloor", "<strong>&#128308; The floor rises with the corpus, so the set of undetectable rewrites grows with the training set.</strong> " +
+    "At " + (1e4).toExponential(0) + " tokens the shortest usable filter is n=" + small + ", so a rewrite every " + (small + 1) +
+    " tokens is still catchable. At " + (1e13).toExponential(0) + " tokens it is n=" + big + ", and every rewrite up to one token in " + big +
+    " is structurally invisible to any exact n-gram filter that will not delete more than 1% of a clean benchmark. " +
+    "This is arithmetic on <code>v&#8319;</code>, not an engineering shortfall &mdash; and uniform tokens make it the optimistic case, " +
+    "because real text repeats and collides far more than uniform draws do.");
+
+  ds.forEach(function(row){
+    row.cells.forEach(function(c){
+      ok(c.sim >= 0 && c.sim <= 1, "the false-flag rate is a rate at " + row.tokens + "/" + c.n);
+      ok(c.closed >= 0 && c.closed <= 1, "the closed form returns a probability at " + row.tokens + "/" + c.n);
+    });
+    for (var i2 = 1; i2 < row.cells.length; i2++)
+      ok(row.cells[i2].sim <= row.cells[i2-1].sim + 1e-12, "false flags fall as n grows at " + row.tokens + " tokens");
+  });
+  for (i = 1; i < toks.length; i++)
+    ok(nMinClosed(DEFAULTS.v, DEFAULTS.k, toks[i], 0.01) >= nMinClosed(DEFAULTS.v, DEFAULTS.k, toks[i-1], 0.01),
+       "the shortest usable filter never shrinks as the corpus grows (" + toks[i].toExponential(0) + ")");
+  ok(big > small, "a big corpus forces a longer filter than a small one");
+
+  set("fCtrl", "<strong>The control is the row that needs no filter at all.</strong> A benchmark whose items were created after the corpus was collected has no copies in it, " +
+    "so its inflation is bounded by accidental overlap alone: measured <strong>" + pp(S.clean.inflation) +
+    "</strong> against a closed-form floor of " + pct(pFlagClosed(DEFAULTS.v, L0, DEFAULTS.k, S.clean.each[0].memGrams)) +
+    " of items, and a published score of <strong>" + f4(S.clean.decon) + "</strong> against an expectation of exactly 0.2500 &mdash; " +
+    Math.abs(S.clean.decon - TRUE_SCORE / 1).toFixed(4) + " away, which is " +
+    (Math.abs(S.clean.decon - TRUE_SCORE) / Math.sqrt(0.1875 / (W * DEFAULTS.nItems))).toFixed(2) +
+    " standard errors on " + (W * DEFAULTS.nItems).toLocaleString() + " pooled items. " +
+    "It beats every filtered design on this page while reporting a contamination figure of " + pct(S.clean.flagRate) +
+    " &mdash; the same figure the rewritten world reports, which is exactly why the figure is not the evidence.");
+}
+
+/* --- stage 5: degeneracy, exact counts, error bars --- */
+function stage5(){
+  var lsw = sweepL({}, [2, 3, 4, 5, 6, 8, 13], N_CONV, 0);
+  S.lsw = lsw;
+  tbl("tL", ["memorisation length L", "distinct L-grams in a clean corpus", "items 'memorised' by accident", "closed form"],
+    lsw.map(function(r){
+      return { cls: r.accRate > 0.02 ? "ctrl" : "win",
+        cells: ["L = " + r.L, r.memGrams.toLocaleString(), pct(r.accRate),
+                pct(pFlagClosed(DEFAULTS.v, r.L, DEFAULTS.k, r.memGrams))] };
+    }));
+  var bad = lsw.filter(function(r){ return r.accRate > 0.02; }).map(function(r){ return r.L; });
+  var okL = lsw.filter(function(r){ return r.accRate <= 0.02; }).map(function(r){ return r.L; });
+  set("fDegen", "<strong>&#9888; The short-L escape is a degeneracy, and it is declared rather than used.</strong> At L = " +
+    bad.join(", ") + " an item is &lsquo;memorised&rsquo; up to " + pct(Math.max.apply(null, lsw.map(function(r){ return r.accRate; }))) +
+    " of the time <em>on a corpus that contains no copies of it</em>. At that point the model is not memorising anything; the abstraction has broken, " +
+    "and any conclusion drawn there is about the arithmetic of short strings. Only L = " + okL.join(", ") +
+    " leave the mechanism meaning what it says, which is why L=" + L0 + " is used above and why the lower edge of the filter window is not a free parameter.");
+
+  var pats = [
+    { v: 3,  k: 9,  pat: [0,1,2],       name: "3 distinct symbols, alphabet 3" },
+    { v: 4,  k: 8,  pat: [0,1,2],       name: "3 distinct symbols, alphabet 4" },
+    { v: 16, k: 32, pat: [0,1,2,3,4],   name: "5 distinct symbols, alphabet 16" },
+    { v: 2,  k: 20, pat: [0,1,0,1],     name: "an alternating 4-gram, alphabet 2" },
+    { v: 2,  k: 20, pat: [0,0,0,0],     name: "a repeated 4-gram, alphabet 2" },
+    { v: 8,  k: 24, pat: [0,0,0,0,0],   name: "a repeated 5-gram, alphabet 8" }
+  ];
+  S.pats = pats.map(function(p){
+    var ex = pContainExact(p.v, p.k, p.pat), ind = pContainIndep(p.v, p.k, p.pat.length);
+    return { p: p, exact: ex, indep: ind, ratio: ex > 0 ? ind / ex : 0,
+             avoid: countAvoiding(p.v, p.k, p.pat), total: powBig(p.v, p.k) };
+  });
+  tbl("tExact", ["pattern", "strings that avoid it", "of", "exact P(contains)", "independence estimate", "independence / exact"],
+    S.pats.map(function(r){
+      return { cls: r.ratio > 1.05 ? "ctrl" : "", cells: [r.p.name, r.avoid.toString(), r.total.toString(),
+               r.exact.toExponential(6), r.indep.toExponential(6), r.ratio.toFixed(3) + "x"] };
+    }));
+  var worstP = S.pats.reduce(function(a, b){ return b.ratio > a.ratio ? b : a; });
+  var bestP = S.pats.reduce(function(a, b){ return Math.abs(b.ratio - 1) < Math.abs(a.ratio - 1) ? b : a; });
+  set("fExact", "<strong>The independence formula is exact where it does not matter and wrong where it does.</strong> On " +
+    bestP.p.name + " it is within " + ((Math.abs(bestP.ratio - 1)) * 100).toFixed(4) + "% of the exact count. On " +
+    worstP.p.name + " it over-states by <strong>" + worstP.ratio.toFixed(3) +
+    "x</strong>, because a self-overlapping pattern cannot start again everywhere it appears to be able to &mdash; " +
+    "and self-overlapping grams are precisely the boilerplate ones a real corpus is full of. Every count in this table is exact integer arithmetic over the KMP automaton for the pattern, " +
+    "and small enough to be checked by enumerating all " + S.pats[0].total.toString() + " strings for the first row.");
+
+  var ratios = S.ds.map(function(row){
+    return row.cells.filter(function(c){ return c.sim > 0.02; }).map(function(c){ return c.closed / c.sim; });
+  }).reduce(function(a, b){ return a.concat(b); }, []);
+  var rmax = ratios.length ? Math.max.apply(null, ratios) : 1, rmin = ratios.length ? Math.min.apply(null, ratios) : 1;
+  set("fDensity", "<strong>In the aggregate the formula holds up.</strong> Across the corpus-size table above, wherever the simulated false-flag rate is large enough to measure, " +
+    "the closed form lands between <strong>" + rmin.toFixed(3) + "x</strong> and <strong>" + rmax.toFixed(3) +
+    "x</strong> of it. That is what licenses the extrapolation to corpus sizes this page cannot simulate &mdash; the floor table is the formula, not a guess.");
+
+  var ms = [S.verb.each[0].N, S.verb.each[0].keptN, S.sw[N_CONV - 3].keptN, S.sw[2].keptN, S.sw[0].keptN];
+  var seen = {}, mlist = [];
+  ms.forEach(function(m){ if (!seen[m] && m > 0){ seen[m] = 1; mlist.push(m); } });
+  mlist.sort(function(a, b){ return b - a; });
+  var d = 0.02;
+  S.binom = mlist.map(function(m){
+    return { m: m, exact: binomTwoSidedExact(m, d), norm: normTwoSided(m, d) };
+  });
+  tbl("tBinom", ["items surviving the filter", "exact P(|score - 1/4| >= 2pp)", "normal approximation", "approximation error"],
+    S.binom.map(function(r){
+      return { cls: r.m < 20 ? "ctrl" : "", cells: [r.m, r.exact.toFixed(6), r.norm.toFixed(6),
+               (100 * (r.norm - r.exact)).toFixed(2) + "pp"] };
+    }));
+  var tiny = S.binom[S.binom.length - 1];
+  set("fBinom", "<strong>&#128308; On " + tiny.m + " surviving items the score is <em>certain</em> to be more than 2 points from the truth</strong> &mdash; exactly " +
+    tiny.exact.toFixed(4) + ", because with " + tiny.m + " four-choice items no attainable score is that close &mdash; while the normal approximation reports " +
+    tiny.norm.toFixed(4) + ". The aggressive filter did not clean the benchmark, it destroyed the sample, and the standard error formula does not notice: " +
+    "it is a statement about a distribution the benchmark no longer has.");
+
+  S.pats.forEach(function(r){
+    ok(r.avoid <= r.total, "the avoiding count never exceeds the alphabet count for " + r.p.name);
+    ok(r.exact >= 0 && r.exact <= 1, "the exact containment probability is a probability for " + r.p.name);
+    ok(countAvoiding(r.p.v, r.p.pat.length - 1, r.p.pat) === powBig(r.p.v, r.p.pat.length - 1),
+       "a string shorter than the pattern always avoids it, for " + r.p.name);
+  });
+  S.binom.forEach(function(r){
+    ok(r.exact >= 0 && r.exact <= 1, "the exact binomial tail is a probability at m=" + r.m);
+    ok(binomTailQuarter(r.m, 0) === 1, "P(X >= 0) is one at m=" + r.m);
+    ok(binomTailQuarter(r.m, r.m + 1) === 0, "P(X > m) is zero at m=" + r.m);
+    ok(binomTailQuarter(r.m, 1) >= binomTailQuarter(r.m, 2), "the binomial tail is non-increasing in a at m=" + r.m);
+  });
+  ok(Math.abs(normCdf(0) - 0.5) < 1e-9, "the normal CDF is one half at zero");
+  ok(Math.abs(normCdf(1.3) + normCdf(-1.3) - 1) < 1e-6, "the normal CDF is symmetric");
+  for (var li = 1; li < S.lsw.length; li++)
+    ok(S.lsw[li].accRate <= S.lsw[li-1].accRate + 1e-12, "accidental overlap falls as L grows (L=" + S.lsw[li].L + ")");
+
+  set("fIdent", "<strong>Checked as identities, not as numbers.</strong> Every point of inflation on this page is an item the model answered from memory that it would otherwise have guessed wrong &mdash; " +
+    "verified item by item in all " + W + " worlds. For any n &le; L, a memorised item is <em>necessarily</em> flagged, because an L-gram present in the corpus contains an n-gram present in the corpus; " +
+    "the page asserts that the missed-benefit count is exactly zero there rather than checking it is small. And flagging is monotone: an n-gram match implies an (n&minus;1)-gram match, so the flag rate can only fall as n grows, " +
+    "which is asserted across the whole sweep.");
+
+  set("fN1", "<strong>1. The fix I set out to recommend was &lsquo;use a shorter n-gram&rsquo;, and it is Pareto-dominated at the short end.</strong> " +
+    "n=3 removes every point of inflation and publishes " + f4(S.sw[0].decon) + " from " + S.sw[0].keptN +
+    " surviving items, which the exact binomial says cannot be within 2 points of the truth. The correct n is n=" + L0 +
+    ", and you can only know that if you know L.");
+  set("fN2", "<strong>2. The evasion band is not a monotone dial.</strong> A more aggressive rewrite is better for the evader only up to the point where the runs drop below L, after which the copy stops helping at all &mdash; " +
+    "so the interesting region is bounded on BOTH sides, and a page that only swept &lsquo;more rewriting&rsquo; would have concluded the opposite.");
+  set("fN3", "<strong>3. The closed form was expected to be badly wrong and it is not.</strong> The independence approximation for the false-flag rate stays within a few percent of the simulator across the whole density range measured, " +
+    "so the interesting failure is not the aggregate formula &mdash; it is the per-pattern case, where a self-overlapping gram makes it over-state by " +
+    S.pats.reduce(function(a, b){ return b.ratio > a.ratio ? b : a; }).ratio.toFixed(2) + "x.");
+  set("fN4", "<strong>4. The mechanism has a floor that had to be declared instead of hidden.</strong> Short memorisation lengths make items &lsquo;memorised&rsquo; by pure chance on a corpus with no copies in it &mdash; up to " +
+    pct(Math.max.apply(null, S.lsw.map(function(r){ return r.accRate; }))) + " at the shortest L tested. Rather than pick parameters where that is invisible, the page measures it, shows which L are unusable, and confines every headline to the range where it is under 2%.");
+}
+
+/* --- stage 6: checks list + badge --- */
+function stage6(){
+  set("ulChecks", CHECKS.map(function(c){
+    return "<li><span class=\"pill " + (c.pass ? "ok\">PASS" : "no\">FAIL") + "</span> " + c.label + "</li>";
+  }).join(""));
+  var el = document.getElementById("selftest");
+  if (FAILED){
+    el.textContent = (CHECKS.length - FAILED) + " / " + CHECKS.length + " checks passed, " + FAILED + " FAILED";
+    el.style.background = "#7f1d1d";
+    if (typeof console !== "undefined") console.error("AI day74 assertions FAILED", CHECKS.filter(function(c){ return !c.pass; }));
+  } else {
+    el.textContent = CHECKS.length + " / " + CHECKS.length + " checks passed";
+  }
+  document.body.setAttribute("data-ready", "1");
+}
+
+/* tabs */
+Array.prototype.forEach.call(document.querySelectorAll(".tab[data-p]"), function(b){
+  b.addEventListener("click", function(){
+    Array.prototype.forEach.call(document.querySelectorAll(".tab[data-p]"), function(x){
+      x.setAttribute("aria-selected", x === b ? "true" : "false");
+    });
+    ["look","understand","build"].forEach(function(n){ document.getElementById("p-" + n).hidden = (n !== b.dataset.p); });
+  });
+});
+
+/* the BUILD tab re-runs the engine with your parameters */
+function clampInt(id, lo, hi, dflt){
+  var x = Math.round(+document.getElementById(id).value);
+  if (!isFinite(x)) x = dflt;
+  return Math.max(lo, Math.min(hi, x));
+}
+function runCustom(){
+  var v = clampInt("inV", 8, 128, 64), k = clampInt("inK", 12, 96, 48);
+  var nI = clampInt("inN", 50, 3000, 600), cp = clampInt("inC", 0, 100, 30);
+  var e = clampInt("inE", 0, 48, 8), L = clampInt("inL", 2, 16, 5);
+  var n = clampInt("inF", 2, 16, 13), bg = clampInt("inB", 50, 6000, 400);
+  var cap = 2 * chunkFor(v);
+  var note = "";
+  if (L > cap){ L = cap; note = "L capped at " + cap + " for this alphabet. "; }
+  if (n > cap){ n = cap; note += "n capped at " + cap + " for this alphabet."; }
+  document.getElementById("runNote").textContent = note;
+  var over = { v: v, k: k, nItems: nI, contamPer1000: cp * 10, editEvery: e, bgDocs: bg };
+  var freshOver = { v: v, k: k, nItems: nI, contamPer1000: 0, editEvery: e, bgDocs: bg };
+  var w = makeWorld(over, 0), r = measure(w, L, n), tightN = Math.min(L, cap);
+  var t = measure(w, L, tightN), fresh = measure(makeWorld(freshOver, 0), L, n);
+  tbl("tRun", ["design", "reported contamination", "measured score", "guess-only score", "raw inflation", "score after filter", "inflation left", "items kept"], [
+    { cls: "ctrl", cells: ["your filter n=" + n, pct(r.flagRate), f4(r.measured), f4(r.truth), pp(r.inflation), f4(r.decon), pp(r.decon - TRUE_SCORE), r.keptN + " / " + r.N] },
+    { cls: "win",  cells: ["filter at n=L=" + tightN, pct(t.flagRate), f4(t.measured), f4(t.truth), pp(t.inflation), f4(t.decon), pp(t.decon - TRUE_SCORE), t.keptN + " / " + t.N] },
+    { cls: "win",  cells: ["fresh benchmark, no filter", pct(fresh.flagRate), f4(fresh.measured), f4(fresh.truth), pp(fresh.inflation), f4(fresh.decon), pp(fresh.decon - TRUE_SCORE), fresh.keptN + " / " + fresh.N] }
+  ]);
+  document.getElementById("runNote").textContent = note +
+    "longest untouched run " + (e > 0 ? e - 1 : k) + " tokens · answered from memory " + pct1(r.memRate) +
+    " · memorised by accident " + pct(r.accRate) + " · clean items the filter deleted " + pct(r.ffRate) +
+    " · filter recall on items that helped " + pct1(r.recall) + " · corpus " + r.tokens.toLocaleString() + " tokens.";
+}
+document.getElementById("btnRun").addEventListener("click", runCustom);
+
+/* A plain setTimeout pump. No requestAnimationFrame, no IntersectionObserver:
+   a background tab must still finish this page, and rAF does not run there. */
+var STAGES = [stage1, stage2, stage3, stage4, stage5, runCustom, stage6], si = 0;
+function pump(){
+  var fn = STAGES[si++];
+  try { fn(); }
+  catch (err){
+    var el = document.getElementById("selftest");
+    el.textContent = "stage " + si + " threw: " + (err && err.message ? err.message : err);
+    el.style.background = "#7f1d1d";
+    if (typeof console !== "undefined") console.error("AI day74 stage " + si + " threw", err);
+    return;
+  }
+  if (si < STAGES.length) setTimeout(pump, 0);
+}
+setTimeout(pump, 0);
+</script>
+</body>
+</html>

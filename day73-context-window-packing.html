@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIFromZero &middot; Day 73 &mdash; Context-window packing: &ldquo;it fit&rdquo; is not &ldquo;it was used&rdquo;</title>
+<style>
+:root{
+  --bg:#f8fafc; --card:#ffffff; --ink:#0f172a; --dim:#475569; --line:#e2e8f0;
+  --accent:#6d28d9; --accent-soft:#ede9fe; --good:#047857; --bad:#b91c1c; --warn:#b45309;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55}
+header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.wrap{max-width:1080px;margin:0 auto;padding:18px 20px}
+.kicker{font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--accent);margin:0 0 8px}
+h1{font-size:20px;line-height:1.35;margin:0 0 10px;font-weight:800}
+h2{font-size:17px;margin:26px 0 10px;font-weight:800}
+h3{font-size:14px;margin:18px 0 6px;font-weight:700;color:var(--dim)}
+p{margin:0 0 12px}
+.lede{color:var(--dim);font-size:14px}
+.tabs{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 15px;font-size:13px;
+     font-weight:700;cursor:pointer;color:var(--dim)}
+.tab[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+main{max-width:1080px;margin:0 auto;padding:8px 20px 70px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+.scrollx{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;font-family:var(--mono)}
+th,td{border-bottom:1px solid var(--line);padding:6px 9px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{color:var(--dim);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+tr.win td{background:#ecfdf5}
+tr.ctrl td{background:#fef2f2}
+code,kbd{font-family:var(--mono);font-size:12.5px;background:#f1f5f9;border-radius:4px;padding:1px 5px}
+.big{font-size:26px;font-weight:800;font-family:var(--mono)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px}
+.stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:#fff}
+.stat .lab{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+.flag{border-left:4px solid var(--accent);background:var(--accent-soft);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+.flag.bad{border-color:var(--bad);background:#fef2f2}
+.flag.good{border-color:var(--good);background:#ecfdf5}
+.pill{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.pill.ok{background:#dcfce7;color:var(--good)}
+.pill.no{background:#fee2e2;color:var(--bad)}
+#selftest{position:fixed;right:14px;bottom:14px;background:#0f172a;color:#e2e8f0;font-family:var(--mono);
+  font-size:11.5px;padding:8px 12px;border-radius:8px;z-index:40;max-width:330px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+.panel[hidden]{display:none}
+.muted{color:var(--dim);font-size:13px}
+ul{margin:0 0 12px 18px;padding:0}
+li{margin:0 0 6px}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <p class="kicker">AIFROMZERO &middot; DAY 73</p>
+    <h1>&#129513; Context-window packing &mdash; every packer reports it filled the window, and that number cannot tell you whether the answer is still in there.</h1>
+    <p class="lede">Six packers, one budget, one corpus. <strong>Utilisation</strong> &mdash; the fraction of the window you actually filled, the number every retrieval stack prints &mdash; separates them by almost nothing. Whether the sentence that answers the question survived separates them by a factor of several. The control fills the window best of all and keeps the answer least.</p>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true"  data-p="look">&#128064; LOOK</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="understand">&#129504; UNDERSTAND</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="build">&#128296; BUILD</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="panel" id="p-look">
+    <div class="card">
+      <h2>The scoreboard</h2>
+      <p class="muted">2,000 corpora &times; 5 budgets = 10,000 packing problems, each solved by all six packers. Every number below is computed in your browser on load.</p>
+      <div class="scrollx"><table id="tMain"></table></div>
+      <div class="flag bad" id="fSpread"></div>
+    </div>
+
+    <div class="card">
+      <h2>The one number everybody reports</h2>
+      <div class="grid">
+        <div class="stat"><div class="lab">utilisation spread</div><div class="big" id="sUtil">&mdash;</div><div class="muted">best minus worst, across all six</div></div>
+        <div class="stat"><div class="lab">answer-kept spread</div><div class="big" id="sKeep">&mdash;</div><div class="muted">same six, same runs</div></div>
+        <div class="stat"><div class="lab">ratio</div><div class="big" id="sRatio">&mdash;</div><div class="muted">how much wider the thing you do not measure is</div></div>
+      </div>
+      <div class="flag" id="fBlind"></div>
+    </div>
+
+    <div class="card">
+      <h2>The control</h2>
+      <p><code>truncate</code> is <code>greedy_score</code> plus one line: when the next document does not fit, put in as much of it as fits. It is the packer almost every hand-rolled context builder actually is.</p>
+      <div class="scrollx"><table id="tCtrl"></table></div>
+      <div class="flag bad" id="fCtrl"></div>
+    </div>
+
+    <div class="card">
+      <h2>Exact optimisation is not the fix</h2>
+      <p><code>knapsack</code> maximises total relevance exactly, by dynamic programming over the budget. It is optimal for the thing it optimises.</p>
+      <div class="flag" id="fKnap"></div>
+    </div>
+
+    <div class="card">
+      <h2>Counting tokens by dividing by four</h2>
+      <p>The corpus carries a true token count per document. The estimator every quick script uses is <code>chars/4</code>.</p>
+      <div class="flag bad" id="fEst"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="p-understand" hidden>
+    <div class="card">
+      <h2>What is actually being measured</h2>
+      <p>A packing problem here is a budget <code>B</code> and a set of documents, each with an integer token cost, an integer relevance score, and a flag saying whether it carries the span that answers the question. Exactly one document per corpus carries it.</p>
+      <ul>
+        <li><strong>utilisation</strong> = tokens placed / <code>B</code>. Never above 1.</li>
+        <li><strong>score</strong> = sum of the relevance of whole documents placed.</li>
+        <li><strong>answer kept</strong> = the answer document was placed <em>whole</em>. A truncated answer document does not count, because the span it carries is what the truncation removed.</li>
+      </ul>
+      <p>The six packers differ only in which documents they choose:</p>
+      <ul>
+        <li><code>greedy_score</code> &mdash; highest relevance first, skip anything that does not fit.</li>
+        <li><code>greedy_density</code> &mdash; highest relevance <em>per token</em> first.</li>
+        <li><code>knapsack</code> &mdash; exact 0/1 dynamic programme; maximum achievable score.</li>
+        <li><code>recency</code> &mdash; newest first, which is what a chat history does.</li>
+        <li><code>answer_oracle</code> &mdash; places the answer document first, then greedy density. Not a real policy; it is the ceiling.</li>
+        <li><code>truncate</code> &mdash; the control.</li>
+      </ul>
+      <div class="flag good">
+        <strong>Why the ceiling is in the table.</strong> Without <code>answer_oracle</code> you cannot tell whether a low answer-kept rate is the packer&rsquo;s fault or the budget&rsquo;s. It separates &ldquo;this packer threw the answer away&rdquo; from &ldquo;the answer never fit&rdquo;.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Why utilisation cannot see the difference</h2>
+      <p>Utilisation is a property of the <em>total</em>. Any packer that keeps taking documents until nothing else fits ends up in the same narrow band, because the band is set by the size of the documents, not by which ones you chose. Two packers that disagree about every single document can report utilisation to within a percentage point of each other.</p>
+      <div class="flag" id="fWhy"></div>
+      <p>The answer-kept rate is a property of <em>one specific document</em>. Nothing about filling the window constrains it, which is exactly why the number that is easy to print is the number that carries no information about the thing you care about.</p>
+    </div>
+
+    <div class="card">
+      <h2>Three things that went against the build</h2>
+      <div class="flag" id="fN1"></div>
+      <div class="flag" id="fN2"></div>
+      <div class="flag" id="fN3"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="p-build" hidden>
+    <div class="card">
+      <h2>Run it yourself</h2>
+      <p class="muted">Everything between <code>ENGINE:BEGIN</code> and <code>ENGINE:END</code> in this file is pure &mdash; no DOM, no network, no clock, no <code>Math.random</code>. The generator is the same 31-bit LCG the rest of this series uses, drawn from the <strong>high</strong> bits: its low bit alternates on every step, so <code>% n</code> on an even bound is perfectly uniform and perfectly predictable.</p>
+      <div class="grid">
+        <div class="stat"><label class="lab" for="inB">budget (tokens)</label><br><input id="inB" type="number" value="2000" min="200" max="8000" step="100"></div>
+        <div class="stat"><label class="lab" for="inD">documents per corpus</label><br><input id="inD" type="number" value="24" min="4" max="60"></div>
+        <div class="stat"><label class="lab" for="inN">corpora</label><br><input id="inN" type="number" value="400" min="20" max="4000" step="20"></div>
+      </div>
+      <p><button class="tab" id="btnRun" aria-selected="true">re-run</button></p>
+      <div class="scrollx"><table id="tRun"></table></div>
+    </div>
+    <div class="card">
+      <h2>The invariants this page checks on load</h2>
+      <ul class="muted" id="ulChecks"></ul>
+    </div>
+  </section>
+</main>
+
+<div id="selftest">running&hellip;</div>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// Pure. No DOM, no network, no clock, no Math.random.
+
+var MULT = 1103515245, INC = 12345, MASK = 0x7FFFFFFF, SCALE = 2147483648;
+
+function Lcg(seed){ this.state = seed >>> 0; }
+Lcg.prototype.nextInt = function(){
+  this.state = (Number((BigInt(MULT) * BigInt(this.state) + BigInt(INC)) & BigInt(MASK)));
+  return this.state;
+};
+// Uniform in [0, n) from the HIGH bits. Not "% n": this LCG has an odd multiplier
+// AND an odd increment, so its low bit flips every step and "% n" for even n
+// alternates parity forever while staying perfectly uniform. Not a bitwise shift
+// either - JS coerces bitwise operands to 32 bits and nextInt()*n overflows that.
+Lcg.prototype.below = function(n){ return Math.floor((this.nextInt() * n) / SCALE); };
+
+function makeCorpus(seed, nDocs){
+  var r = new Lcg(seed), docs = [], i;
+  for (i = 0; i < nDocs; i++){
+    var tokens = 40 + r.below(361);          // 40..400
+    var score  = 1 + r.below(1000);          // 1..1000
+    // chars are what a naive estimator sees: ~4 per token, wobbling by document
+    var chars  = tokens * 4 + r.below(2 * tokens + 1) - tokens;
+    docs.push({ id: i, tokens: tokens, score: score, chars: chars, answer: false });
+  }
+  docs[r.below(nDocs)].answer = true;        // exactly one answer document
+  return docs;
+}
+
+function place(docs, order, budget, allowCut){
+  var used = 0, score = 0, kept = false, placed = [], i, d, room;
+  for (i = 0; i < order.length; i++){
+    d = docs[order[i]];
+    if (used + d.tokens <= budget){
+      used += d.tokens; score += d.score; placed.push(d.id);
+      if (d.answer) kept = true;
+    } else if (allowCut){
+      room = budget - used;
+      if (room > 0){ used += room; placed.push(-1 - d.id); }   // a cut fragment
+      break;                                                    // window is full
+    }
+  }
+  return { used: used, score: score, kept: kept, placed: placed };
+}
+
+function byScore(docs){ var o = docs.map(function(d){return d.id;});
+  o.sort(function(a,b){ return docs[b].score - docs[a].score || a - b; }); return o; }
+function byDensity(docs){ var o = docs.map(function(d){return d.id;});
+  o.sort(function(a,b){ var x = docs[b].score/docs[b].tokens - docs[a].score/docs[a].tokens;
+    return x !== 0 ? (x > 0 ? 1 : -1) : a - b; }); return o; }
+function byRecency(docs){ var o = docs.map(function(d){return d.id;}); o.reverse(); return o; }
+function byOracle(docs){
+  var ans = -1, i; for (i = 0; i < docs.length; i++) if (docs[i].answer) ans = i;
+  var rest = byDensity(docs).filter(function(id){ return id !== ans; });
+  return [ans].concat(rest);
+}
+
+// exact 0/1 knapsack over the token budget
+function knapsack(docs, budget){
+  var n = docs.length, dp = new Int32Array(budget + 1), take = [], b, i, w, best;
+  for (i = 0; i < n; i++){
+    take.push(new Uint8Array(budget + 1));
+    w = docs[i].tokens;
+    for (b = budget; b >= w; b--){
+      var cand = dp[b - w] + docs[i].score;
+      if (cand > dp[b]){ dp[b] = cand; take[i][b] = 1; }
+    }
+  }
+  best = budget; var chosen = [], keptAns = false, used = 0;
+  for (i = n - 1; i >= 0; i--){
+    if (take[i][best]){ chosen.push(i); used += docs[i].tokens; if (docs[i].answer) keptAns = true; best -= docs[i].tokens; }
+  }
+  return { used: used, score: dp[budget], kept: keptAns, placed: chosen.reverse() };
+}
+
+var POLICIES = ["greedy_score","greedy_density","knapsack","recency","answer_oracle","truncate"];
+
+function pack(name, docs, budget){
+  if (name === "greedy_score")   return place(docs, byScore(docs),   budget, false);
+  if (name === "greedy_density") return place(docs, byDensity(docs), budget, false);
+  if (name === "recency")        return place(docs, byRecency(docs), budget, false);
+  if (name === "answer_oracle")  return place(docs, byOracle(docs),  budget, false);
+  if (name === "truncate")       return place(docs, byScore(docs),   budget, true);
+  if (name === "knapsack")       return knapsack(docs, budget);
+  throw new Error("unknown policy " + name);
+}
+
+function sweep(nCorpora, nDocs, budgets, seed0){
+  var acc = {}, i, p, b, c;
+  for (i = 0; i < POLICIES.length; i++) acc[POLICIES[i]] = { used:0, cap:0, score:0, kept:0, runs:0, cut:0 };
+  var estWrong = 0, estTotal = 0, knapBeatsDens = 0, densBeatsKnap = 0, pairs = 0;
+  for (c = 0; c < nCorpora; c++){
+    var docs = makeCorpus(seed0 + c * 7919, nDocs);
+    for (b = 0; b < budgets.length; b++){
+      var budget = budgets[b], res = {};
+      for (i = 0; i < POLICIES.length; i++){
+        p = POLICIES[i]; res[p] = pack(p, docs, budget);
+        var a = acc[p];
+        a.used += res[p].used; a.cap += budget; a.score += res[p].score;
+        a.kept += res[p].kept ? 1 : 0; a.runs += 1;
+        if (p === "truncate" && res[p].placed.some(function(x){ return x < 0; })) a.cut += 1;
+      }
+      // does the answer document survive under an estimator that counts chars/4?
+      var estUsed = 0, estKept = false, ord = byScore(docs), k, d2;
+      for (k = 0; k < ord.length; k++){
+        d2 = docs[ord[k]];
+        var est = Math.ceil(d2.chars / 4);
+        if (estUsed + est <= budget){ estUsed += est; if (d2.answer) estKept = true; }
+      }
+      estTotal++;
+      // an estimator error that MATTERS: it claims to fit, but the true tokens overflow.
+      // The admission test must run on the ESTIMATE and the total on the REAL cost -
+      // adding one to the other is the unit mix-up this measurement is about.
+      var estRun = 0, realRun = 0;
+      for (k = 0; k < ord.length; k++){
+        d2 = docs[ord[k]]; var e2 = Math.ceil(d2.chars / 4);
+        if (estRun + e2 <= budget){ estRun += e2; realRun += d2.tokens; }
+      }
+      if (realRun > budget) estWrong++;
+      if (res.knapsack.kept !== res.greedy_density.kept){
+        pairs++;
+        if (res.knapsack.kept) knapBeatsDens++; else densBeatsKnap++;
+      }
+    }
+  }
+  var out = { policies: {}, estOverflow: estWrong / estTotal, estTotal: estTotal,
+              knapBeatsDens: knapBeatsDens, densBeatsKnap: densBeatsKnap, pairs: pairs };
+  for (i = 0; i < POLICIES.length; i++){
+    p = POLICIES[i]; var a = acc[p];
+    out.policies[p] = { util: a.used / a.cap, keep: a.kept / a.runs,
+                        score: a.score / a.runs, runs: a.runs, cutRate: a.cut / a.runs };
+  }
+  return out;
+}
+// ===== ENGINE:END =====
+
+/* ---------- presentation ---------- */
+var CHECKS = [], FAILED = 0;
+function ok(cond, label){ CHECKS.push({ pass: !!cond, label: label }); if (!cond) FAILED++; }
+function near(a, b, tol, label){ ok(Math.abs(a - b) <= tol, label + " (got " + a + ")"); }
+function pct(x){ return (100 * x).toFixed(2) + "%"; }
+function f2(x){ return x.toFixed(2); }
+
+var BUDGETS = [800, 1400, 2000, 3000, 4500];
+var R = sweep(2000, 24, BUDGETS, 20260828);
+
+/* --- invariants: these hold for ANY corpus, so they are bounds, not constants --- */
+POLICIES.forEach(function(p){
+  var s = R.policies[p];
+  ok(s.util >= 0 && s.util <= 1,  "utilisation is a fraction for " + p);
+  ok(s.keep >= 0 && s.keep <= 1,  "answer-kept is a rate for " + p);
+  ok(s.runs === 2000 * BUDGETS.length, "every policy saw every problem: " + p);
+});
+ok(R.policies.answer_oracle.keep >= R.policies.greedy_score.keep,   "the oracle is a ceiling over greedy_score");
+ok(R.policies.answer_oracle.keep >= R.policies.knapsack.keep,       "the oracle is a ceiling over knapsack");
+ok(R.policies.answer_oracle.keep >= R.policies.truncate.keep,       "the oracle is a ceiling over truncate");
+ok(R.policies.knapsack.score     >= R.policies.greedy_score.score - 1e-9,   "knapsack is optimal for score vs greedy_score");
+ok(R.policies.knapsack.score     >= R.policies.greedy_density.score - 1e-9, "knapsack is optimal for score vs greedy_density");
+ok(R.policies.truncate.util      >= R.policies.greedy_score.util,   "cutting mid-document cannot lower utilisation");
+
+var utils = POLICIES.map(function(p){ return R.policies[p].util; });
+var keeps = POLICIES.map(function(p){ return R.policies[p].keep; });
+var utilSpread = Math.max.apply(null, utils) - Math.min.apply(null, utils);
+var keepSpread = Math.max.apply(null, keeps) - Math.min.apply(null, keeps);
+ok(keepSpread > utilSpread, "the unmeasured quantity separates the packers more than the measured one");
+
+/* --- render --- */
+function tbl(el, head, rows){
+  var h = "<thead><tr>" + head.map(function(c){ return "<th>" + c + "</th>"; }).join("") + "</tr></thead><tbody>";
+  h += rows.map(function(r){
+    return "<tr class=\"" + (r.cls || "") + "\">" + r.cells.map(function(c){ return "<td>" + c + "</td>"; }).join("") + "</tr>";
+  }).join("");
+  document.getElementById(el).innerHTML = h + "</tbody>";
+}
+
+var best = POLICIES.reduce(function(a,b){ return R.policies[b].keep > R.policies[a].keep ? b : a; });
+tbl("tMain", ["packer","utilisation","answer kept","mean score"], POLICIES.map(function(p){
+  var s = R.policies[p];
+  return { cls: p === "truncate" ? "ctrl" : (p === best ? "win" : ""),
+           cells: [p, pct(s.util), pct(s.keep), s.score.toFixed(0)] };
+}));
+
+document.getElementById("sUtil").textContent  = pct(utilSpread);
+document.getElementById("sKeep").textContent  = pct(keepSpread);
+document.getElementById("sRatio").textContent = (keepSpread / (utilSpread || 1e-9)).toFixed(1) + "x";
+
+document.getElementById("fSpread").innerHTML =
+  "<strong>&#128308; Utilisation spans " + pct(utilSpread) + " across all six packers. Answer-kept spans " + pct(keepSpread) +
+  ".</strong> Same corpora, same budgets, same runs. The number a retrieval dashboard prints is the one that does not move.";
+
+document.getElementById("fBlind").innerHTML =
+  "Every packer here reports it filled between <strong>" + pct(Math.min.apply(null, utils)) + "</strong> and <strong>" +
+  pct(Math.max.apply(null, utils)) + "</strong> of the window. Reading that column alone, they are the same system.";
+
+var t = R.policies.truncate, g = R.policies.greedy_score;
+tbl("tCtrl", ["", "greedy_score", "truncate (control)"], [
+  { cells: ["utilisation", pct(g.util), pct(t.util)] },
+  { cells: ["mean score",  g.score.toFixed(0), t.score.toFixed(0)] },
+  { cls: "ctrl", cells: ["answer kept", pct(g.keep), pct(t.keep)] },
+  { cells: ["runs ending in a cut fragment", "0.00%", pct(t.cutRate)] }
+]);
+document.getElementById("fCtrl").innerHTML =
+  "<strong>&#128308; The control fills the window better and keeps the answer worse.</strong> It cuts a document on <strong>" +
+  pct(t.cutRate) + "</strong> of runs, and every cut fragment still counts toward utilisation &mdash; which is why the metric rewards it. " +
+  "Its utilisation is <strong>" + pct(t.util - g.util) + "</strong> higher than <code>greedy_score</code>; its answer-kept rate is <strong>" +
+  pct(g.keep - t.keep) + "</strong> lower.";
+
+var kn = R.policies.knapsack, dn = R.policies.greedy_density;
+document.getElementById("fKnap").innerHTML =
+  "<strong>Knapsack wins the objective and loses the question.</strong> Mean score " + kn.score.toFixed(0) + " against " +
+  dn.score.toFixed(0) + " for <code>greedy_density</code> &mdash; optimal, as promised. Answer kept: <strong>" + pct(kn.keep) +
+  "</strong> against <strong>" + pct(dn.keep) + "</strong>. On the " + R.pairs.toLocaleString() +
+  " problems where the two disagree about the answer document, density is the one that keeps it <strong>" +
+  pct(R.densBeatsKnap / (R.pairs || 1)) + "</strong> of the time. Maximising total relevance is not a proxy for retaining any particular sentence.";
+
+document.getElementById("fEst").innerHTML =
+  "<strong>&#128308; Counting tokens as <code>chars/4</code> overflows the real window on " + pct(R.estOverflow) +
+  " of " + R.estTotal.toLocaleString() + " problems.</strong> The packer believes it fit. The window disagrees, and the part that " +
+  "falls off the end is the part the estimator was most wrong about.";
+
+document.getElementById("fWhy").innerHTML =
+  "Measured here: the gap between the best and worst utilisation is <strong>" + pct(utilSpread) +
+  "</strong>, while the gap in answer retention is <strong>" + pct(keepSpread) + "</strong> &mdash; <strong>" +
+  (keepSpread / (utilSpread || 1e-9)).toFixed(1) + "x</strong> wider.";
+
+document.getElementById("fN1").innerHTML =
+  "<strong>1. The exact optimum is not the best packer.</strong> <code>knapsack</code> keeps the answer " + pct(kn.keep) +
+  " of the time; <code>" + best + "</code> keeps it " + pct(R.policies[best].keep) + ". Optimality is defined against the objective you wrote down.";
+document.getElementById("fN2").innerHTML =
+  "<strong>2. Recency is not obviously worse.</strong> <code>recency</code> &mdash; what a chat history does by default, with no scoring at all &mdash; keeps the answer " +
+  pct(R.policies.recency.keep) + " of the time against <code>greedy_score</code>&rsquo;s " + pct(g.keep) + ".";
+document.getElementById("fN3").innerHTML =
+  "<strong>3. The ceiling is exactly " + pct(R.policies.answer_oracle.keep) + ", and that is the uncomfortable part.</strong> " +
+  "<code>answer_oracle</code> keeps the answer on every single problem, so the budget is never the constraint here: the answer document " +
+  "always fits. Every miss by every other packer is therefore a choice it made, not a window it ran out of &mdash; " +
+  "<code>truncate</code> loses " + pct(R.policies.answer_oracle.keep - R.policies.truncate.keep) +
+  " of problems that were winnable. Had the oracle come in under 100% you could blame the budget; it did not, so you cannot.";
+
+document.getElementById("ulChecks").innerHTML = CHECKS.map(function(c){
+  return "<li><span class=\"pill " + (c.pass ? "ok\">PASS" : "no\">FAIL") + "</span> " + c.label + "</li>";
+}).join("");
+
+/* tabs */
+Array.prototype.forEach.call(document.querySelectorAll(".tab[data-p]"), function(b){
+  b.addEventListener("click", function(){
+    Array.prototype.forEach.call(document.querySelectorAll(".tab[data-p]"), function(x){ x.setAttribute("aria-selected", x === b ? "true" : "false"); });
+    ["look","understand","build"].forEach(function(n){ document.getElementById("p-" + n).hidden = (n !== b.dataset.p); });
+  });
+});
+
+/* the BUILD tab re-runs the engine with your parameters */
+function runCustom(){
+  var B = Math.max(200, Math.min(8000, +document.getElementById("inB").value || 2000));
+  var D = Math.max(4,   Math.min(60,   +document.getElementById("inD").value || 24));
+  var N = Math.max(20,  Math.min(4000, +document.getElementById("inN").value || 400));
+  var r = sweep(N, D, [B], 424242);
+  tbl("tRun", ["packer","utilisation","answer kept","mean score"], POLICIES.map(function(p){
+    var s = r.policies[p];
+    return { cls: p === "truncate" ? "ctrl" : "", cells: [p, pct(s.util), pct(s.keep), s.score.toFixed(0)] };
+  }));
+}
+document.getElementById("btnRun").addEventListener("click", runCustom);
+runCustom();
+
+document.getElementById("selftest").textContent =
+  CHECKS.length + " / " + CHECKS.length + " checks passed";
+if (FAILED) {
+  document.getElementById("selftest").textContent =
+    (CHECKS.length - FAILED) + " / " + CHECKS.length + " checks passed, " + FAILED + " FAILED";
+  document.getElementById("selftest").style.background = "#7f1d1d";
+  console.error("AI day73 assertions FAILED", CHECKS.filter(function(c){ return !c.pass; }));
+}
+</script>
+</body>
+</html>
