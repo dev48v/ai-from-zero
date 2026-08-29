@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIFromZero &middot; Day 75 &mdash; Inference nondeterminism: temperature 0, a fixed seed, and a different reply anyway</title>
+<style>
+:root{
+  --bg:#f7f7fb; --card:#ffffff; --ink:#12101c; --dim:#4c4a63; --line:#e3e1ee;
+  --accent:#5b21b6; --accent-soft:#ede9fe; --good:#046c4e; --bad:#b42318; --warn:#b45309;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55}
+header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.wrap{max-width:1100px;margin:0 auto;padding:18px 20px}
+.kicker{font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--accent);margin:0 0 8px}
+h1{font-size:20px;line-height:1.35;margin:0 0 10px;font-weight:800}
+h2{font-size:17px;margin:26px 0 10px;font-weight:800}
+h3{font-size:14px;margin:18px 0 6px;font-weight:700;color:var(--dim)}
+p{margin:0 0 12px}
+.lede{color:var(--dim);font-size:14px}
+.tabs{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 15px;font-size:13px;
+     font-weight:700;cursor:pointer;color:var(--dim)}
+.tab[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+main{max-width:1100px;margin:0 auto;padding:8px 20px 70px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+.scrollx{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;font-family:var(--mono)}
+th,td{border-bottom:1px solid var(--line);padding:6px 9px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{color:var(--dim);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+tr.win td{background:#ecfdf5}
+tr.ctrl td{background:#fef2f2}
+tr.mid td{background:#fffbeb}
+code,kbd{font-family:var(--mono);font-size:12.5px;background:#f2f1f8;border-radius:4px;padding:1px 5px}
+.big{font-size:26px;font-weight:800;font-family:var(--mono)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px}
+.stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:#fff}
+.stat .lab{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+.flag{border-left:4px solid var(--accent);background:var(--accent-soft);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+.flag.bad{border-color:var(--bad);background:#fef2f2}
+.flag.good{border-color:var(--good);background:#ecfdf5}
+.flag.warn{border-color:var(--warn);background:#fffbeb}
+.pill{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.pill.ok{background:#dcfce7;color:var(--good)}
+.pill.no{background:#fee2e2;color:var(--bad)}
+#selftest{position:fixed;right:14px;bottom:14px;background:#12101c;color:#e7e5f2;font-family:var(--mono);
+  font-size:11.5px;padding:8px 12px;border-radius:8px;z-index:40;max-width:340px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+.panel[hidden]{display:none}
+.muted{color:var(--dim);font-size:13px}
+ul{margin:0 0 12px 18px;padding:0}
+li{margin:0 0 6px}
+input[type=number]{width:100%;font-family:var(--mono);font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:6px}
+button.go{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:8px 16px;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <p class="kicker">AIFROMZERO &middot; DAY 75</p>
+    <h1>&#127922; Inference nondeterminism &mdash; <code>temperature=0</code> and a fixed <code>seed</code> are the two things everyone reaches for, and on this page the seed changes <strong>nothing at all</strong>: the reply still comes back different, and what decides it is how many other people were in your batch.</h1>
+    <p class="lede">Weights that never change. The same prompt, twice. Greedy decoding, same seed, same everything you can put in a request body. Nothing here simulates language: the engine simulates the <strong>arithmetic</strong> &mdash; a logit is a sum of many terms, floating-point addition is not associative, and the order the machine adds them in is picked by the size of the batch you happened to land in. Every number below is computed in your browser on load, from integers, so the &ldquo;exact&rdquo; answer is exact and not an estimate of one.</p>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true"  data-p="look">&#128064; LOOK</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="understand">&#129504; UNDERSTAND</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="build">&#128296; BUILD</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="panel" id="p-look">
+    <div class="card">
+      <h2>The same prompt, twice</h2>
+      <p class="muted" id="mScope">running&hellip;</p>
+      <div class="scrollx"><table id="tMain"></table></div>
+      <div class="flag bad" id="fHead"></div>
+    </div>
+
+    <div class="card">
+      <h2>The two things you were going to try</h2>
+      <div class="grid">
+        <div class="stat"><div class="lab">replies that differ</div><div class="big" id="sDiv">&mdash;</div><div class="muted">greedy, same seed, same weights, same prompt</div></div>
+        <div class="stat"><div class="lab">what fixing the seed changes</div><div class="big" id="sSeed">&mdash;</div><div class="muted">every column, compared bit for bit</div></div>
+        <div class="stat"><div class="lab">chance your reply used one kernel</div><div class="big" id="sOne">&mdash;</div><div class="muted">one reduction shape for the whole reply</div></div>
+      </div>
+      <div class="flag" id="fPair"></div>
+    </div>
+
+    <div class="card">
+      <h2>Who else was in your batch</h2>
+      <p class="muted">The kernel is not told which split to use. It is given a cost model &mdash; the reduction work per block, how many blocks the machine runs at once, and what an extra split costs in the epilogue &mdash; and it picks the <code>K</code> that finishes soonest. That choice is a function of <code>B</code>, the number of rows in the launch, which is a function of who else was being served. Times are in the model&rsquo;s own units; the chosen split is in bold.</p>
+      <div class="scrollx"><table id="tKernel"></table></div>
+      <div class="flag warn" id="fLadder"></div>
+    </div>
+
+    <div class="card">
+      <h2>Which split is the accurate one</h2>
+      <p class="muted">Every split reduced from the <em>same</em> products on the <em>same</em> states, so this comparison is paired &mdash; the only thing that changes between rows is the order of the additions. <code>mean |&Delta;|</code> is the average distance from the exact logit, measured in units of one top-two gap.</p>
+      <div class="scrollx"><table id="tSplit"></table></div>
+      <div class="flag bad" id="fSplit"></div>
+      <div class="flag" id="fAvg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Where in the reply it differs &mdash; and whether anyone notices</h2>
+      <p class="muted">A flip is absorbing: once one token changes, the state that produced the next one has changed too, so everything after it is a different continuation. The closed form uses the measured per-token flip rate and the measured rate at which two decorrelated continuations happen to agree; it is a prediction of the shape, not a fit to it.</p>
+      <div class="scrollx"><table id="tPos"></table></div>
+      <div class="scrollx"><table id="tRead"></table></div>
+      <div class="flag bad" id="fRead"></div>
+    </div>
+
+    <div class="card">
+      <h2>The flakiest test in your suite is the longest one</h2>
+      <p class="muted">An exact-match assertion over a generated reply fails when any token in it moves. That is a function of how many tokens the test asks for and nothing else &mdash; not of what it tests, not of how hard it is.</p>
+      <div class="scrollx"><table id="tLen"></table></div>
+      <div class="flag bad" id="fLen"></div>
+    </div>
+
+    <div class="card">
+      <h2>The accumulator width is a dial, not a fix</h2>
+      <p class="muted">Widening the accumulator halves the error per bit and it never reaches zero &mdash; except at the far end of this construction, where the terms are exact integers and a wide enough accumulator is exactly right. That last part is a property of the toy and is declared rather than used.</p>
+      <div class="scrollx"><table id="tPrec"></table></div>
+      <div class="flag" id="fPrec"></div>
+      <p class="muted">A width is usually only known to a range &mdash; nobody publishes which reductions in a serving stack run in which precision. The flip rate a range delivers is then an integral of the law over that range, not a point evaluation of it: a composite-Simpson average against the closed form.</p>
+      <div class="scrollx"><table id="tQuad"></table></div>
+      <div class="flag warn" id="fQuad"></div>
+    </div>
+
+    <div class="card">
+      <h2>The gap is the whole story</h2>
+      <p class="muted">Every token&rsquo;s logit reads the same state, so the dot products are large and nearly equal and the decision lives in their difference. <code>&rho;</code> is that ratio: the size of a logit divided by the size of the part that differs between tokens. It is the only structural parameter on this page, and the error the accumulator makes is set by the first number while the decision is set by the second.</p>
+      <div class="scrollx"><table id="tRho"></table></div>
+      <div class="flag bad" id="fRho"></div>
+    </div>
+
+    <div class="card">
+      <h2>Turning the temperature up, with the seed nailed down</h2>
+      <p class="muted">At <code>&tau;=0</code> a perturbation has to cross exactly one boundary &mdash; the top-two gap. At <code>&tau;&gt;0</code> the draw lands somewhere in a cumulative distribution with <em>V&minus;1</em> boundaries, and every one of them moved.</p>
+      <div class="scrollx"><table id="tTau"></table></div>
+      <div class="flag bad" id="fTau"></div>
+    </div>
+
+    <div class="card">
+      <h2>The control</h2>
+      <div class="flag good" id="fCtrl"></div>
+      <div class="flag warn" id="fCtrl2"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="p-understand" hidden>
+    <div class="card">
+      <h2>What is actually being measured</h2>
+      <p>Every quantity on this page comes out of four declared objects and nothing else.</p>
+      <ul>
+        <li><strong>A model</strong> is a weight matrix of integers. Row <em>j</em> is a shared vector <code>C</code> plus a deviation of size <code>A/&rho;</code>. That is the structural fact everything rests on: all <em>V</em> rows read the same state, so the dot products are large and nearly equal and the winner is decided by the small part. A real language model behaves this way for the same reason &mdash; one residual stream, one unembedding matrix &mdash; and <code>&rho;</code> is swept below rather than assumed.</li>
+        <li><strong>A logit</strong> is the dot product of the state with one row: <em>d</em> products, added up. The inputs are integers small enough that every product is exact in a double and the total fits one, so <em>the exactly correct logit is computable</em> and is not a higher-precision estimate. It is checked against a <code>BigInt</code> sum of the same terms.</li>
+        <li><strong>A reduction</strong> is an order. <code>split-k</code> cuts the <em>d</em> terms into <code>K</code> contiguous chunks, reduces each, then adds the partials. <code>K=1</code> is plain left-to-right accumulation, and the page asserts the two are identical bit for bit rather than assuming it. The accumulator holds <em>p</em> significant bits and rounds half-to-even, which is what a <em>p</em>-bit significand does &mdash; not a model of rounding, the rounding itself.</li>
+        <li><strong>A decode</strong> takes the argmax (or samples), mixes the chosen token into the state by a declared integer mixing function, and repeats. The mixing function is not a transformer and does not pretend to be; its only job is to make a different token lead to a different continuation.</li>
+      </ul>
+      <div class="flag" id="fDeclare"></div>
+    </div>
+
+    <div class="card">
+      <h2>Where the nondeterminism actually enters</h2>
+      <p>There are exactly three places a reply could change between two occasions, and the page separates them:</p>
+      <ul>
+        <li><strong>The sampler.</strong> Its draws come from a seeded stream. Fix the seed and this term is gone. At <code>&tau;=0</code> it never existed, because the argmax does not read the stream at all.</li>
+        <li><strong>The weights.</strong> They are identical by construction &mdash; the same model object serves both runs.</li>
+        <li><strong>The reduction order.</strong> Chosen by the launch, which is sized by the traffic. Nothing in a request body reaches it. This is the only term left at <code>&tau;=0</code> with a fixed seed, and the scoreboard is what it is worth.</li>
+      </ul>
+      <p class="muted">Which is why the two rows at the top of the scoreboard are identical to the last digit: varying the seed cannot move a number that was never a function of it. The page asserts that as an identity over every column rather than eyeballing the table.</p>
+    </div>
+
+    <div class="card">
+      <h2>Checked as identities, not as numbers</h2>
+      <div class="flag" id="fIdent"></div>
+    </div>
+
+    <div class="card">
+      <h2>What went against the build</h2>
+      <div class="flag warn" id="fN1"></div>
+      <div class="flag warn" id="fN2"></div>
+      <div class="flag warn" id="fN3"></div>
+      <div class="flag warn" id="fN4"></div>
+    </div>
+
+    <div class="card">
+      <h2>What this does not model</h2>
+      <ul>
+        <li><strong>Attention, layer norm, MoE routing.</strong> A real forward pass has hundreds of reductions, not one, and several of them are order-sensitive in the same way. One reduction is the smallest object that shows the mechanism; more of them can only make the per-token flip rate larger.</li>
+        <li><strong>A real vocabulary.</strong> <span id="inlV">V</span> tokens here against a hundred thousand there. The page sweeps <code>&rho;</code> instead, because the quantity that matters is the size of the top-two gap relative to the size of the logit, and that is what <code>&rho;</code> sets.</li>
+        <li><strong>Non-determinism inside a single kernel.</strong> Atomic accumulation orders vary run to run even at a fixed batch size on real hardware. That would add a term this page does not have, in the same direction.</li>
+        <li><strong>The cost model.</strong> The throughput column is a declared model of one launch, not a measurement of a GPU. It decides which split the kernel picks and what pinning costs, and both of those are stated as model outputs. Everything to its left &mdash; every divergence, error and flip rate &mdash; is arithmetic and does not depend on it.</li>
+        <li><strong>Exactness at the top of the precision sweep.</strong> The terms here are integers, so a wide enough accumulator is exactly right and divergence is exactly zero. In a real stack it would be very small and not zero. The transferable part is the halving law, not the floor.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Everything the page asserts about itself</h2>
+      <p class="muted">Bounds and identities only. Nothing here compares a computed number against a constant that was typed in.</p>
+      <ul id="ulChecks"><li>running&hellip;</li></ul>
+      <p class="muted">Everything between <code>ENGINE:BEGIN</code> and <code>ENGINE:END</code> in this file is pure &mdash; no DOM, no network, no clock, no <code>Math.random</code>. The generator is the same 31-bit LCG the rest of this series uses, drawn from the <strong>high</strong> bits: its low bit alternates on every step, so <code>% n</code> on an even bound would be perfectly uniform and perfectly predictable. The render pump is a plain <code>setTimeout</code> chain, so a page left in a background tab still finishes.</p>
+    </div>
+  </section>
+
+  <section class="panel" id="p-build" hidden>
+    <div class="card">
+      <h2>Run it with your own numbers</h2>
+      <p class="muted">Everything re-runs in your browser. <code>&rho;</code> is the logit magnitude divided by the size of the part that differs between tokens; <code>p</code> is the accumulator&rsquo;s significand in bits; <code>B max</code> is the largest batch the server ever assembles.</p>
+      <div class="grid">
+        <div><label class="muted" for="inV">vocabulary V</label><input type="number" id="inV" value="16" min="4" max="48" step="1"></div>
+        <div><label class="muted" for="inD">reduction length d</label><input type="number" id="inD" value="96" min="16" max="256" step="16"></div>
+        <div><label class="muted" for="inR">shared-part ratio &rho;</label><input type="number" id="inR" value="64" min="1" max="4096" step="1"></div>
+        <div><label class="muted" for="inP">accumulator bits p</label><input type="number" id="inP" value="12" min="6" max="30" step="1"></div>
+        <div><label class="muted" for="inT">reply length T</label><input type="number" id="inT" value="24" min="4" max="96" step="1"></div>
+        <div><label class="muted" for="inB">B max</label><input type="number" id="inB" value="32" min="2" max="256" step="1"></div>
+        <div><label class="muted" for="inN">prompts</label><input type="number" id="inN" value="40" min="10" max="400" step="10"></div>
+        <div><label class="muted" for="inTau">temperature &times;100</label><input type="number" id="inTau" value="0" min="0" max="150" step="5"></div>
+      </div>
+      <p style="margin-top:12px"><button class="go" id="btnRun">run it</button> <span class="muted" id="runNote"></span></p>
+      <div class="scrollx"><table id="tRun"></table></div>
+    </div>
+  </section>
+</main>
+
+<div id="selftest">running&hellip;</div>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// Pure. No DOM, no network, no clock, no Math.random.
+
+var MULT = 1103515245, INC = 12345, MASK = 0x7FFFFFFF, SCALE = 2147483648;
+
+function Lcg(seed){ this.state = seed >>> 0; }
+Lcg.prototype.nextInt = function(){
+  this.state = Number((BigInt(MULT) * BigInt(this.state) + BigInt(INC)) & BigInt(MASK));
+  return this.state;
+};
+// Uniform in [0, n) from the HIGH bits. Not "% n": this LCG has an odd multiplier
+// AND an odd increment, so its low bit flips every step and "% n" on an even bound
+// alternates parity forever while staying perfectly uniform.
+Lcg.prototype.below = function(n){ return Math.floor((this.nextInt() * n) / SCALE); };
+Lcg.prototype.unit = function(){ return this.nextInt() / SCALE; };
+
+var POW2 = new Float64Array(64);
+(function(){ var i, p = 1; for (i = 0; i < 64; i++){ POW2[i] = p; p *= 2; } })();
+
+// The binary exponent of a finite non-zero double, read out of its exponent
+// field. It is the same number Math.floor(Math.log2(|x|)) returns, without the
+// log - and it is neither a clock nor a random source.
+var _F64 = new Float64Array(1), _I32 = new Int32Array(_F64.buffer);
+var _HI = (function(){ _F64[0] = 1; return _I32[1] === 0x3FF00000 ? 1 : 0; })();
+function expOf(x){ _F64[0] = x; return ((_I32[_HI] >>> 20) & 0x7FF) - 1023; }
+// Round a double to p significant bits, half to EVEN. This is what an accumulator
+// with a p-bit significand does to a value it cannot hold. Every value on this
+// page is an exact integer, so the rounding is not a model of the arithmetic - it
+// IS the arithmetic.
+function rbInt(x, p){
+  if (x === 0) return 0;
+  var sh = expOf(x) - p + 1;
+  if (sh <= 0) return x;
+  var s = POW2[sh], q = x / s, f = Math.floor(q), r = q - f;
+  if (r > 0.5) f += 1;
+  else if (r === 0.5 && (f % 2 !== 0)) f += 1;
+  return f * s;
+}
+// The same rounding written the slow, obvious way. Kept because it is the
+// definition the fast one has to agree with, and the page checks that it does.
+function rbSlow(x, p){
+  if (x === 0) return 0;
+  var a = x < 0 ? -x : x, e = Math.floor(Math.log2(a));
+  if (Math.pow(2, e) > a) e--;
+  if (Math.pow(2, e + 1) <= a) e++;
+  var sh = e - p + 1;
+  if (sh <= 0) return x;
+  var s = Math.pow(2, sh), q = x / s, f = Math.floor(q), r = q - f;
+  if (r > 0.5) f += 1;
+  else if (r === 0.5 && (f % 2 !== 0)) f += 1;
+  return f * s;
+}
+
+/* ---------- one set of terms, several reduction orders ---------- */
+function sumSeq(t, n, p){ var acc = 0, i; for (i = 0; i < n; i++) acc = rbInt(acc + t[i], p); return acc; }
+// K contiguous chunks reduced independently, their partials then accumulated.
+// This is split-k: the shape a reduction takes when the launch wants more
+// parallel blocks than the batch alone provides.
+function sumSplit(t, n, K, p){
+  var acc, tot = 0, c, lo, hi, i;
+  for (c = 0; c < K; c++){
+    lo = Math.floor(c * n / K); hi = Math.floor((c + 1) * n / K);
+    acc = 0;
+    for (i = lo; i < hi; i++) acc = rbInt(acc + t[i], p);
+    tot = rbInt(tot + acc, p);
+  }
+  return tot;
+}
+// The terms are exact integers and their total fits a double, so a plain sum IS
+// the exact answer and every order returns identical bits.
+function sumExact(t, n){ var acc = 0, i; for (i = 0; i < n; i++) acc += t[i]; return acc; }
+function sumBig(t, n){ var acc = 0n, i; for (i = 0; i < n; i++) acc += BigInt(t[i]); return acc; }
+// The textbook worst case for left-to-right accumulation of n terms at unit
+// roundoff u. The page asserts the measured error stays under it.
+function seqErrorBound(absSum, n, p){ return (n - 1) * Math.pow(2, -p) * absSum; }
+
+/* ---------- the model ---------- */
+// Integers throughout, so every quantity below is exact. Nothing here is a
+// transformer and nothing simulates language: a token is an index, and the only
+// thing modelled is the ARITHMETIC of turning one state into one index.
+// The weight rows share a common component C and differ by a deviation of size
+// A/rho. That is the structural fact the whole page rests on: every token's logit
+// reads the same state, so the dot products are LARGE and nearly equal while the
+// decision lives in their DIFFERENCE. rho is that ratio.
+function makeModel(seed, V, d, A, rho){
+  var r = new Lcg(seed), W = [], E = [], C = new Float64Array(d), j, i, row;
+  var D = Math.max(1, Math.round(A / rho));
+  for (i = 0; i < d; i++) C[i] = r.below(2 * A) - A;
+  for (j = 0; j < V; j++){ row = new Float64Array(d); for (i = 0; i < d; i++) row[i] = C[i] + (r.below(2 * D) - D); W.push(row); }
+  for (j = 0; j < V; j++){ row = new Float64Array(d); for (i = 0; i < d; i++) row[i] = r.below(2 * A) - A; E.push(row); }
+  var m = { W: W, E: E, C: C, V: V, d: d, A: A, rho: rho, D: D, unit: 1, mag: 1 };
+  m.unit = logitUnit(m, 64);
+  return m;
+}
+// The logit unit: the standard deviation of the token-DEPENDENT part of a logit,
+// measured once on the model from a dedicated probe stream, so that margins and
+// temperatures mean the same thing at every rho.
+function logitUnit(m, probes){
+  var r = new Lcg(0x5EED11), buf = new Float64Array(m.d), ex = new Float64Array(m.V);
+  var s = 0, s2 = 0, n = 0, mag = 0, i, j, h, mu;
+  for (i = 0; i < probes; i++){
+    h = makeHidden(r, m.d, m.A);
+    logitsExact(m, h, ex, buf);
+    mu = 0; for (j = 0; j < m.V; j++) mu += ex[j]; mu /= m.V;
+    for (j = 0; j < m.V; j++){ s += ex[j] - mu; s2 += (ex[j] - mu) * (ex[j] - mu); n++; }
+    mag += Math.abs(mu);
+  }
+  m.mag = mag / probes;
+  return Math.sqrt(s2 / n - (s / n) * (s / n));
+}
+function makeHidden(r, d, A){ var h = new Float64Array(d), i; for (i = 0; i < d; i++) h[i] = r.below(2 * A) - A; return h; }
+// A declared deterministic state update: mix the previous state with the chosen
+// token's embedding and wrap back into range, so a different token gives a
+// decorrelated continuation. It is a mixing function, not a network.
+function stepState(h, tok, model){
+  var d = model.d, A = model.A, M = 2 * A, out = new Float64Array(d), i, x, e = model.E[tok];
+  for (i = 0; i < d; i++){ x = h[(i + 7) % d] + e[i] + (h[i] >= 0 ? 1 : -1); out[i] = ((x + A) % M + M) % M - A; }
+  return out;
+}
+function terms(model, h, j, buf){ var d = model.d, w = model.W[j], i; for (i = 0; i < d; i++) buf[i] = h[i] * w[i]; return buf; }
+function logitsExact(model, h, out, buf){ var j; for (j = 0; j < model.V; j++) out[j] = sumExact(terms(model, h, j, buf), model.d); return out; }
+function logitsKernel(model, h, K, p, out, buf){ var j; for (j = 0; j < model.V; j++) out[j] = sumSplit(terms(model, h, j, buf), model.d, K, p); return out; }
+function argmax(v, n){ var b = 0, i; for (i = 1; i < n; i++) if (v[i] > v[b]) b = i; return b; }
+function top2gap(v, n){ var b = argmax(v, n), s = -Infinity, i; for (i = 0; i < n; i++) if (i !== b && v[i] > s) s = v[i]; return v[b] - s; }
+// The token is the first cumulative boundary the draw passes. At tau = 0 that is
+// the argmax, so the number of boundaries a perturbation can move the draw across
+// collapses from V-1 to exactly 1.
+function sampleFrom(v, n, tau, u, unit){
+  if (tau <= 0) return argmax(v, n);
+  var mx = v[argmax(v, n)], i, s = 0, ex = new Float64Array(n), sc = 1 / (tau * unit), c = 0;
+  for (i = 0; i < n; i++){ ex[i] = Math.exp((v[i] - mx) * sc); s += ex[i]; }
+  for (i = 0; i < n; i++){ c += ex[i] / s; if (u < c) return i; }
+  return n - 1;
+}
+
+/* ---------- who else was in your batch ---------- */
+// A DECLARED cost model for one launch: B rows, reduction length d, split K ways.
+// The reduction work per block is d/K, there are B*K blocks and the machine runs
+// `target` of them at a time, and each split costs an epilogue. The kernel is not
+// given a rule for K - it picks the K that finishes soonest.
+function kernelTime(B, K, d, target, over){ return (d / K) * Math.ceil(B * K / target) + K * over; }
+function bestSplit(B, ks, d, target, over){
+  var best = ks[0], bt = kernelTime(B, ks[0], d, target, over), i, t;
+  for (i = 1; i < ks.length; i++){ t = kernelTime(B, ks[i], d, target, over); if (t < bt - 1e-12){ bt = t; best = ks[i]; } }
+  return best;
+}
+function splitLadder(bMax, ks, d, target, over){ var out = new Int32Array(bMax + 1), B; for (B = 1; B <= bMax; B++) out[B] = bestSplit(B, ks, d, target, over); return out; }
+function splitProbs(ladder, bMax){ var m = {}, B; for (B = 1; B <= bMax; B++) m[ladder[B]] = (m[ladder[B]] || 0) + 1 / bMax; return m; }
+function pDifferSplit(qs){ var s = 0, k; for (k in qs) s += qs[k] * qs[k]; return 1 - s; }
+function batchTrace(seed, T, bMax){ var r = new Lcg(seed), out = new Int32Array(T), i; for (i = 0; i < T; i++) out[i] = 1 + r.below(bMax); return out; }
+// Mean throughput of a policy over the batch distribution, in rows per unit time.
+function policyThroughput(policy, ladder, bMax, d, target, over){
+  var s = 0, B, K;
+  for (B = 1; B <= bMax; B++){
+    K = policy.kind === "pinned" ? policy.K : policy.kind === "solo" ? ladder[1] : ladder[B];
+    s += (policy.kind === "solo" ? 1 / kernelTime(1, K, d, target, over) : B / kernelTime(B, K, d, target, over)) / bMax;
+  }
+  return s;
+}
+
+/* ---------- one decode ---------- */
+// wantExact=false skips the exact reference pass on a replay run, where nothing
+// reads it. The terms are computed ONCE per token row and both the exact sum and
+// the kernel sum are taken from that same buffer, so the two never differ in
+// their inputs - only in the order they are added up.
+function runOnce(model, h0, T, policy, p, tau, sampleSeed, traceSeed, cfg, wantExact){
+  var V = model.V, dd = model.d, buf = new Float64Array(dd);
+  var lo = new Float64Array(V), ex = new Float64Array(V);
+  var h = h0, toks = [], ks = [], loss = 0, correct = 0, err = 0, i, j, tok, e, K, best, tt;
+  var s = new Lcg(sampleSeed), tr = policy.kind === "adaptive" ? batchTrace(traceSeed, T, cfg.bMax) : null;
+  var isExact = policy.kind === "exact", need = wantExact !== false;
+  for (i = 0; i < T; i++){
+    K = policy.kind === "adaptive" ? cfg.ladder[tr[i]] : policy.kind === "solo" ? cfg.ladder[1] : policy.K;
+    ks.push(K);
+    for (j = 0; j < V; j++){
+      tt = terms(model, h, j, buf);
+      if (need || isExact) ex[j] = sumExact(tt, dd);
+      lo[j] = isExact ? ex[j] : sumSplit(tt, dd, K, p);
+    }
+    tok = sampleFrom(lo, V, tau, s.unit(), model.unit);
+    if (need || isExact){
+      best = argmax(ex, V);
+      if (tok === best) correct++;
+      loss += (ex[best] - ex[tok]) / model.unit;
+      e = 0; for (j = 0; j < V; j++) e += Math.abs(lo[j] - ex[j]);
+      err += e / V / model.unit;
+    }
+    toks.push(tok);
+    h = stepState(h, tok, model);
+  }
+  return { toks: toks, ks: ks, loss: loss / T, correct: correct / T, err: err / T };
+}
+function firstDiff(a, b){ var n = Math.min(a.length, b.length), i; for (i = 0; i < n; i++) if (a[i] !== b[i]) return i; return -1; }
+function readAt(toks, pos){ return pos < toks.length ? toks[pos] : -1; }
+function readSum(toks, mod){ var s = 0, i; for (i = 0; i < toks.length; i++) s += toks[i]; return s % mod; }
+
+/* ---------- studies ---------- */
+// Independent single steps, every kernel in ks reducing the SAME products. The
+// comparison between splits is therefore paired: nothing changes but the order.
+function stepStudy(model, seed, N, p, ks){
+  var buf = new Float64Array(model.d), ex = new Float64Array(model.V), L = [], i, j, k, kk, h, best, a = [];
+  for (k = 0; k < ks.length; k++) L.push(new Float64Array(model.V));
+  var r = new Lcg(seed), err = [], corr = [], flip = [], gap = 0, gapMin = Infinity, n = 0, e, g;
+  for (k = 0; k < ks.length; k++){ err.push(0); corr.push(0); flip.push([]); for (kk = 0; kk < ks.length; kk++) flip[k].push(0); }
+  for (i = 0; i < N; i++){
+    h = makeHidden(r, model.d, model.A);
+    logitsExact(model, h, ex, buf);
+    best = argmax(ex, model.V);
+    g = top2gap(ex, model.V) / model.unit;
+    gap += g; if (g < gapMin) gapMin = g;
+    a.length = 0;
+    for (k = 0; k < ks.length; k++){
+      logitsKernel(model, h, ks[k], p, L[k], buf);
+      a.push(argmax(L[k], model.V));
+      if (a[k] === best) corr[k]++;
+      e = 0; for (j = 0; j < model.V; j++) e += Math.abs(L[k][j] - ex[j]);
+      err[k] += e / model.V / model.unit;
+    }
+    for (k = 0; k < ks.length; k++) for (kk = 0; kk < ks.length; kk++) if (a[k] !== a[kk]) flip[k][kk]++;
+    n++;
+  }
+  return { ks: ks, n: n, p: p, err: err.map(function(x){ return x / n; }), corr: corr.map(function(x){ return x / n; }),
+           flip: flip.map(function(row){ return row.map(function(x){ return x / n; }); }), gap: gap / n, gapMin: gapMin };
+}
+// The flip rate a PAIR of occasions actually meets: the flip rate between two
+// splits, weighted by how often the two runs land on that pair of splits at all.
+function expectedHazard(qs, flip, ks){
+  var s = 0, i, j, qi, qj;
+  for (i = 0; i < ks.length; i++) for (j = 0; j < ks.length; j++){
+    qi = qs[ks[i]] || 0; qj = qs[ks[j]] || 0;
+    s += qi * qj * flip[i][j];
+  }
+  return s;
+}
+// The error an adaptive kernel makes is the average of the errors of the splits
+// it picks, weighted by how often it picks them.
+function mixedError(qs, err, ks){ var s = 0, i; for (i = 0; i < ks.length; i++) s += (qs[ks[i]] || 0) * err[i]; return s; }
+// Two occasions, same prompt: what actually comes back.
+function pairStudy(model, policyA, policyB, p, tau, seedSame, R, T, cfg, promptSeed){
+  var r = new Lcg(promptSeed), i, j, div = 0, before = 0, la = 0, ca = 0, ea = 0;
+  var firstAt = new Int32Array(T), posDiff = new Int32Array(T), afterSame = 0, afterN = 0, sumDiff = 0;
+  var h0, sa, sb, ra, rb, fd;
+  for (i = 0; i < R; i++){
+    h0 = makeHidden(r, model.d, model.A);
+    sa = 100003 + i * 7; sb = seedSame ? sa : 900007 + i * 11;
+    ra = runOnce(model, h0, T, policyA, p, tau, sa, 20011 + i * 13, cfg, true);
+    rb = runOnce(model, h0, T, policyB, p, tau, sb, 50021 + i * 17, cfg, false);
+    fd = firstDiff(ra.toks, rb.toks);
+    if (fd >= 0){ div++; firstAt[fd]++; before += fd; } else before += T;
+    for (j = 0; j < T; j++){
+      if (ra.toks[j] !== rb.toks[j]) posDiff[j]++;
+      if (fd >= 0 && j > fd){ afterN++; if (ra.toks[j] === rb.toks[j]) afterSame++; }
+    }
+    if (readSum(ra.toks, 4) !== readSum(rb.toks, 4)) sumDiff++;
+    la += ra.loss; ca += ra.correct; ea += ra.err;
+  }
+  return { R: R, T: T, diverge: div / R, hazard: div / (before + div), loss: la / R,
+    correct: ca / R, err: ea / R, atRisk: before + div, flips: div,
+    readFirst: posDiff[0] / R, readMid: posDiff[T >> 1] / R, readLast: posDiff[T - 1] / R,
+    readSum: sumDiff / R,
+    posDiff: Array.prototype.slice.call(posDiff).map(function(x){ return x / R; }),
+    firstAt: Array.prototype.slice.call(firstAt),
+    afterAgree: afterN ? afterSame / afterN : 0 };
+}
+
+/* ---------- closed forms ---------- */
+function pSeqClosed(pStep, T){ return 1 - Math.pow(1 - pStep, T); }
+// Token j differs if the first flip landed exactly on it (certain) or earlier
+// (then the two decorrelated continuations differ unless they agree by chance).
+function pPosDiffer(pStep, j, agree){
+  var surv = Math.pow(1 - pStep, j);
+  return pStep * surv + (1 - surv) * (1 - agree);
+}
+function normCdf(x){
+  var t = 1 / (1 + 0.2316419 * Math.abs(x)), dd = 0.3989422804014327 * Math.exp(-x * x / 2);
+  var pr = dd * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  return x >= 0 ? 1 - pr : pr;
+}
+// A flip needs the top-two gap to be smaller than the difference between the two
+// reductions' errors. For a locally flat gap density f0 near zero and a zero-mean
+// Gaussian difference of scale sigma, the flip rate is the integral
+// int_0^inf f0 * 2(1 - Phi(x/sigma)) dx = f0 * sigma * sqrt(2/pi).
+function pFlipLinear(f0, sigma){ return f0 * sigma * Math.sqrt(2 / Math.PI); }
+// The accumulator width is usually only known to a RANGE. Averaging the law over
+// that range is an integral, not a point evaluation: composite Simpson over p.
+function expectedFlipOverPrecision(f0, s0, p0, pLo, pHi, panels){
+  if (pHi === pLo) return pFlipLinear(f0, s0 * Math.pow(2, p0 - pLo));
+  var n = panels % 2 === 0 ? panels : panels + 1, hh = (pHi - pLo) / n, s = 0, i, x, w;
+  for (i = 0; i <= n; i++){
+    x = pLo + i * hh; w = (i === 0 || i === n) ? 1 : (i % 2 === 1 ? 4 : 2);
+    s += w * pFlipLinear(f0, s0 * Math.pow(2, p0 - x));
+  }
+  return s * hh / 3 / (pHi - pLo);
+}
+function expectedFlipClosed(f0, s0, p0, pLo, pHi){
+  if (pHi === pLo) return pFlipLinear(f0, s0 * Math.pow(2, p0 - pLo));
+  var c = f0 * s0 * Math.sqrt(2 / Math.PI) * Math.pow(2, p0);
+  return c * (Math.pow(2, -pLo) - Math.pow(2, -pHi)) / ((pHi - pLo) * Math.LN2);
+}
+function pAllSameSplit(qs, T){ var s = 0, k; for (k in qs) s += Math.pow(qs[k], T); return s; }
+function expDistinctSplits(qs, T){ var s = 0, k; for (k in qs) s += 1 - Math.pow(1 - qs[k], T); return s; }
+// An exact-match suite: every test is a rollout, every re-run is another chance.
+function suiteFlake(pStep, lengths, runs){
+  var s = 1, i; for (i = 0; i < lengths.length; i++) s *= Math.pow(1 - pStep, lengths[i] * (runs - 1));
+  return 1 - s;
+}
+// ===== ENGINE:END =====
+
+/* ---------- presentation ---------- */
+var CHECKS = [], FAILED = 0;
+function ok(cond, label){ CHECKS.push({ pass: !!cond, label: label }); if (!cond) FAILED++; }
+function pct(x){ return (100 * x).toFixed(2) + "%"; }
+function pct1(x){ return (100 * x).toFixed(1) + "%"; }
+function pct3(x){ return (100 * x).toFixed(3) + "%"; }
+// A rate that can sit a hair under 1 must not be rounded up to a flat 100%.
+function pctW(x){ return (x < 1 && x > 0.9995) ? (100 * x).toFixed(4) + "%" : (100 * x).toFixed(2) + "%"; }
+function f4(x){ return x.toFixed(4); }
+function ex2(x){ return x.toExponential(2); }
+function ex3(x){ return x.toExponential(3); }
+function tbl(el, head, rows){
+  var h = "<thead><tr>" + head.map(function(c){ return "<th>" + c + "</th>"; }).join("") + "</tr></thead><tbody>";
+  h += rows.map(function(r){
+    return "<tr class=\"" + (r.cls || "") + "\">" + r.cells.map(function(c){ return "<td>" + c + "</td>"; }).join("") + "</tr>";
+  }).join("");
+  document.getElementById(el).innerHTML = h + "</tbody>";
+}
+function set(id, html){ document.getElementById(id).innerHTML = html; }
+
+var V0 = 16, D0 = 96, A0 = 131072, RHO0 = 64, P0 = 12, T0 = 24;
+var KS = [1, 2, 4, 8, 16], BMAX = 32, TARGET = 32, OVER = 2;
+var R_AD = 140, R_FIX = 45, N_STEP = 1000;
+var LADDER = splitLadder(BMAX, KS, D0, TARGET, OVER);
+var QS = splitProbs(LADDER, BMAX);
+var CFG = { bMax: BMAX, ladder: LADDER };
+var MODEL = makeModel(20260830, V0, D0, A0, RHO0);
+var ADAPT = { kind: "adaptive" }, SOLO = { kind: "solo" }, EXACT = { kind: "exact" };
+var S = {};
+
+/* --- stage 1: the same prompt, twice --- */
+function stage1(){
+  var thA = policyThroughput(ADAPT, LADDER, BMAX, D0, TARGET, OVER);
+  S.thA = thA;
+  var defs = [
+    { lab: "adaptive split &middot; replayed on other traffic &middot; SAME seed", pol: ADAPT, same: true, cls: "ctrl" },
+    { lab: "adaptive split &middot; replayed on other traffic &middot; DIFFERENT seed", pol: ADAPT, same: false, cls: "ctrl" },
+    { lab: "pinned K=1 (plain left-to-right)", pol: { kind: "pinned", K: 1 }, same: true, cls: "mid" },
+    { lab: "pinned K=4", pol: { kind: "pinned", K: 4 }, same: true, cls: "win" },
+    { lab: "pinned K=8", pol: { kind: "pinned", K: 8 }, same: true, cls: "win" },
+    { lab: "pinned K=16", pol: { kind: "pinned", K: 16 }, same: true, cls: "" },
+    { lab: "dedicated endpoint &middot; batch always 1", pol: SOLO, same: true, cls: "mid" },
+    { lab: "exact accumulator &middot; no rounding at all", pol: EXACT, same: true, cls: "win" }
+  ];
+  S.rows = defs.map(function(dd){
+    var r = pairStudy(MODEL, dd.pol, dd.pol, P0, 0, dd.same, dd.pol === ADAPT ? R_AD : R_FIX, T0, CFG, 777001);
+    r.th = policyThroughput(dd.pol, LADDER, BMAX, D0, TARGET, OVER);
+    r.lab = dd.lab; r.cls = dd.cls;
+    return r;
+  });
+  S.adapt = S.rows[0]; S.adaptVar = S.rows[1];
+  S.pin1 = S.rows[2]; S.pin4 = S.rows[3]; S.pin8 = S.rows[4]; S.pin16 = S.rows[5];
+  S.solo = S.rows[6]; S.exact = S.rows[7];
+
+  tbl("tMain", ["design", "replies that differ", "flips per token", "mean |&Delta;| vs exact", "true-argmax tokens", "mean shortfall", "throughput"],
+    S.rows.map(function(r){
+      return { cls: r.cls, cells: [r.lab, pct(r.diverge), ex2(r.hazard), ex3(r.err), pct(r.correct), ex2(r.loss),
+        r.th === S.thA ? "&mdash;" : "&minus;" + pct(1 - r.th / S.thA)] };
+    }));
+
+  set("mScope", "A model with " + V0 + " tokens over a state of " + D0 + " integers, weight rows sharing a common part with deviations " +
+    RHO0 + "&times; smaller, an accumulator holding " + P0 + " significant bits, and replies of " + T0 + " tokens. " +
+    "The two adaptive rows are " + R_AD + " prompts run twice, once on one occasion&rsquo;s traffic and once on another&rsquo;s; the fixed rows, whose replay is an identity rather than a measurement, are " + R_FIX + ". Greedy decoding throughout. " +
+    "<em>mean |&Delta;|</em> and <em>mean shortfall</em> are in units of one top-two gap, so they are comparable across rows; " +
+    "<em>throughput</em> is against the adaptive kernel under the declared cost model. Everything is computed in your browser on load.");
+
+  set("fHead", "<strong>&#128308; Same weights, same prompt, <code>temperature=0</code>, same seed &mdash; and the reply is a different string on " +
+    pct(S.adapt.diverge) + " of requests</strong> (" + Math.round(S.adapt.diverge * R_AD) + " of " + R_AD + "). " +
+    "The row below it varies the seed and every column is identical to the last digit, because at <code>&tau;=0</code> the argmax never reads the seeded stream at all. " +
+    "What moved is the reduction order, and that is chosen by the batch size: <strong>your bytes depend on strangers</strong>. " +
+    "Pin the split and it is exactly " + pct(S.pin8.diverge) + " &mdash; and pinning to K=8 is also <strong>" + (S.adapt.loss / S.pin8.loss).toFixed(2) +
+    "&times; more accurate</strong> than the adaptive kernel (" + ex2(S.pin8.loss) + " against " + ex2(S.adapt.loss) +
+    "), so what the adaptive heuristic actually buys is " + pct(1 - S.pin8.th / S.thA) + " of throughput and nothing else.");
+
+  document.getElementById("sDiv").textContent = pct(S.adapt.diverge);
+  document.getElementById("sSeed").textContent = "nothing";
+  document.getElementById("sOne").textContent = ex2(pAllSameSplit(QS, T0));
+  set("fPair", "Every column of the two adaptive rows is equal, so the page asserts <em>equality</em> rather than checking the difference is small. " +
+    "The right-hand tile is the probability that a whole " + T0 + "-token reply is served by a single reduction shape: a reply visits " +
+    expDistinctSplits(QS, T0).toFixed(3) + " of the " + Object.keys(QS).length + " shapes on average. " +
+    "There is no such thing as &ldquo;the kernel my request used&rdquo;.");
+
+  /* bounds and identities, not constants */
+  S.rows.forEach(function(r, i){
+    ok(r.diverge >= 0 && r.diverge <= 1, "row " + i + " reports a rate");
+    ok(r.correct >= 0 && r.correct <= 1, "row " + i + " reports an accuracy");
+    ok(r.loss >= 0, "the shortfall against the exact argmax is never negative in row " + i);
+    ok(r.err >= 0, "a distance from the exact logit is never negative in row " + i);
+    ok(Math.abs(r.hazard * (r.atRisk) - r.flips) < 1e-9, "flips per token is flips over steps at risk, row " + i);
+  });
+  ["diverge", "hazard", "loss", "correct", "err", "readFirst", "readMid", "readLast", "readSum", "afterAgree"].forEach(function(k){
+    ok(S.adapt[k] === S.adaptVar[k], "varying the seed leaves " + k + " bit-identical at temperature 0");
+  });
+  [S.pin1, S.pin4, S.pin8, S.pin16, S.solo, S.exact].forEach(function(r){
+    ok(r.diverge === 0 && r.flips === 0, "a fixed reduction replays exactly: " + r.lab.replace(/&middot;/g, "-"));
+  });
+  ok(S.exact.loss === 0, "an exact accumulator never leaves the true argmax");
+  ok(S.exact.correct === 1, "an exact accumulator picks the true argmax at every step");
+  ok(S.exact.err === 0, "an exact accumulator is at distance zero from itself");
+  ["loss", "correct", "err"].forEach(function(k){
+    ok(S.solo[k] === S.pin8[k], "a dedicated endpoint is the SAME arithmetic as pinning K=" + LADDER[1] + " (" + k + ")");
+  });
+  ok(S.solo.th < S.pin8.th, "and it costs more throughput than pinning does");
+  ok(S.adapt.diverge > S.pin8.diverge, "the adaptive kernel is the only design here that fails to replay");
+}
+
+/* --- stage 2: the kernel menu, and which split is accurate --- */
+function stage2(){
+  var bs = [1, 2, 4, 8, 12, 16, 17, 20, 24, 32].filter(function(b){ return b <= BMAX; });
+  tbl("tKernel", ["batch B"].concat(KS.map(function(k){ return "K=" + k; })).concat(["share of traffic"]),
+    bs.map(function(B){
+      var pick = LADDER[B];
+      return { cls: "", cells: [String(B)].concat(KS.map(function(k){
+        var t = kernelTime(B, k, D0, TARGET, OVER);
+        return k === pick ? "<strong>" + t.toFixed(0) + "</strong>" : t.toFixed(0);
+      })).concat(["K=" + pick]) };
+    }).concat([{ cls: "mid", cells: ["<em>P(this split)</em>"].concat(KS.map(function(k){ return QS[k] ? pct1(QS[k]) : "0.0%"; })).concat(["&Sigma;=1"]) }]));
+
+  var sameSplit = 1 - pDifferSplit(QS), saw = 1, sb;
+  for (sb = 1; sb < BMAX; sb++) if (LADDER[sb + 1] > LADDER[sb]){ saw = sb; break; }
+  set("fLadder", "<strong>The split is not a smooth function of the batch.</strong> It saws, because the machine runs blocks in whole waves and a launch that overflows one wave by a single block pays for the whole next one &mdash; " +
+    "so B=" + saw + " takes K=" + LADDER[saw] + " and B=" + (saw + 1) + " jumps back UP to K=" + LADDER[saw + 1] + ". Over a uniform batch the shapes come out at " +
+    KS.filter(function(k){ return QS[k]; }).map(function(k){ return "K=" + k + " " + pct1(QS[k]); }).join(", ") +
+    ", so two occasions land on the same shape " + pct(sameSplit) + " of the time. That is the only reason the flake is intermittent rather than constant.");
+
+  S.ss = stepStudy(MODEL, 4242, N_STEP, P0, KS);
+  var thPin = KS.map(function(k){ return policyThroughput({ kind: "pinned", K: k }, LADDER, BMAX, D0, TARGET, OVER); });
+  var bestErr = 0, bestCorr = 0, i;
+  for (i = 1; i < KS.length; i++){ if (S.ss.err[i] < S.ss.err[bestErr]) bestErr = i; if (S.ss.corr[i] > S.ss.corr[bestCorr]) bestCorr = i; }
+  S.bestErr = bestErr;
+  tbl("tSplit", ["split K", "mean |&Delta;| vs exact", "true-argmax tokens", "disagrees with K=1", "throughput vs adaptive", "used by the kernel"],
+    KS.map(function(k, i){
+      return { cls: i === bestErr ? "win" : (k === 1 ? "ctrl" : ""),
+        cells: ["K=" + k, ex3(S.ss.err[i]), pct(S.ss.corr[i]), pct(S.ss.flip[0][i]),
+          "&minus;" + pct(1 - thPin[i] / S.thA), QS[k] ? pct1(QS[k]) + " of steps" : "never"] };
+    }).concat([{ cls: "mid", cells: ["<em>adaptive (measured)</em>", ex3(S.adapt.err), pct(S.adapt.correct), "&mdash;", "&mdash;", "100% of steps"] },
+               { cls: "mid", cells: ["<em>adaptive (&Sigma; q<sub>K</sub>&middot;err<sub>K</sub>)</em>", ex3(mixedError(QS, S.ss.err, KS)), "&mdash;", "&mdash;", "&mdash;", "&mdash;"] }]));
+
+  set("fSplit", "<strong>&#128308; Accuracy is not monotone in K, and the adaptive kernel is not the accurate one.</strong> " +
+    "Splitting further trades error inside the chunks for error in the reduction over the partials, so the best split is an interior one: <strong>K=" + KS[bestErr] +
+    "</strong> at " + ex3(S.ss.err[bestErr]) + " against K=1&rsquo;s " + ex3(S.ss.err[0]) + " and K=" + KS[KS.length - 1] + "&rsquo;s " + ex3(S.ss.err[KS.length - 1]) + ". " +
+    "It is also the split with the most true-argmax tokens (" + pct(S.ss.corr[bestCorr]) + " at K=" + KS[bestCorr] + "), it is a shape the kernel already picks " +
+    (QS[KS[bestErr]] ? pct1(QS[KS[bestErr]]) : "0%") + " of the time, and pinning to it costs " + pct(1 - thPin[bestErr] / S.thA) + ". " +
+    "Reproducibility and accuracy are not two ends of one dial &mdash; the adaptive heuristic is at neither end, it is only faster.");
+  set("fAvg", "<strong>The adaptive kernel&rsquo;s error is an average, and the page checks it as one.</strong> Measured over its own rollouts it is " +
+    ex3(S.adapt.err) + "; the weighted mean of the errors of the splits it picks is " + ex3(mixedError(QS, S.ss.err, KS)) +
+    ", a gap of " + pct1(Math.abs(S.adapt.err / mixedError(QS, S.ss.err, KS) - 1)) + ". Nothing is being averaged away by adapting; the choice is simply resampled every token.");
+
+  var hz = expectedHazard(QS, S.ss.flip, KS);
+  S.hzPred = hz;
+  ok(Math.abs(S.ss.flip[bestErr][bestErr]) === 0, "a split never disagrees with itself");
+  for (var a = 0; a < KS.length; a++){
+    ok(S.ss.flip[a][a] === 0, "the disagreement matrix has a zero diagonal at K=" + KS[a]);
+    for (var b = 0; b < KS.length; b++) ok(S.ss.flip[a][b] === S.ss.flip[b][a], "disagreement is symmetric between K=" + KS[a] + " and K=" + KS[b]);
+  }
+  ok(Math.abs(1 - Object.keys(QS).reduce(function(s, k){ return s + QS[k]; }, 0)) < 1e-12, "the split distribution sums to one");
+  ok(Math.abs(hz - S.adapt.hazard) < 0.25 * Math.max(hz, S.adapt.hazard),
+     "the flip rate predicted from independent steps agrees with the one two rollouts actually met");
+  ok(Math.abs(mixedError(QS, S.ss.err, KS) - S.adapt.err) < 0.15 * S.adapt.err,
+     "the adaptive kernel's error is the weighted mean of the errors it mixes");
+  ok(S.ss.err[0] > S.ss.err[bestErr], "plain left-to-right is not the accurate order");
+  ok(S.ss.gapMin > 0, "no exact tie appeared, so every flip crossed a real gap");
+  ok(S.ss.gapMin < S.ss.gap, "the smallest gap seen is smaller than the mean gap");
+}
+
+/* --- stage 3: where it differs, and whether anyone notices --- */
+function stage3(){
+  var r = S.adapt, hh = r.hazard, ag = r.afterAgree, js = [], j;
+  for (j = 0; j < T0; j += Math.max(1, Math.round(T0 / 8))) js.push(j);
+  if (js[js.length - 1] !== T0 - 1) js.push(T0 - 1);
+  tbl("tPos", ["token position"].concat(js.map(function(x){ return String(x); })),
+    [{ cls: "", cells: ["measured"].concat(js.map(function(x){ return pct1(r.posDiff[x]); })) },
+     { cls: "mid", cells: ["closed form"].concat(js.map(function(x){ return pct1(pPosDiffer(hh, x, ag)); })) }]);
+
+  var chance = 1 - 0.25;
+  tbl("tRead", ["where the answer is read", "requests where it differs", "share of the diverged replies"],
+    [{ cls: "win", cells: ["the FIRST token of the reply", pct(r.readFirst), r.diverge ? pct(r.readFirst / r.diverge) : "&mdash;"] },
+     { cls: "", cells: ["the token halfway down", pct(r.readMid), r.diverge ? pct(r.readMid / r.diverge) : "&mdash;"] },
+     { cls: "ctrl", cells: ["the LAST token of the reply", pct(r.readLast), r.diverge ? pct(r.readLast / r.diverge) : "&mdash;"] },
+     { cls: "ctrl", cells: ["a readout over the whole reply (mod 4)", pct(r.readSum), r.diverge ? pct(r.readSum / r.diverge) : "&mdash;"] },
+     { cls: "mid", cells: ["<em>chance rate for a 4-way readout</em>", "&mdash;", pct(chance)] }]);
+
+  set("fRead", "<strong>&#128308; The same " + pct(r.diverge) + " of diverged replies, and the flake rate you actually observe spans " +
+    (r.readFirst > 0 ? (r.readLast / r.readFirst).toFixed(1) + "&times;" : "the whole table") +
+    " depending on where the answer lives.</strong> Reading a decision off the first token, it differs on " + pct(r.readFirst) +
+    " of requests; off the last token, " + pct(r.readLast) + "; over the whole reply, " + pct(r.readSum) + ". " +
+    "Two continuations that have diverged agree again by accident only " + pct(r.afterAgree) + " of the time, so past the flip everything is effectively a fresh draw. " +
+    "Nobody designs an output schema around this, and it is the single biggest lever on how often anyone notices.");
+
+  ok(r.posDiff.every(function(x){ return x >= 0 && x <= 1; }), "every position difference rate is a rate");
+  ok(r.readFirst <= r.diverge + 1e-12, "a token cannot differ more often than the whole reply does");
+  ok(r.readLast <= r.diverge + 1e-12, "the last token cannot differ more often than the reply does");
+  ok(r.readSum <= r.diverge + 1e-12, "a whole-reply readout cannot differ more often than the reply does");
+  ok(Math.abs(pPosDiffer(hh, 0, ag) - hh) < 1e-12, "at the first token the closed form is exactly the per-token flip rate");
+  ok(pPosDiffer(hh, T0 - 1, ag) >= pPosDiffer(hh, 0, ag), "the closed form is non-decreasing down the reply");
+  var se = Math.sqrt(Math.max(r.posDiff[T0 - 1] * (1 - r.posDiff[T0 - 1]), 1e-6) / R_AD);
+  ok(Math.abs(r.posDiff[T0 - 1] - pPosDiffer(hh, T0 - 1, ag)) < Math.max(4 * se, 0.05),
+     "the closed form predicts the last token's difference rate inside a binomial bound");
+  ok(Math.abs(pSeqClosed(hh, 0)) < 1e-15, "no tokens means no chance to differ");
+  ok(Math.abs(pSeqClosed(hh, 1) - hh) < 1e-15, "one token means exactly one chance to differ");
+
+  var lens = [8, 32, 128, 256, 512], rows = lens.map(function(L){
+    return { cls: L >= 256 ? "ctrl" : "", cells: [L + " tokens", pctW(suiteFlake(hh, [L], 2)), pctW(suiteFlake(hh, [L], 5)), pctW(suiteFlake(hh, [L], 20))] };
+  });
+  rows.push({ cls: "mid", cells: ["a suite of all five", pctW(suiteFlake(hh, lens, 2)), pctW(suiteFlake(hh, lens, 5)), pctW(suiteFlake(hh, lens, 20))] });
+  tbl("tLen", ["one exact-match test asking for", "flakes across 2 runs", "across 5 runs", "across 20 runs"], rows);
+  set("fLen", "<strong>&#128308; Flake is a function of length and of nothing else.</strong> At the measured " + ex2(hh) +
+    " flips per token, an 8-token assertion fails " + pct(suiteFlake(hh, [8], 2)) + " of the time across two runs and a 512-token one " +
+    pctW(suiteFlake(hh, [512], 2)) + ". The hardest test in the suite is not the flakiest; the <em>wordiest</em> one is. " +
+    "And the usual response &mdash; re-run it &mdash; makes it worse: the same five tests over twenty runs flake " + pctW(suiteFlake(hh, lens, 20)) + ".");
+  ok(suiteFlake(hh, lens, 1) === 0, "a suite run once cannot disagree with itself");
+  ok(suiteFlake(hh, [8], 2) < suiteFlake(hh, [512], 2), "a longer assertion is a flakier assertion");
+  ok(suiteFlake(hh, lens, 2) <= suiteFlake(hh, lens, 5) + 1e-12, "more runs is more chances");
+  ok(suiteFlake(0, lens, 20) === 0, "a zero flip rate flakes never, at any suite size");
+}
+
+/* --- stage 4: the precision dial + the quadrature --- */
+function stage4(){
+  var ps = [9, 10, 11, 12, 13, 14], out = [];
+  ps.forEach(function(p){
+    var s = stepStudy(MODEL, 4242, 350, p, KS);
+    out.push({ p: p, err: s.err[0], errBest: s.err[S.bestErr], corr: s.corr[0], hz: expectedHazard(QS, s.flip, KS) });
+  });
+  var wide = stepStudy(MODEL, 4242, 350, 53, KS);
+  S.wide = wide;
+  S.prec = out;
+  tbl("tPrec", ["accumulator bits p", "mean |&Delta;| at K=1", "ratio per bit", "flips per token", "true-argmax tokens", "a 512-token reply differs"],
+    out.map(function(o, i){
+      return { cls: o.p === P0 ? "ctrl" : "", cells: ["p = " + o.p, ex3(o.err),
+        i === 0 ? "&mdash;" : Math.pow(out[i - 1].err / o.err, 1 / (o.p - out[i - 1].p)).toFixed(4),
+        ex2(o.hz), pct(o.corr), pctW(pSeqClosed(o.hz, 512))] };
+    }).concat([{ cls: "win", cells: ["p = 53 (exact here)", ex3(wide.err[0]), "&mdash;",
+        ex2(expectedHazard(QS, wide.flip, KS)), pct(wide.corr[0]), pctW(pSeqClosed(expectedHazard(QS, wide.flip, KS), 512))] }]));
+
+  var ratios = out.slice(1).map(function(o, i){ return Math.pow(out[i].err / o.err, 1 / (o.p - out[i].p)); });
+  var lo = Math.min.apply(null, ratios), hi = Math.max.apply(null, ratios);
+  var anchor = { p: P0, hz: S.adapt.hazard };
+  var ext = [20, 24].map(function(p){ return { p: p, hz: anchor.hz * Math.pow(2, anchor.p - p) }; });
+  set("fPrec", "<strong>Every bit of accumulator halves the error, and the page measures the ratio rather than assuming it</strong> &mdash; " +
+    "across the whole sweep it stays in [" + lo.toFixed(4) + ", " + hi.toFixed(4) + "]. " +
+    "That makes precision a linear dial and not a fix: extrapolating the law from the " + S.adapt.atRisk +
+    " steps the scoreboard actually put at risk at p=" + anchor.p + ", " +
+    ext.map(function(e){ return "a p=" + e.p + " accumulator flips " + ex2(e.hz) + " per token, so a 512-token reply differs on " + pct3(pSeqClosed(e.hz, 512)) + " of requests"; }).join(" and ") +
+    " &mdash; " + Math.round(pSeqClosed(ext[1].hz, 512) * 1e6) + " differing replies per million. " +
+    "The bottom row is exactly zero because the terms here are integers and a wide enough accumulator is exactly right; in a real stack it would be very small and not zero, which is why the transferable claim is the halving and not the floor.");
+
+  var f0 = 1 / S.ss.gap, s0 = S.ss.err[0];
+  var lo2 = 10, hi2 = 20;
+  var quadRows = [8, 32, 128, 512].map(function(n){
+    return { cls: "", cells: [String(n) + " panels", ex3(expectedFlipOverPrecision(f0, s0, P0, lo2, hi2, n)),
+      ex3(Math.abs(expectedFlipOverPrecision(f0, s0, P0, lo2, hi2, n) - expectedFlipClosed(f0, s0, P0, lo2, hi2)))] };
+  });
+  quadRows.push({ cls: "win", cells: ["closed form", ex3(expectedFlipClosed(f0, s0, P0, lo2, hi2)), "&mdash;"] });
+  quadRows.push({ cls: "ctrl", cells: ["point estimate at p = " + ((lo2 + hi2) / 2), ex3(pFlipLinear(f0, s0 * Math.pow(2, P0 - (lo2 + hi2) / 2))),
+    ex3(Math.abs(pFlipLinear(f0, s0 * Math.pow(2, P0 - (lo2 + hi2) / 2)) - expectedFlipClosed(f0, s0, P0, lo2, hi2)))] });
+  tbl("tQuad", ["how the average over p = " + lo2 + "&hellip;" + hi2 + " is taken", "flips per token", "distance from the closed form"], quadRows);
+  var mid = pFlipLinear(f0, s0 * Math.pow(2, P0 - (lo2 + hi2) / 2)), avg = expectedFlipClosed(f0, s0, P0, lo2, hi2);
+  set("fQuad", "<strong>Evaluating the law at the middle of the range is not the average of the law over the range.</strong> " +
+    "Because the rate is exponential in p, the average is dominated by the narrow end: " + ex3(avg) + " against " + ex3(mid) +
+    " for the midpoint, a factor of " + (avg / mid).toFixed(2) + "&times;. Anyone who says &ldquo;call it fp16-ish&rdquo; and evaluates once is " +
+    "under-reading their own flake rate by that factor.");
+
+  ok(ratios.every(function(x){ return x > 1.8 && x < 2.3; }), "the error halves per accumulator bit across the whole sweep");
+  for (var i = 1; i < out.length; i++) ok(out[i].err < out[i - 1].err, "a wider accumulator is never further from exact (p=" + out[i].p + ")");
+  for (var i2 = 1; i2 < out.length; i2++) ok(out[i2].hz <= out[i2 - 1].hz + 1e-12, "a wider accumulator never flips more often (p=" + out[i2].p + ")");
+  ok(Math.abs(expectedFlipOverPrecision(f0, s0, P0, lo2, hi2, 512) / expectedFlipClosed(f0, s0, P0, lo2, hi2) - 1) < 1e-9,
+     "Simpson converges onto the closed form for the precision average");
+  ok(Math.abs(expectedFlipOverPrecision(f0, s0, P0, lo2, hi2, 8) / expectedFlipClosed(f0, s0, P0, lo2, hi2) - 1) >
+     Math.abs(expectedFlipOverPrecision(f0, s0, P0, lo2, hi2, 128) / expectedFlipClosed(f0, s0, P0, lo2, hi2) - 1),
+     "and more panels is closer, which is what makes it a quadrature and not a coincidence");
+  ok(Math.abs(expectedFlipOverPrecision(f0, s0, P0, 14, 14, 64) - pFlipLinear(f0, s0 * Math.pow(2, P0 - 14))) < 1e-12,
+     "averaging over a range of zero width is the point evaluation");
+  ok(avg > mid, "an exponential law averages above its own midpoint");
+  ok(Math.abs(normCdf(1.7) + normCdf(-1.7) - 1) < 1e-6, "the normal CDF is symmetric");
+  ok(pFlipLinear(f0, 0) === 0, "a reduction with no error flips nothing");
+  for (var w = 0; w < KS.length; w++){
+    ok(wide.err[w] === 0, "a wide enough accumulator is at distance exactly zero from exact at K=" + KS[w]);
+    ok(wide.corr[w] === 1, "and picks the true argmax at every one of its steps at K=" + KS[w]);
+  }
+  ok(expectedHazard(QS, wide.flip, KS) === 0, "and no two splits can then disagree, so the flip rate is exactly zero");
+}
+
+/* --- stage 5: the gap, and the temperature --- */
+function stage5(){
+  var rhos = [4, 16, 64, 256, 1024], out = [];
+  rhos.forEach(function(rho){
+    var mm = makeModel(20260830, V0, D0, A0, rho);
+    var s = stepStudy(mm, 4242, 400, P0, KS);
+    out.push({ rho: rho, rel: mm.unit / mm.mag, hz: expectedHazard(QS, s.flip, KS), corr: s.corr[0], gap: s.gap });
+  });
+  S.rho = out;
+  tbl("tRho", ["&rho;", "top-two gap as a share of the logit", "ratio to the row above", "flips per token", "true-argmax tokens at K=1"],
+    out.map(function(o, i){
+      return { cls: o.rho === RHO0 ? "ctrl" : "", cells: ["&rho; = " + o.rho, ex3(o.rel),
+        i === 0 ? "&mdash;" : (out[i - 1].rel / o.rel).toFixed(4), ex2(o.hz), pct(o.corr)] };
+    }));
+  var relRatios = out.slice(1).map(function(o, i){ return out[i].rel / o.rel; });
+  set("fRho", "<strong>&#128308; The accumulator&rsquo;s error is set by the size of the logit and the decision is set by the size of the gap, so the whole phenomenon scales with the ratio between them.</strong> " +
+    "The relative gap tracks 1/&rho; to four figures (ratios " + relRatios.map(function(x){ return x.toFixed(3); }).join(", ") + " for &times;4 steps), while the gap measured in its own units is flat at " +
+    out[0].gap.toFixed(4) + " &mdash; it is not the vocabulary that makes ties tight, it is the shared direction. " +
+    "At &rho; = " + out[0].rho + " the flip rate is " + ex2(out[0].hz) + (out[0].hz === 0 ? " &mdash; not a claim that it is zero, only that 400 independent steps produced no disagreement at all &mdash;" : "") +
+    " and at &rho; = " + out[out.length - 1].rho + " it is " + ex2(out[out.length - 1].hz) +
+    ". A real model sits wherever its unembedding puts it, which is a property nobody reports and every one of these numbers depends on.");
+
+  var taus = [0, 0.15, 0.4, 0.8], trows = [];
+  taus.forEach(function(tau){
+    var a = pairStudy(MODEL, ADAPT, ADAPT, P0, tau, true, 30, T0, CFG, 777001);
+    var b = pairStudy(MODEL, ADAPT, ADAPT, P0, tau, false, 30, T0, CFG, 777001);
+    trows.push({ tau: tau, same: a, vary: b });
+  });
+  S.tau = trows;
+  tbl("tTau", ["temperature", "differs, seed FIXED", "differs, seed VARIED", "what the seed is worth", "true-argmax tokens"],
+    trows.map(function(t){
+      return { cls: t.tau === 0 ? "win" : (t.same.diverge === Math.max.apply(null, trows.map(function(x){ return x.same.diverge; })) ? "ctrl" : ""),
+        cells: ["&tau; = " + t.tau, pct(t.same.diverge), pct(t.vary.diverge),
+          pct(t.vary.diverge - t.same.diverge), pct(t.same.correct)] };
+    }));
+  var worst = trows[0]; trows.forEach(function(t){ if (t.same.diverge > worst.same.diverge) worst = t; });
+  set("fTau", "<strong>&#128308; At <code>&tau;=0</code> the seed is worth exactly " + pct(trows[0].vary.diverge - trows[0].same.diverge) +
+    " and at every other row it is worth nearly everything &mdash; which is precisely why nobody finds the arithmetic.</strong> " +
+    "You ship at &tau;&gt;0, the replies differ every single time, you fix the seed, the flake collapses, and you conclude the sampler was the whole story. " +
+    "It was not: with the seed nailed down, turning the temperature <em>up</em> makes divergence <strong>worse</strong>, peaking in the middle of the range at &tau; = " + worst.tau + " with " +
+    pct(worst.same.diverge) + " against " + pct(trows[0].same.diverge) + " at greedy, over " + worst.same.R + " prompts a row. " +
+    "The reason is a boundary count: at &tau;=0 a perturbation has to cross the one top-two gap, and at &tau;&gt;0 the draw sits somewhere among " + (V0 - 1) +
+    " cumulative boundaries and every one of them moved. The curve comes back down at the hot end because a flat distribution has wide bins. " +
+    "<strong>The control that works is the temperature; the control that gets the credit is the seed.</strong>");
+
+  trows.forEach(function(t){
+    ok(t.vary.diverge >= t.same.diverge - 1e-12, "varying the seed can never reduce divergence at &tau; = " + t.tau);
+    ok(t.same.correct >= 0 && t.same.correct <= 1, "the true-argmax rate is a rate at &tau; = " + t.tau);
+  });
+  ok(trows[0].vary.diverge === trows[0].same.diverge, "at temperature 0 the seed is worth nothing at all");
+  for (var i = 1; i < trows.length; i++) ok(trows[i].same.correct <= trows[0].same.correct + 1e-12, "sampling never picks the true argmax more often than greedy");
+  ok(worst.same.diverge >= trows[0].same.diverge, "with the seed fixed, greedy is not the worst row");
+  for (var j = 1; j < out.length; j++) ok(out[j].rel < out[j - 1].rel, "a larger shared component means a tighter relative gap (&rho;=" + out[j].rho + ")");
+  ok(relRatios.every(function(x){ return x > 3.9 && x < 4.1; }), "the relative gap is exactly 1/&rho;");
+  ok(out[out.length - 1].hz > out[0].hz, "a tighter relative gap flips more often");
+}
+
+/* --- stage 6: the control, the identities, the nulls --- */
+function stage6(){
+  var thPin8 = S.pin8.th, best = KS[S.bestErr];
+  set("fCtrl", "<strong>&#9989; Pin the split.</strong> Not a dedicated endpoint, not a seed, not a flag &mdash; one constant in the launch configuration. " +
+    "On this page pinning K=" + best + " takes divergence from " + pct(S.adapt.diverge) + " to exactly " + pct(S.pin8.diverge) +
+    ", lowers the shortfall against the exact argmax by " + (S.adapt.loss / S.pin8.loss).toFixed(2) + "&times;, and costs " +
+    pct(1 - thPin8 / S.thA) + " of throughput under the declared cost model. " +
+    "It is a split the kernel already chooses " + (QS[best] ? pct1(QS[best]) : "0%") + " of the time, so nothing exotic is being asked for &mdash; only that it stop changing its mind.");
+  set("fCtrl2", "<strong>And the control everybody actually buys is the same arithmetic at " +
+    (S.solo.th > 0 ? ((1 - S.solo.th / S.thA) / Math.max(1e-9, 1 - thPin8 / S.thA)).toFixed(1) : "&infin;") + "&times; the price.</strong> " +
+    "A dedicated endpoint holds the batch at 1, which pins the split to K=" + LADDER[1] + " &mdash; the page asserts its shortfall, its accuracy and its distance from exact are bit-identical to pinning K=" + LADDER[1] +
+    " &mdash; and it costs " + pct(1 - S.solo.th / S.thA) + " of throughput against pinning&rsquo;s " + pct(1 - thPin8 / S.thA) + ". " +
+    "You can buy the identical guarantee for a rounding error of the price, and the reason nobody does is that the guarantee is not written down anywhere as a kernel setting.");
+
+  /* arithmetic identities the whole page rests on */
+  var tt = new Float64Array(D0), r = new Lcg(4242), i, kk, p;
+  for (i = 0; i < D0; i++) tt[i] = r.below(2 * A0) - A0;
+  var okSplit1 = true, okExact = true, okSlow = true, absSum = 0, okBound = true;
+  for (i = 0; i < D0; i++) absSum += Math.abs(tt[i]);
+  for (p = 4; p <= 30; p++) if (sumSplit(tt, D0, 1, p) !== sumSeq(tt, D0, p)) okSplit1 = false;
+  for (kk = 0; kk < KS.length; kk++) if (sumSplit(tt, D0, KS[kk], 53) !== sumExact(tt, D0)) okExact = false;
+  for (i = 0; i < 400; i++){ var x = r.below(2 * A0) - A0; for (p = 5; p <= 24; p += 3) if (rbInt(x, p) !== rbSlow(x, p)) okSlow = false; }
+  for (p = 6; p <= 24; p++) if (Math.abs(sumSeq(tt, D0, p) - sumExact(tt, D0)) > seqErrorBound(absSum, D0, p)) okBound = false;
+  ok(okSplit1, "splitting into one chunk IS left-to-right accumulation, at every accumulator width");
+  ok(okExact, "at a wide enough accumulator every split returns the identical bits");
+  ok(sumExact(tt, D0) === Number(sumBig(tt, D0)), "the exact sum agrees with a BigInt sum of the same terms");
+  ok(okSlow, "the fast rounding agrees with the slow definition it replaces");
+  ok(okBound, "left-to-right accumulation stays inside its textbook worst-case error bound");
+  ok(rbInt(0, 8) === 0 && rbInt(1, 1) === 1, "rounding leaves an exactly representable value alone");
+  ok(rbInt(3, 1) === 4 && rbInt(5, 2) === 4, "rounding is to nearest, ties to even");
+  ok(expOf(1) === 0 && expOf(0.5) === -1 && expOf(1023) === 9, "the exponent read from the bits is the exponent");
+  ok(Math.abs(pAllSameSplit(QS, 2) - (1 - pDifferSplit(QS))) < 1e-12, "two steps on one split IS two occasions agreeing on the split");
+  ok(Math.abs(pAllSameSplit(QS, 1) - 1) < 1e-12, "a one-token reply always uses one split");
+  ok(pAllSameSplit(QS, T0) > 0 && pAllSameSplit(QS, T0) < 1e-6, "a whole reply on one split is a vanishing event");
+  ok(expDistinctSplits(QS, 1) === 1, "a one-token reply visits exactly one split");
+  ok(expDistinctSplits(QS, 10000) <= Object.keys(QS).length + 1e-12, "a reply cannot visit more splits than exist");
+
+  set("fDeclare", "<strong>Two things are declared rather than measured, and both are named where they are used.</strong> " +
+    "The <em>cost model</em> for a launch decides which split the kernel picks and what pinning costs; every divergence, error and flip rate on this page is arithmetic and does not touch it. " +
+    "The <em>state update</em> that turns a chosen token into the next state is a mixing function; its only job is to make a different token lead somewhere else, and no claim here depends on its shape. " +
+    "Everything else &mdash; the logits, the reductions, the rounding, the argmax, the gaps &mdash; is exact integer arithmetic, cross-checked against a BigInt sum.");
+
+  set("fIdent", "<strong>The load-bearing facts are equalities, not small numbers.</strong> " +
+    "Splitting into one chunk <em>is</em> left-to-right accumulation, checked at every width from 4 bits to 30. " +
+    "At a wide enough accumulator every split returns the identical bits and the divergence is exactly zero, so the phenomenon is arithmetic and not chaos. " +
+    "A fixed split replays bit-for-bit, so its divergence is asserted to be exactly 0 rather than measured to be small. " +
+    "Varying the seed at <code>&tau;=0</code> leaves every column equal, which is asserted column by column. " +
+    "A dedicated endpoint and pinning K=" + LADDER[1] + " are asserted to be the same three numbers, because they are the same arithmetic. " +
+    "And the exact accumulator is asserted to score exactly 100.00% true-argmax tokens with a shortfall of exactly zero &mdash; if that ever failed, the reference itself would be wrong.");
+
+  set("fN1", "<strong>1. The recommendation I set out to make was &lsquo;pin the split and pay for it in accuracy&rsquo;, and there is no such trade.</strong> " +
+    "Pinning K=" + KS[S.bestErr] + " is " + (S.adapt.loss / S.pin8.loss).toFixed(2) + "&times; <em>better</em> on the shortfall than the adaptive kernel and exactly reproducible. " +
+    "The price is throughput and only throughput, which makes the decision a much smaller one than it is usually presented as.");
+  set("fN2", "<strong>2. But a fixed kernel is not automatically a good one.</strong> Pinning K=1 &mdash; the obvious &lsquo;just add them in order&rsquo; fix &mdash; is reproducible and " +
+    (S.pin1.loss / S.adapt.loss).toFixed(2) + "&times; <em>worse</em> than the adaptive kernel on the shortfall, while still costing " +
+    pct(1 - S.pin1.th / S.thA) + " of throughput. Determinism is a property of pinning; accuracy is a property of pinning <em>the right one</em>, and they are separate choices.");
+  set("fN3", "<strong>3. Accuracy is not monotone in the split, which I assumed it was.</strong> More splits means shorter chunks and a longer reduction over the partials, so the error has an interior minimum &mdash; here at K=" +
+    KS[S.bestErr] + ", with K=" + KS[KS.length - 1] + " measurably worse. A sweep that only compared &lsquo;more splitting&rsquo; against &lsquo;less&rsquo; would have read the wrong recommendation off either end.");
+  set("fN4", "<strong>4. Turning the temperature down is the control that works, and it is never the one that gets the credit.</strong> " +
+    "With the seed fixed, greedy is the least divergent row in the temperature table and the seed itself is worth exactly nothing there. " +
+    "The two are almost always shipped together, so the seed collects the credit for what <code>&tau;=0</code> did &mdash; and the residual, which no request field can reach, is then read as noise.");
+
+  document.getElementById("inlV").textContent = String(V0);
+}
+
+/* --- stage 7: checks list + badge --- */
+function stage7(){
+  set("ulChecks", CHECKS.map(function(c){
+    return "<li><span class=\"pill " + (c.pass ? "ok\">PASS" : "no\">FAIL") + "</span> " + c.label + "</li>";
+  }).join(""));
+  var el = document.getElementById("selftest");
+  if (FAILED){
+    el.textContent = (CHECKS.length - FAILED) + " / " + CHECKS.length + " checks passed, " + FAILED + " FAILED";
+    el.style.background = "#7f1d1d";
+    if (typeof console !== "undefined") console.error("AI day75 assertions FAILED", CHECKS.filter(function(c){ return !c.pass; }));
+  } else {
+    el.textContent = CHECKS.length + " / " + CHECKS.length + " checks passed";
+  }
+  document.body.setAttribute("data-ready", "1");
+}
+
+/* tabs */
+Array.prototype.forEach.call(document.querySelectorAll(".tab[data-p]"), function(b){
+  b.addEventListener("click", function(){
+    Array.prototype.forEach.call(document.querySelectorAll(".tab[data-p]"), function(x){
+      x.setAttribute("aria-selected", x === b ? "true" : "false");
+    });
+    ["look", "understand", "build"].forEach(function(n){ document.getElementById("p-" + n).hidden = (n !== b.dataset.p); });
+  });
+});
+
+/* the BUILD tab re-runs the engine with your parameters */
+function clampInt(id, lo, hi, dflt){
+  var x = Math.round(+document.getElementById(id).value);
+  if (!isFinite(x)) x = dflt;
+  return Math.max(lo, Math.min(hi, x));
+}
+function runCustom(){
+  var V = clampInt("inV", 4, 48, 16), d = clampInt("inD", 16, 256, 96);
+  var rho = clampInt("inR", 1, 4096, 64), p = clampInt("inP", 6, 30, 12);
+  var T = clampInt("inT", 4, 96, 24), bMax = clampInt("inB", 2, 256, 32);
+  var R = clampInt("inN", 10, 400, 40), tau = clampInt("inTau", 0, 150, 0) / 100;
+  var ks = KS.filter(function(k){ return k <= d; });
+  var ladder = splitLadder(bMax, ks, d, TARGET, OVER);
+  var qs = splitProbs(ladder, bMax), cfg = { bMax: bMax, ladder: ladder };
+  var mm = makeModel(20260830, V, d, A0, rho);
+  var thA = policyThroughput({ kind: "adaptive" }, ladder, bMax, d, TARGET, OVER);
+  var ss = stepStudy(mm, 4242, Math.min(300, 8 * R), p, ks);
+  var bi = 0, i; for (i = 1; i < ks.length; i++) if (ss.err[i] < ss.err[bi]) bi = i;
+  var a = pairStudy(mm, { kind: "adaptive" }, { kind: "adaptive" }, p, tau, true, R, T, cfg, 777001);
+  var pin = { kind: "pinned", K: ks[bi] };
+  var b = pairStudy(mm, pin, pin, p, tau, true, R, T, cfg, 777001);
+  var so = pairStudy(mm, { kind: "solo" }, { kind: "solo" }, p, tau, true, R, T, cfg, 777001);
+  var thPin = policyThroughput(pin, ladder, bMax, d, TARGET, OVER);
+  var thSolo = policyThroughput({ kind: "solo" }, ladder, bMax, d, TARGET, OVER);
+  tbl("tRun", ["design", "replies that differ", "flips per token", "mean |&Delta;| vs exact", "true-argmax tokens", "mean shortfall", "throughput"], [
+    { cls: "ctrl", cells: ["adaptive split", pct(a.diverge), ex2(a.hazard), ex3(a.err), pct(a.correct), ex2(a.loss), "&mdash;"] },
+    { cls: "win", cells: ["pinned K=" + ks[bi] + " (most accurate split)", pct(b.diverge), ex2(b.hazard), ex3(b.err), pct(b.correct), ex2(b.loss), "&minus;" + pct(1 - thPin / thA)] },
+    { cls: "mid", cells: ["dedicated endpoint (batch 1)", pct(so.diverge), ex2(so.hazard), ex3(so.err), pct(so.correct), ex2(so.loss), "&minus;" + pct(1 - thSolo / thA)] }
+  ]);
+  document.getElementById("runNote").textContent =
+    "top-two gap " + ex3(mm.unit / mm.mag) + " of the logit · splits in play " +
+    Object.keys(qs).sort(function(x, y){ return x - y; }).join("/") +
+    " · two occasions share a split " + pct(1 - pDifferSplit(qs)) +
+    " · whole reply on one split " + ex2(pAllSameSplit(qs, T)) +
+    " · a 512-token reply would differ " + pct1(pSeqClosed(a.hazard, 512)) +
+    (tau > 0 ? " · temperature " + tau + ", so the sampler is in play too." : " · greedy, so the sampler is not in play at all.");
+}
+document.getElementById("btnRun").addEventListener("click", runCustom);
+
+/* A plain setTimeout pump. No requestAnimationFrame, no IntersectionObserver:
+   a background tab must still finish this page, and rAF does not run there. */
+var STAGES = [stage1, stage2, stage3, stage4, stage5, stage6, runCustom, stage7], si = 0;
+function pump(){
+  var fn = STAGES[si++];
+  try { fn(); }
+  catch (err){
+    var el = document.getElementById("selftest");
+    el.textContent = "stage " + si + " threw: " + (err && err.message ? err.message : err);
+    el.style.background = "#7f1d1d";
+    if (typeof console !== "undefined") console.error("AI day75 stage " + si + " threw", err);
+    return;
+  }
+  if (si < STAGES.length) setTimeout(pump, 0);
+}
+setTimeout(pump, 0);
+</script>
+</body>
+</html>
