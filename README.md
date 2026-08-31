@@ -76,6 +76,8 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 72 — Where a preference eval’s variance lives](https://dev48.infy.uk/ai/days/day72-preference-eval-variance.html) — `day72-preference-eval-variance.html`
 - [AIFromZero · Day 73 — Context-Window Packing](https://dev48.infy.uk/ai/days/day73-context-window-packing.html) — `day73-context-window-packing.html`
 - [AIFromZero · Day 74 — Benchmark contamination](https://dev48.infy.uk/ai/days/day74-benchmark-contamination.html) — `day74-benchmark-contamination.html`
+- [AIFromZero · Day 75 — Inference non-determinism](https://dev48.infy.uk/ai/days/day75-inference-nondeterminism.html) — `day75-inference-nondeterminism.html`
+- [AIFromZero · Day 76 — Human oversight](https://dev48.infy.uk/ai/days/day76-human-oversight.html) — `day76-human-oversight.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk

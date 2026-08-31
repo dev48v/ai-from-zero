@@ -1,0 +1,1259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIFromZero &middot; Day 76 &mdash; Human oversight: the review step whose catch rate is set by the model it reviews</title>
+<style>
+:root{
+  --bg:#f7f7fb; --card:#ffffff; --ink:#12101c; --dim:#4c4a63; --line:#e3e1ee;
+  --accent:#5b21b6; --accent-soft:#ede9fe; --good:#046c4e; --bad:#b42318; --warn:#b45309;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55}
+header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.wrap{max-width:1100px;margin:0 auto;padding:18px 20px}
+.kicker{font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--accent);margin:0 0 8px}
+h1{font-size:20px;line-height:1.35;margin:0 0 10px;font-weight:800}
+h2{font-size:17px;margin:26px 0 10px;font-weight:800}
+h3{font-size:14px;margin:18px 0 6px;font-weight:700;color:var(--dim)}
+p{margin:0 0 12px}
+.lede{color:var(--dim);font-size:14px}
+.tabs{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 15px;font-size:13px;
+     font-weight:700;cursor:pointer;color:var(--dim)}
+.tab[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+main{max-width:1100px;margin:0 auto;padding:8px 20px 70px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+.scrollx{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;font-family:var(--mono)}
+th,td{border-bottom:1px solid var(--line);padding:6px 9px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{color:var(--dim);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+tr.win td{background:#ecfdf5}
+tr.ctrl td{background:#fef2f2}
+tr.mid td{background:#fffbeb}
+code,kbd{font-family:var(--mono);font-size:12.5px;background:#f2f1f8;border-radius:4px;padding:1px 5px}
+.big{font-size:26px;font-weight:800;font-family:var(--mono)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px}
+.stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:#fff}
+.stat .lab{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+.flag{border-left:4px solid var(--accent);background:var(--accent-soft);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+.flag.bad{border-color:var(--bad);background:#fef2f2}
+.flag.good{border-color:var(--good);background:#ecfdf5}
+.flag.warn{border-color:var(--warn);background:#fffbeb}
+.pill{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.pill.ok{background:#dcfce7;color:var(--good)}
+.pill.no{background:#fee2e2;color:var(--bad)}
+#selftest{position:fixed;right:14px;bottom:14px;background:#12101c;color:#e7e5f2;font-family:var(--mono);
+  font-size:11.5px;padding:8px 12px;border-radius:8px;z-index:40;max-width:340px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+.panel[hidden]{display:none}
+.muted{color:var(--dim);font-size:13px}
+ul{margin:0 0 12px 18px;padding:0}
+li{margin:0 0 6px}
+input[type=number]{width:100%;font-family:var(--mono);font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:6px}
+button.go{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:8px 16px;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <p class="kicker">AIFROMZERO &middot; DAY 76</p>
+    <h1>&#128065; Human oversight &mdash; &ldquo;a person checks the output&rdquo; is the mitigation everybody writes down, and on this page <strong>making the model better makes the checker worse</strong>: over one whole stretch of the improvement path, a model with half the error rate ships <em>more</em> wrong answers to the customer.</h1>
+    <p class="lede">Same reviewer, same skill, same policy, same coverage, same everything in the runbook. Nothing here simulates language: the engine simulates the <strong>decision</strong> &mdash; a reviewer is a detector with a sensitivity and a threshold, and the threshold that minimises their expected cost is a function of how often they actually meet an error, which is a function of the model. The catch rate is not a property of the reviewer. It is a property of the pair. Every number below is computed in your browser on load, and every headline is checked against a stream of items drawn one at a time.</p>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true"  data-p="look">&#128064; LOOK</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="understand">&#129504; UNDERSTAND</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="build">&#128296; BUILD</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="panel" id="p-look">
+    <div class="card">
+      <h2>The improvement path</h2>
+      <p class="muted" id="mScope">running&hellip;</p>
+      <div class="scrollx"><table id="tPath"></table></div>
+      <div class="flag bad" id="fPeak"></div>
+      <div class="grid">
+        <div class="stat"><div class="lab">errors reaching the customer</div><div class="big" id="sShip">&mdash;</div><div class="muted">at the turnover, against the worse model</div></div>
+        <div class="stat"><div class="lab">catch rate over the path</div><div class="big" id="sCatch">&mdash;</div><div class="muted">same reviewer, same skill, start to end</div></div>
+        <div class="stat"><div class="lab">what the review dashboard shows</div><div class="big" id="sFlag">&mdash;</div><div class="muted">flags per thousand items, start to end</div></div>
+      </div>
+      <div class="flag" id="fDash"></div>
+    </div>
+
+    <div class="card">
+      <h2>Is the turnover a corner case?</h2>
+      <p class="muted">The criterion is re-optimised at every cell, so each entry is the error rate at which that reviewer, working to that cost ratio, stops helping more than the model is improving. Rows are reviewer sensitivity; columns are how many false alarms one missed error is declared to be worth.</p>
+      <div class="scrollx"><table id="tPeak"></table></div>
+      <div class="flag warn" id="fPeakGrid"></div>
+    </div>
+
+    <div class="card">
+      <h2>The reviewer is not getting lazy. They are getting it right.</h2>
+      <p class="muted">A reviewer who flags too readily buys catches with false alarms. The threshold that minimises their expected cost sits where the likelihood ratio equals the odds against an error divided by the price of a miss &mdash; so when errors get rarer, the threshold rises, and the catch rate falls out of it. The closed form is <code>k = d&prime;/2 + ln(&beta;)/d&prime;</code>; the column beside it is the same minimum found by brute search over the whole criterion axis, which is how the page knows the algebra is right.</p>
+      <div class="scrollx"><table id="tCrit"></table></div>
+      <div class="flag" id="fCrit"></div>
+      <p class="muted">Catch rate and false-alarm rate are two readings of one dial, so given the sensitivity either determines the other with nothing free in between. That relation is the ROC curve, and the area under it has a closed form that this page checks by integrating the curve itself with Gauss&ndash;Legendre nodes generated by Newton iteration.</p>
+      <div class="scrollx"><table id="tRoc"></table></div>
+      <div class="flag good" id="fRoc"></div>
+    </div>
+
+    <div class="card">
+      <h2>What it costs to hold the catch rate you had</h2>
+      <p class="muted">Freeze the threshold where it sat when the model was bad and the catch rate stays where it was &mdash; that is what a threshold is. The bill arrives as false alarms, and the reviewer&rsquo;s own expected cost goes up, which is exactly why they moved. The last column is the number nobody computes: the price a missed error would have to be declared to carry for the optimal threshold to land back on that catch rate.</p>
+      <div class="scrollx"><table id="tHold"></table></div>
+      <div class="flag" id="fHold"></div>
+    </div>
+
+    <div class="card">
+      <h2>More review is not more review</h2>
+      <p class="muted">Send only the items the model is least sure about. Two things move at once and they separate cleanly: the human now sees a larger share of the errors, and the queue they see has a higher error rate, so their own threshold comes back down. Freezing the threshold at its unrouted value isolates the first effect from the second.</p>
+      <div class="scrollx"><table id="tCov"></table></div>
+      <div class="flag bad" id="fCov"></div>
+      <div class="scrollx"><table id="tTri"></table></div>
+      <div class="flag" id="fTri"></div>
+    </div>
+
+    <div class="card">
+      <h2>A second pair of eyes, looking at the same answer</h2>
+      <p class="muted">Two reviewers who were both shown the model&rsquo;s answer do not bring two independent readings. Part of what each of them sees is the same thing &mdash; the answer itself, and how plausible it looks &mdash; so their evidence correlates, and the correlation is the whole reason the second one is worth less than the first. Both thresholds are re-optimised for the rule they are used under, because a pair should not sit where a soloist sits.</p>
+      <div class="scrollx"><table id="tPair"></table></div>
+      <div class="flag bad" id="fPair"></div>
+      <p class="muted">The obvious repair is to hide the model&rsquo;s answer from the second reviewer, which takes the correlation to zero and costs them whatever the answer was worth as evidence. That is a trade with a crossover, and the crossover is computable.</p>
+      <div class="scrollx"><table id="tBlind"></table></div>
+      <div class="flag warn" id="fBlind"></div>
+    </div>
+
+    <div class="card">
+      <h2>Planting errors on purpose</h2>
+      <p class="muted">Put known-bad items into the review queue. The reviewer&rsquo;s capacity does not grow, so each planted item displaces a real one and the load is identical to doing nothing &mdash; but the error rate they meet goes up, their threshold comes back down, and the catch rate on the <em>real</em> items rises with it. Airport X-ray screening has run this for decades under the name threat image projection. The two effects pull opposite ways, so there is an interior best rate.</p>
+      <div class="scrollx"><table id="tSeed"></table></div>
+      <div class="flag bad" id="fSeed"></div>
+      <p class="muted">It does not always pay. A reviewer good enough to be catching nearly everything is limited by nothing that a threshold can fix, and every planted item is then pure loss.</p>
+      <div class="scrollx"><table id="tSeedNull"></table></div>
+      <div class="flag warn" id="fSeedNull"></div>
+    </div>
+
+    <div class="card">
+      <h2>The number the review layer exists to deliver, and why you do not have it</h2>
+      <p class="muted">A week of review produces two counts: how many items were flagged, and how many of those turned out to be genuinely wrong. Three quantities sit behind them &mdash; the model&rsquo;s error rate, the catch rate, the false-alarm rate &mdash; so the observation is a curve through those three, not a point on it. Every row below reproduces the same two counts exactly.</p>
+      <div class="scrollx"><table id="tId"></table></div>
+      <div class="flag bad" id="fId"></div>
+      <p class="muted">Planted items are what close it: they are the only items whose true label is known before the reviewer sees them, so the catch rate on them is an estimate with a denominator. The interval is exact &mdash; a binomial tail inverted, not a normal approximation to a count of a few dozen.</p>
+      <div class="scrollx"><table id="tCI"></table></div>
+      <div class="flag" id="fCI"></div>
+    </div>
+
+    <div class="card">
+      <h2>Sensitivity known only to a range</h2>
+      <p class="muted">Nobody knows a reviewer&rsquo;s sensitivity to three decimals. The catch rate a range delivers is then an integral of the law over that range, not the law evaluated at the middle of it, and the two differ in a direction that is not an accident.</p>
+      <div class="scrollx"><table id="tQuad"></table></div>
+      <div class="flag warn" id="fQuad"></div>
+    </div>
+
+    <div class="card">
+      <h2>Checked against items drawn one at a time</h2>
+      <p class="muted">Every headline above is closed form. These two simulations exist so the closed forms can be wrong in public: one draws reviewers&rsquo; evidence for a fixed pool of right and wrong items, the other runs a whole stream through routing, planting and review and counts what slipped.</p>
+      <div class="scrollx"><table id="tSim"></table></div>
+      <div class="flag good" id="fSim"></div>
+    </div>
+
+    <div class="card">
+      <h2>The control</h2>
+      <div class="flag good" id="fCtrl"></div>
+      <div class="flag warn" id="fCtrl2"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="p-understand" hidden>
+    <div class="card">
+      <h2>What is actually being measured</h2>
+      <p>Every quantity on this page comes out of three declared objects and nothing else.</p>
+      <ul>
+        <li><strong>An item</strong> is a coin. The model got it right or it did not, with probability <em>e</em>. There is no text, no task, no difficulty &mdash; nothing that a language model does appears anywhere in this engine, because none of it is needed to show the mechanism.</li>
+        <li><strong>A reviewer</strong> is a detector. An item the model got wrong presents evidence drawn from a unit normal centred at <em>d&prime;</em>; an item it got right, from a unit normal centred at zero. They raise a flag when the evidence clears a threshold <em>k</em>. <em>d&prime;</em> is <strong>skill</strong> &mdash; how far apart the two piles are &mdash; and <em>k</em> is <strong>policy</strong>. A single &ldquo;reviewer accuracy&rdquo; number is a reading of both at once, which is why it moves when neither of them has.</li>
+        <li><strong>A cost</strong> is one number: how many false alarms one missed error is worth. It is the only thing that decides where the threshold should sit, and in almost every real review process it has never been written down. The reviewer is then choosing it, item by item, from whatever the last hundred items felt like.</li>
+      </ul>
+      <div class="flag" id="fDeclare"></div>
+    </div>
+
+    <div class="card">
+      <h2>Why the threshold moves</h2>
+      <p>Expected cost per item is <code>e &middot; ratio &middot; (1 &minus; catch) + (1 &minus; e) &middot; falseAlarm</code>. Differentiate with respect to the threshold, set it to zero, and the two normal densities cancel into a single condition: the <em>likelihood ratio</em> at the threshold equals the odds against an error divided by the price of a miss. Taking logs turns that into the closed form the page uses.</p>
+      <p class="muted">Nothing in that derivation is about attention, fatigue or complacency. A reviewer who is perfectly attentive and perfectly calibrated and doing arithmetic in their head lands in exactly the same place. Real reviewers also get tired, and that would push the same way &mdash; but it is not needed, and leaving it out is what makes the result hard to argue with.</p>
+      <p>The consequence is the whole page. The threshold is a function of the base rate. The base rate is a function of the model. So the catch rate, the false-alarm rate, the size of the queue and the fraction of the queue that turns out to be a real error are <em>all</em> functions of the model being reviewed &mdash; and every one of them moves when the model ships, with nobody having changed a policy.</p>
+    </div>
+
+    <div class="card">
+      <h2>Checked as identities, not as numbers</h2>
+      <div class="flag" id="fIdent"></div>
+    </div>
+
+    <div class="card">
+      <h2>What went against the build</h2>
+      <div class="flag warn" id="fN1"></div>
+      <div class="flag warn" id="fN2"></div>
+      <div class="flag warn" id="fN3"></div>
+      <div class="flag warn" id="fN4"></div>
+      <div class="flag warn" id="fN5"></div>
+    </div>
+
+    <div class="card">
+      <h2>What this does not model</h2>
+      <ul>
+        <li><strong>Fatigue, distraction, time pressure.</strong> All of them exist and all of them push the catch rate the same way. The page leaves them out on purpose: the result is stronger from a reviewer who is behaving optimally than from one who is behaving badly.</li>
+        <li><strong>Unequal variances.</strong> Real detection tasks rarely have the two piles equally spread, and an unequal-variance model bends the ROC. The direction of the threshold movement does not depend on that; the exact numbers do.</li>
+        <li><strong>A reviewer who is wrong about the base rate.</strong> Here they know it. A reviewer who over-estimates how often the model errs will over-flag, and one who under-estimates will under-flag &mdash; both are the same mechanism with a different input, and the planted-item design works by moving that input on purpose.</li>
+        <li><strong>Correlated items.</strong> Errors arrive in clusters in real systems, which makes every count on this page more variable than a binomial. It does not move any of the means.</li>
+        <li><strong>What happens after a catch.</strong> A flagged error is assumed fixed. If the repair is itself unreliable, every catch rate here is an upper bound on what the customer sees.</li>
+        <li><strong>The cost model itself.</strong> One number for the price of a miss is a simplification of a distribution: some misses are embarrassing and some end up in a regulator&rsquo;s inbox. Sweeping that number is the whole second table for exactly that reason.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Everything the page asserts about itself</h2>
+      <p class="muted">Bounds and identities only. Nothing here compares a computed number against a constant that was typed in.</p>
+      <ul id="ulChecks"><li>running&hellip;</li></ul>
+      <p class="muted">Everything between <code>ENGINE:BEGIN</code> and <code>ENGINE:END</code> in this file is pure &mdash; no DOM, no network, no clock, no <code>Math.random</code>. The generator is the same 31-bit LCG the rest of this series uses, drawn from the <strong>high</strong> bits: its low bit alternates on every step, so <code>% n</code> on an even bound would be perfectly uniform and perfectly predictable at the same time. The render pump is a plain <code>setTimeout</code> chain, so a page left in a background tab still finishes.</p>
+    </div>
+  </section>
+
+  <section class="panel" id="p-build" hidden>
+    <div class="card">
+      <h2>Run it with your own numbers</h2>
+      <p class="muted">Everything re-runs in your browser. <code>d&prime;</code> is how far apart a reviewer holds the two piles; <code>miss:alarm</code> is how many false alarms one missed error is declared to be worth; <code>model d&prime;</code> is how well the model&rsquo;s own confidence separates its errors; <code>anchor</code> is how much of a second reviewer&rsquo;s evidence is the same evidence, in hundredths.</p>
+      <div class="grid">
+        <div><label class="muted" for="inE">model error rate &times;1000</label><input type="number" id="inE" value="20" min="1" max="450" step="1"></div>
+        <div><label class="muted" for="inDp">reviewer d&prime; &times;100</label><input type="number" id="inDp" value="200" min="40" max="600" step="10"></div>
+        <div><label class="muted" for="inRatio">miss:alarm</label><input type="number" id="inRatio" value="5" min="1" max="200" step="1"></div>
+        <div><label class="muted" for="inDm">model d&prime; &times;100</label><input type="number" id="inDm" value="120" min="0" max="400" step="10"></div>
+        <div><label class="muted" for="inRho">anchor &times;100</label><input type="number" id="inRho" value="60" min="0" max="95" step="5"></div>
+        <div><label class="muted" for="inU">coverage &times;100</label><input type="number" id="inU" value="100" min="5" max="100" step="5"></div>
+      </div>
+      <p style="margin-top:12px"><button class="go" id="btnRun">run it</button> <span class="muted" id="runNote"></span></p>
+      <div class="scrollx"><table id="tRun"></table></div>
+    </div>
+  </section>
+</main>
+
+<div id="selftest">running&hellip;</div>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// Pure. No DOM, no network, no clock, no Math.random.
+
+var MULT = 1103515245, INC = 12345, MASK = 0x7FFFFFFF, SCALE = 2147483648;
+
+function Lcg(seed){ this.state = seed >>> 0; this.spare = null; }
+Lcg.prototype.nextInt = function(){
+  this.state = Number((BigInt(MULT) * BigInt(this.state) + BigInt(INC)) & BigInt(MASK));
+  return this.state;
+};
+// Uniform in [0,1) and [0,n) from the HIGH bits. This LCG has an odd multiplier
+// AND an odd increment, so its low bit flips every single step: "% n" on an even
+// bound would be perfectly uniform and perfectly predictable at the same time.
+Lcg.prototype.unit = function(){ return this.nextInt() / SCALE; };
+Lcg.prototype.below = function(n){ return Math.floor((this.nextInt() * n) / SCALE); };
+// Marsaglia polar - rejection, not trigonometry. The second value of each pair is
+// cached, so the stream position stays a deterministic function of how many
+// gaussians have been taken.
+Lcg.prototype.gauss = function(){
+  if (this.spare !== null){ var s2 = this.spare; this.spare = null; return s2; }
+  var u, v, s;
+  do { u = 2 * this.unit() - 1; v = 2 * this.unit() - 1; s = u * u + v * v; } while (s <= 0 || s >= 1);
+  var f = Math.sqrt(-2 * Math.log(s) / s);
+  this.spare = v * f;
+  return u * f;
+};
+
+/* ---------- the normal law, to the last bit a double holds ---------- */
+var SQRT2PI = 2.5066282746310002;
+function phi(x){ return Math.exp(-0.5 * x * x) / SQRT2PI; }
+// Marsaglia's series: Phi(x) = 1/2 + phi(x)*(x + x^3/3 + x^5/(3*5) + ...). It
+// stops when the running sum stops moving, so over the |x| < 8 this page ever
+// asks for it is exact to a double rather than an approximation with an error
+// term to quote.
+function Phi(x){
+  if (x < -8) return 0;
+  if (x > 8) return 1;
+  var s = x, t = 0, b = x, q = x * x, i = 1;
+  while (s !== t){ t = s; i += 2; b *= q / i; s += b; }
+  return 0.5 + s * phi(x);
+}
+// Acklam's rational start, then Halley steps against Phi itself. The refinement
+// is what makes this exact rather than approximate, and it uses only the two
+// functions above.
+var AK_A = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02, 1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+var AK_B = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01];
+var AK_C = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00, -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+var AK_D = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00, 3.754408661907416e+00];
+function PhiInv(p){
+  if (p <= 0) return -Infinity;
+  if (p >= 1) return Infinity;
+  var a = AK_A, b = AK_B, c = AK_C, d = AK_D, pl = 0.02425, x, q, r, i, e, u;
+  if (p < pl){ q = Math.sqrt(-2 * Math.log(p));
+    x = (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+  } else if (p > 1 - pl){ q = Math.sqrt(-2 * Math.log(1 - p));
+    x = -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+  } else { q = p - 0.5; r = q * q;
+    x = (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q / (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+  }
+  for (i = 0; i < 3; i++){ e = Phi(x) - p; u = e / phi(x); x = x - u / (1 + x * u / 2); }
+  return x;
+}
+
+/* ---------- the reviewer, as a detector ---------- */
+// Equal-variance Gaussian signal detection. An item the model got WRONG presents
+// evidence drawn from N(dp,1); an item it got RIGHT from N(0,1). The reviewer
+// raises a flag when the evidence clears a criterion k. dp is SKILL and k is
+// POLICY - two different quantities that a single "reviewer accuracy" number
+// melts into one.
+function catchAt(k, dp){ return Phi(dp - k); }
+function faAt(k){ return Phi(-k); }
+// The criterion that minimises expected cost when a miss costs `ratio` times a
+// false alarm and the base rate is e. Derived, not fitted: set the derivative of
+// e*ratio*(1-Phi(dp-k)) + (1-e)*Phi(-k) to zero, the likelihood ratio at the
+// crossing is beta = ((1-e)/e)/ratio, and taking logs of the gaussian ratio
+// gives this k.
+function bayesK(e, dp, ratio){ return dp / 2 + Math.log(((1 - e) / e) / ratio) / dp; }
+function betaOf(e, ratio){ return ((1 - e) / e) / ratio; }
+// The likelihood ratio the reviewer is actually sitting on at criterion k.
+function lrAt(k, dp){ return Math.exp(dp * k - dp * dp / 2); }
+// Expected cost per item, in units of ONE false alarm. cov is the fraction of
+// items that reach a reviewer at all.
+function costAt(e, dp, k, ratio, cov){
+  var u = cov === undefined ? 1 : cov;
+  return e * (1 - u * catchAt(k, dp)) * ratio + (1 - e) * u * faAt(k);
+}
+// The same minimum found by search instead of by algebra. Used to PROVE the
+// closed form is the argmin, never to compute a headline.
+function gridBestK(e, dp, ratio, lo, hi, n){
+  var best = lo, bc = costAt(e, dp, lo, ratio), i, k, c;
+  for (i = 1; i <= n; i++){ k = lo + (hi - lo) * i / n; c = costAt(e, dp, k, ratio); if (c < bc){ bc = c; best = k; } }
+  return best;
+}
+// The cost ratio a reviewer would have to be working to for their catch rate to
+// land on a target. A catch rate is a policy, and this writes that policy back
+// out in the units the people who set it actually argue in.
+function ratioForCatch(e, dp, target){
+  var k = dp - PhiInv(target);
+  return ((1 - e) / e) / lrAt(k, dp);
+}
+// The ROC identity: catch and false alarm are two readings of ONE criterion, so
+// either one determines the other given dp, with no free parameter between them.
+function rocCatch(f, dp){ return Phi(PhiInv(f) + dp); }
+function auc(dp){ return Phi(dp / Math.SQRT2); }
+function shippedAt(e, dp, ratio){ return e * (1 - catchAt(bayesK(e, dp, ratio), dp)); }
+function flagRate(e, dp, k){ return e * catchAt(k, dp) + (1 - e) * faAt(k); }
+function queuePrecision(e, dp, k){ var w = e * catchAt(k, dp); return w / (w + (1 - e) * faAt(k)); }
+// Where a better model ships MORE errors. With the criterion re-optimised at
+// every e, S(e) = e*(1 - Phi(dp - k(e))) and dS/de = (1-c) - phi(dp-k)/(dp(1-e)).
+// A sign change in that is the whole uncomfortable result, and it is analytic.
+function dShipped(e, dp, ratio){
+  var k = bayesK(e, dp, ratio);
+  return (1 - catchAt(k, dp)) - phi(dp - k) / (dp * (1 - e));
+}
+// The base rate at which the shipped-error curve turns over. A log-spaced scan
+// finds a bracket where the derivative changes sign, then bisection lands on it.
+// The scan is what makes this safe: at a very small d' with a very expensive
+// miss the turnover sits near a thousandth, and an endpoint-only test would
+// return nothing there. Returns null when no bracket exists at all.
+function peakGridPoint(i, n){ return Math.pow(10, -9 + 9 * i / n); }
+function shippedPeak(dp, ratio){
+  var n = 1200, i, lo = null, hi = null, xa, xb, mid, m;
+  for (i = 0; i < n - 1; i++){
+    xa = peakGridPoint(i, n); xb = peakGridPoint(i + 1, n);
+    if (dShipped(xa, dp, ratio) > 0 && dShipped(xb, dp, ratio) < 0){ lo = xa; hi = xb; break; }
+  }
+  if (lo === null) return null;
+  for (i = 0; i < 200; i++){ mid = 0.5 * (lo + hi); m = dShipped(mid, dp, ratio); if (m > 0) lo = mid; else hi = mid; }
+  return 0.5 * (lo + hi);
+}
+
+/* ---------- quadrature ---------- */
+// Gauss-Legendre nodes built by Newton iteration on the Legendre polynomial.
+// Nothing is tabulated, so the nodes are a computation rather than a constant.
+// Cached by order, because the same order gets asked for many times.
+var LEG = {};
+function legendre(n){
+  if (LEG[n]) return LEG[n];
+  var x = new Float64Array(n), w = new Float64Array(n), i, j, m, z, p0, p1, p2, dpz, dz;
+  for (i = 0; i < n; i++){
+    z = Math.cos(Math.PI * (i + 0.75) / (n + 0.5));
+    dpz = 1;
+    for (j = 0; j < 100; j++){
+      p0 = 1; p1 = 0;
+      for (m = 0; m < n; m++){ p2 = p1; p1 = p0; p0 = ((2 * m + 1) * z * p1 - m * p2) / (m + 1); }
+      dpz = n * (z * p0 - p1) / (z * z - 1);
+      dz = p0 / dpz; z -= dz;
+      if (Math.abs(dz) < 1e-15) break;
+    }
+    x[i] = z; w[i] = 2 / ((1 - z * z) * dpz * dpz);
+  }
+  LEG[n] = { x: x, w: w };
+  return LEG[n];
+}
+function quad(f, a, b, n){
+  var g = legendre(n), s = 0, i, hm = 0.5 * (b - a), hp = 0.5 * (b + a);
+  for (i = 0; i < n; i++) s += g.w[i] * f(hp + hm * g.x[i]);
+  return s * hm;
+}
+// The area under the ROC as an integral instead of a closed form. Substituting
+// f = Phi(-k) turns int c df into int Phi(dp-k) phi(k) dk over the whole line.
+function aucQuad(dp, n){ return quad(function(k){ return Phi(dp - k) * phi(k); }, -9, 9, n); }
+// The catch rate averaged over a RANGE of reviewer skill, because nobody knows
+// their reviewers' dp to three decimals. An integral of the law over the range,
+// not the law evaluated at the middle of it.
+function catchOverSkill(e, ratio, dpLo, dpHi, n){
+  if (dpHi === dpLo) return catchAt(bayesK(e, dpLo, ratio), dpLo);
+  return quad(function(dp){ return catchAt(bayesK(e, dp, ratio), dp); }, dpLo, dpHi, n) / (dpHi - dpLo);
+}
+
+/* ---------- two reviewers looking at the same answer ---------- */
+// Reviewer j sees mu + a*s + sqrt(1-a^2)*z_j, where s is a component they SHARE -
+// the model's own answer, which both of them were shown. Their evidence
+// correlates at rho = a^2, and that correlation is the entire reason a second
+// pair of eyes is worth less than the first.
+// Bivariate normal CDF at equal arguments by Plackett's identity: the derivative
+// of Phi2 with respect to the correlation IS the bivariate density.
+function bvnEqual(h, rho, n){
+  if (rho <= 0) return Phi(h) * Phi(h);
+  if (rho >= 1) return Phi(h);
+  return Phi(h) * Phi(h) + quad(function(r){
+    return Math.exp(-h * h / (1 + r)) / (2 * Math.PI * Math.sqrt(1 - r * r));
+  }, 0, rho, n);
+}
+// Two reviewers at the same criterion on an item whose mean evidence is mu.
+// bvnEqual gives P(both BELOW), so P(both flag) follows by inclusion-exclusion
+// and the three outcomes sum to one by construction.
+function pairStats(k, mu, rho, n){
+  var h = k - mu, one = Phi(mu - k), neither = bvnEqual(h, rho, n);
+  var both = 1 - 2 * Phi(h) + neither;
+  return { one: one, both: both, either: 2 * one - both, exactlyOne: 2 * one - 2 * both, neither: neither };
+}
+// The whole two-reviewer design at one criterion: OR escalates on any flag, AND
+// only on both. Load is counted in reviewer-items, so two reviewers cost twice.
+function twoReviewerDesign(e, dp, k, rho, rule, n){
+  var w = pairStats(k, dp, rho, n), r = pairStats(k, 0, rho, n);
+  var c = rule === "and" ? w.both : w.either;
+  var f = rule === "and" ? r.both : r.either;
+  return { k: k, c: c, f: f, shipped: e * (1 - c), waste: (1 - e) * f, load: 2 };
+}
+function pairCost(e, d, ratio){ return e * (1 - d.c) * ratio + (1 - e) * d.f; }
+// The criterion two reviewers should sit at is not the one a single reviewer
+// should sit at: the rule changes what a given k buys. Found by search, because
+// the OR and AND rules have no tidy closed form once the evidence correlates.
+function bestPairK(e, dp, ratio, rho, rule, lo, hi, n, qn){
+  var bk = lo, bc = Infinity, i, k, d, c;
+  for (i = 0; i <= n; i++){
+    k = lo + (hi - lo) * i / n;
+    d = twoReviewerDesign(e, dp, k, rho, rule, qn || 48);
+    c = pairCost(e, d, ratio);
+    if (c < bc){ bc = c; bk = k; }
+  }
+  return bk;
+}
+
+/* ---------- triage ---------- */
+// The model's own confidence is a second detector: a signal of size dm that
+// separates the items it got wrong from the ones it got right. Send the top u of
+// the stream by that signal to the human.
+function routedFraction(t, e, dm){ return e * Phi(dm - t) + (1 - e) * Phi(-t); }
+function triageT(e, dm, u){
+  var lo = -9, hi = 9, mid, i;
+  for (i = 0; i < 200; i++){ mid = 0.5 * (lo + hi); if (routedFraction(mid, e, dm) > u) lo = mid; else hi = mid; }
+  return 0.5 * (lo + hi);
+}
+function routedBase(t, e, dm){ var w = e * Phi(dm - t); return w / (w + (1 - e) * Phi(-t)); }
+// Triage moves two things at once and they are separable: the human sees a larger
+// share of the errors (targeting), and the base rate they meet is higher so their
+// own criterion moves back (restoration). Freezing the criterion at the unrouted
+// value isolates the first from the second.
+function triageStudy(e, dp, ratio, dm, u){
+  var t = triageT(e, dm, u), er = routedBase(t, e, dm), share = Phi(dm - t);
+  var kFree = bayesK(er, dp, ratio), kFrozen = bayesK(e, dp, ratio);
+  var cFree = catchAt(kFree, dp), cFrozen = catchAt(kFrozen, dp);
+  return { u: u, t: t, er: er, share: share, kFree: kFree, kFrozen: kFrozen,
+           cFree: cFree, cFrozen: cFrozen, fFree: faAt(kFree),
+           shippedFree: e * (1 - share * cFree),
+           shippedFrozen: e * (1 - share * cFrozen),
+           shippedRandom: e * (1 - u * cFrozen) };
+}
+// The coverage that ships fewest errors. With a useless confidence signal it is
+// one; with a good one it is not, and that is the point.
+function bestCoverage(e, dp, ratio, dm, n){
+  var bu = 1 / n, bs = Infinity, i, u, s;
+  for (i = 1; i <= n; i++){ u = i / n; s = triageStudy(e, dp, ratio, dm, u).shippedFree; if (s < bs){ bs = s; bu = u; } }
+  return { u: bu, shipped: bs };
+}
+
+/* ---------- seeded errors ---------- */
+// Plant known-bad items in the review queue at rate q. The reviewer's capacity
+// does NOT grow, so a seed DISPLACES a real item: two things happen at once, the
+// base rate they actually meet rises and moves their criterion back down, and q
+// of the queue is spent on items that were never real. Load stays exactly u,
+// which is what makes this comparable to doing nothing.
+function seedRun(e, dp, ratio, u, q, dpSeed){
+  var ePerceived = q + (1 - q) * e;
+  var k = bayesK(ePerceived, dp, ratio);
+  var c = catchAt(k, dp);
+  return { q: q, ePerceived: ePerceived, k: k, c: c, f: faAt(k),
+           cSeed: catchAt(k, dpSeed === undefined ? dp : dpSeed),
+           realCoverage: u * (1 - q), load: u,
+           shipped: e * (1 - u * (1 - q) * c) };
+}
+function bestSeedRate(e, dp, ratio, u, n){
+  var bq = 0, bs = seedRun(e, dp, ratio, u, 0).shipped, i, q, s;
+  for (i = 1; i <= n; i++){ q = i / (n + 1); s = seedRun(e, dp, ratio, u, q).shipped; if (s < bs){ bs = s; bq = q; } }
+  return { q: bq, shipped: bs };
+}
+
+/* ---------- exact binomial, in BigInt ---------- */
+// Pascal's triangle in BigInt. With a dyadic success probability the whole tail
+// is an exact integer over a power of two, so no floating point is involved in
+// the answer at all.
+function pascalRow(n){
+  var row = [1n], i;
+  for (i = 1; i <= n; i++) row.push(row[i - 1] * BigInt(n - i + 1) / BigInt(i));
+  return row;
+}
+function bigPow(b, e){ var r = 1n, i; for (i = 0; i < e; i++) r *= b; return r; }
+// P(X <= x) for X ~ Bin(n, num/2^den), exact, converted to a double only at the
+// very end.
+function binomCdfDyadic(n, x, num, den){
+  var row = pascalRow(n), tot = 0n, i, N = BigInt(num), D = (1n << BigInt(den)) - N;
+  for (i = 0; i <= x && i <= n; i++) tot += row[i] * bigPow(N, i) * bigPow(D, n - i);
+  return Number(tot) / Number(bigPow(1n << BigInt(den), n));
+}
+function lgamma(z){
+  var g = [676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059,
+           12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+  if (z < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * z)) - lgamma(1 - z);
+  z -= 1;
+  var x = 0.99999999999980993, i;
+  for (i = 0; i < 8; i++) x += g[i] / (z + i + 1);
+  var t = z + 7.5;
+  return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+}
+function lchoose(n, k){ return lgamma(n + 1) - lgamma(k + 1) - lgamma(n - k + 1); }
+function binomCdf(n, x, p){
+  if (x < 0) return 0;
+  if (x >= n) return 1;
+  if (p <= 0) return 1;
+  if (p >= 1) return 0;
+  var s = 0, i, lp = Math.log(p), lq = Math.log(1 - p);
+  for (i = 0; i <= x; i++) s += Math.exp(lchoose(n, i) + i * lp + (n - i) * lq);
+  return s > 1 ? 1 : s;
+}
+// Clopper-Pearson by bisection on the exact tails. An interval that holds by
+// construction, rather than a normal approximation to a count of thirty.
+function cpInterval(n, x, alpha){
+  var lo = 0, hi = 1, mid, i;
+  if (x > 0){
+    for (i = 0; i < 200; i++){ mid = 0.5 * (lo + hi); if (1 - binomCdf(n, x - 1, mid) > alpha / 2) hi = mid; else lo = mid; }
+    lo = 0.5 * (lo + hi);
+  }
+  var lo2 = 0, hi2 = 1;
+  if (x < n){
+    for (i = 0; i < 200; i++){ mid = 0.5 * (lo2 + hi2); if (binomCdf(n, x, mid) < alpha / 2) hi2 = mid; else lo2 = mid; }
+    hi2 = 0.5 * (lo2 + hi2);
+  }
+  return { lo: x > 0 ? lo : 0, hi: x < n ? hi2 : 1 };
+}
+// The interval a normal approximation would have printed for the same count -
+// unclipped, so it can be seen leaving the unit interval.
+function waldInterval(n, x, z){
+  var p = x / n, se = Math.sqrt(p * (1 - p) / n);
+  return { lo: p - z * se, hi: p + z * se };
+}
+
+/* ---------- what the dashboard can and cannot pin down ---------- */
+// Observed per item: a flag rate F and a confirmed-wrong rate C. Three unknowns
+// sit behind them - the model's error rate e, the catch rate c, the false-alarm
+// rate f - so one week of numbers is a CURVE, not a point.
+function levelSet(C, F, es){
+  var out = [], i, e, c, f;
+  for (i = 0; i < es.length; i++){
+    e = es[i]; c = C / e; f = (F - C) / (1 - e);
+    out.push({ e: e, c: c, f: f, feasible: c <= 1 && c >= 0 && f >= 0 && f <= 1 });
+  }
+  return out;
+}
+// Adding the ROC identity closes the system: given dp, an observed (C,F) pins
+// down e and the criterion. Which is exactly why dp is the thing worth measuring.
+function identifyE(C, F, dp){
+  var lo = C, hi = 0.999999, mid, i, c, k, g;
+  for (i = 0; i < 200; i++){
+    mid = 0.5 * (lo + hi);
+    c = C / mid;
+    if (c >= 1){ lo = mid; continue; }
+    k = dp - PhiInv(c);
+    g = mid * c + (1 - mid) * faAt(k);
+    if (g > F) lo = mid; else hi = mid;
+  }
+  return 0.5 * (lo + hi);
+}
+
+/* ---------- forward simulation ---------- */
+// Nothing above needs these: every headline is closed form. They exist so the
+// closed forms can be wrong in public, because evidence drawn one item at a time
+// is the only thing that finds a formula that is quietly wrong.
+// Per-class draws: nW items the model got wrong and nR it got right, each judged
+// by one or two reviewers sharing an anchor of correlation rho.
+function detectorSim(seed, nW, nR, dp, k, rho, rule){
+  var r = new Lcg(seed), a = Math.sqrt(rho), b = Math.sqrt(1 - rho), i, mu, s, e1, e2, hit = 0, fa = 0, flag;
+  for (i = 0; i < nW + nR; i++){
+    mu = i < nW ? dp : 0;
+    s = r.gauss();
+    e1 = mu + a * s + b * r.gauss();
+    flag = e1 > k;
+    if (rule){
+      e2 = mu + a * s + b * r.gauss();
+      flag = rule === "and" ? (flag && e2 > k) : (flag || e2 > k);
+    }
+    if (flag){ if (i < nW) hit++; else fa++; }
+  }
+  return { c: hit / nW, f: fa / nR, nW: nW, nR: nR };
+}
+// A whole stream: items arrive, some slots are taken by planted items, the rest
+// are reviewed, and whatever slips through is counted. It checks the
+// composition, not just the detector.
+function streamSim(seed, n, e, dp, ratio, u, q){
+  var r = new Lcg(seed), i, wrong, shipped = 0, reviewed = 0, wrongRev = 0, caught = 0, fa = 0, rightRev = 0;
+  var seeds = 0, seedCaught = 0, real = 0;
+  var ePerceived = q + (1 - q) * e, k = bayesK(ePerceived, dp, ratio);
+  for (i = 0; i < n; i++){
+    wrong = r.unit() < e;
+    real++;
+    if (r.unit() >= u){ if (wrong) shipped++; continue; }
+    if (r.unit() < q){ seeds++; if (r.gauss() + dp > k) seedCaught++; if (wrong) shipped++; continue; }
+    reviewed++;
+    if (wrong){ wrongRev++; if (r.gauss() + dp > k) caught++; else shipped++; }
+    else { rightRev++; if (r.gauss() > k) fa++; }
+  }
+  return { n: n, real: real, reviewed: reviewed, seeds: seeds, k: k,
+           c: wrongRev ? caught / wrongRev : 0, f: rightRev ? fa / rightRev : 0,
+           cSeed: seeds ? seedCaught / seeds : 0, shipped: shipped / n };
+}
+// ===== ENGINE:END =====
+
+/* ---------- presentation ---------- */
+var CHECKS = [], FAILED = 0;
+function ok(cond, label){ CHECKS.push({ pass: !!cond, label: label }); if (!cond) FAILED++; }
+function pct(x){ return (100 * x).toFixed(2) + "%"; }
+function pct1(x){ return (100 * x).toFixed(1) + "%"; }
+function pct3(x){ return (100 * x).toFixed(3) + "%"; }
+function f2(x){ return x.toFixed(2); }
+function f3(x){ return x.toFixed(3); }
+function f4(x){ return x.toFixed(4); }
+function ex2(x){ return x.toExponential(2); }
+function per1k(x){ return (1000 * x).toFixed(2); }
+function tbl(el, head, rows){
+  var h = "<thead><tr>" + head.map(function(c){ return "<th>" + c + "</th>"; }).join("") + "</tr></thead><tbody>";
+  h += rows.map(function(r){
+    var cls = r.cls ? " class=\"" + r.cls + "\"" : "";
+    return "<tr" + cls + ">" + r.cells.map(function(c){ return "<td>" + c + "</td>"; }).join("") + "</tr>";
+  }).join("");
+  document.getElementById(el).innerHTML = h + "</tbody>";
+}
+function set(id, html){ document.getElementById(id).innerHTML = html; }
+
+/* ---------- the declared configuration ---------- */
+var DP0 = 2, RATIO0 = 5, DM0 = 1.2, RHO0 = 0.6, U0 = 1, E0 = 0.02;
+var EPATH = [0.40, 0.30, 0.25, 0.20, 0.15, 0.10, 0.05, 0.02, 0.01, 0.005];
+var S = {};
+
+/* --- stage 1: the improvement path --- */
+function stage1(){
+  var rows = [], i, e, k, c, f, sh, pr, best = 0, worst = 0;
+  S.path = [];
+  for (i = 0; i < EPATH.length; i++){
+    e = EPATH[i]; k = bayesK(e, DP0, RATIO0); c = catchAt(k, DP0); f = faAt(k);
+    sh = e * (1 - c); pr = queuePrecision(e, DP0, k);
+    S.path.push({ e: e, k: k, c: c, f: f, sh: sh, pr: pr, fl: flagRate(e, DP0, k) });
+    ok(Math.abs(sh - shippedAt(e, DP0, RATIO0)) < 1e-15, "shipped rate is e(1-catch) at model error " + pct1(e));
+    ok(sh < e, "review never ships more than no review at all, at model error " + pct1(e));
+    ok(c > 0 && c < 1 && f > 0 && f < 1, "catch and false-alarm rates are probabilities at model error " + pct1(e));
+  }
+  S.peak = shippedPeak(DP0, RATIO0);
+  ok(S.peak !== null, "the shipped-error curve turns over somewhere inside the unit interval");
+  ok(Math.abs(dShipped(S.peak, DP0, RATIO0)) < 1e-9, "the derivative of the shipped-error curve is zero at the turnover");
+  ok(dShipped(S.peak * 0.9, DP0, RATIO0) > 0 && dShipped(Math.min(0.999, S.peak * 1.1), DP0, RATIO0) < 0,
+     "the derivative changes sign across the turnover, so it is a maximum and not an inflection");
+  var pkSh = shippedAt(S.peak, DP0, RATIO0), gm = 0, ee;
+  for (i = 1; i <= 400; i++){ ee = i / 401; if (shippedAt(ee, DP0, RATIO0) > pkSh + 1e-15) gm++; }
+  ok(gm === 0, "no point on a 400-step sweep ships more than the turnover does");
+  for (i = 1; i < S.path.length; i++){
+    ok(S.path[i].c < S.path[i - 1].c, "the catch rate falls as the model improves, step " + i);
+    ok(S.path[i].f < S.path[i - 1].f, "the false-alarm rate falls as the model improves, step " + i);
+    ok(S.path[i].fl < S.path[i - 1].fl, "the review queue shrinks as the model improves, step " + i);
+    ok(S.path[i].pr < S.path[i - 1].pr, "the share of the queue that is a real error falls as the model improves, step " + i);
+  }
+  var rose = false;
+  for (i = 1; i < S.path.length; i++) if (S.path[i].sh > S.path[i - 1].sh) rose = true;
+  ok(rose, "somewhere on the path a BETTER model ships MORE errors");
+  for (i = 0; i < S.path.length; i++){
+    var p = S.path[i];
+    rows.push({ cls: p.e === EPATH[0] ? "ctrl" : (Math.abs(p.e - 0.20) < 1e-12 ? "mid" : ""),
+      cells: [pct1(p.e), f3(p.k), pct(p.c), pct(p.f), per1k(p.fl), pct(p.pr), per1k(p.sh), f2(p.e / p.sh)] });
+  }
+  tbl("tPath", ["model error rate", "reviewer threshold", "errors caught", "false alarms", "flags / 1k", "queue is a real error", "reach customer / 1k", "review divides errors by"], rows);
+
+  var eA = EPATH[0], shA = shippedAt(eA, DP0, RATIO0), shP = shippedAt(S.peak, DP0, RATIO0);
+  var e10 = 0.20, e10b = 0.02;
+  set("mScope", "One reviewer of sensitivity d&prime; = " + f2(DP0) + " (their two piles of evidence are that far apart, an area under the ROC of " +
+    pct(auc(DP0)) + "), working to a declared price of " + RATIO0 + " false alarms per missed error, reviewing every item. " +
+    "The only thing that changes down the table is the model. The threshold is re-optimised at every row, because that is what a reviewer does.");
+  set("fPeak", "<strong>&#128308; The turnover is at a model error rate of " + pct(S.peak) + ", and above it a better model is worse for the customer.</strong> " +
+    "Take the model from " + pct1(eA) + " wrong to " + pct(S.peak) + " wrong &mdash; " + f2(eA / S.peak) + "&times; better, the kind of jump a team ships and celebrates &mdash; and the number of wrong answers reaching the customer <em>rises</em> " +
+    pct1(shP / shA - 1) + ", from " + per1k(shA) + " to " + per1k(shP) + " per thousand. Nobody changed the review policy. Nobody got worse at their job. " +
+    "The reviewer&rsquo;s threshold moved because the base rate moved, and it moved further than the model did.");
+  set("sShip", "+" + pct1(shP / shA - 1));
+  set("sCatch", pct1(S.path[0].c) + " &rarr; " + pct1(S.path[S.path.length - 1].c));
+  set("sFlag", per1k(S.path[0].fl) + " &rarr; " + per1k(S.path[S.path.length - 1].fl));
+  set("fDash", "<strong>And every operational number improves the whole way down.</strong> The queue shrinks by " +
+    f2(S.path[0].fl / S.path[S.path.length - 1].fl) + "&times;. False alarms fall from " + pct(S.path[0].f) + " to " + pct3(S.path[S.path.length - 1].f) + ". " +
+    "The one thing that gets worse is the share of the queue that turns out to be a genuine error, " + pct(S.path[0].pr) + " down to " + pct(S.path[S.path.length - 1].pr) +
+    " &mdash; which is the reviewer&rsquo;s own daily experience of the job, and it is pointing the same way their threshold is. " +
+    "Outside the turnover the improvement still arrives, only heavily discounted: from " + pct1(e10) + " to " + pct1(e10b) + " the model gets " +
+    f2(e10 / e10b) + "&times; better and the customer sees " + f2(shippedAt(e10, DP0, RATIO0) / shippedAt(e10b, DP0, RATIO0)) + "&times; fewer errors; end to end down the table, " +
+    f2(EPATH[0] / EPATH[EPATH.length - 1]) + "&times; buys " + f2(shA / shippedAt(EPATH[EPATH.length - 1], DP0, RATIO0)) + "&times;.");
+}
+
+/* --- stage 2: is the turnover a corner case --- */
+function stage2(){
+  var dps = [1, 1.5, 2, 2.5, 3, 4], ras = [1, 2, 5, 10, 20, 50], rows = [], i, j, p, lo = 1, hi = 0, nulls = 0;
+  for (i = 0; i < dps.length; i++){
+    var cells = [f2(dps[i])];
+    for (j = 0; j < ras.length; j++){
+      p = shippedPeak(dps[i], ras[j]);
+      if (p === null){ nulls++; cells.push("&mdash;"); continue; }
+      if (p < lo) lo = p;
+      if (p > hi) hi = p;
+      ok(Math.abs(dShipped(p, dps[i], ras[j])) < 1e-9, "the turnover solves its own derivative at d' " + dps[i] + ", price " + ras[j]);
+      cells.push(pct(p));
+    }
+    rows.push({ cells: cells });
+  }
+  // extreme corners, so the grid is not quietly hiding a boundary
+  var corners = [[0.5, 200], [0.5, 1], [10, 1], [10, 200], [8, 500], [1.2, 1000]], cn = 0;
+  for (i = 0; i < corners.length; i++){
+    p = shippedPeak(corners[i][0], corners[i][1]);
+    if (p !== null){ cn++; if (p < lo) lo = p; if (p > hi) hi = p; }
+  }
+  ok(nulls === 0, "every cell of the sensitivity-by-price grid has a turnover");
+  ok(cn === corners.length, "and so does every extreme corner tried outside it");
+  S.peakLo = lo; S.peakHi = hi;
+  var head = ["reviewer d&prime;"];
+  for (j = 0; j < ras.length; j++) head.push(ras[j] + " : 1");
+  tbl("tPeak", head, rows);
+  ok(shippedPeak(4, 1) > shippedPeak(1, 50), "a better reviewer working to a cheaper miss turns over at a higher error rate");
+  ok(shippedPeak(DP0, 50) < shippedPeak(DP0, 2), "raising the declared price of a miss pushes the turnover DOWN");
+  set("fPeakGrid", "<strong>It is not a corner case, and the way out is a number you already control.</strong> Every cell here has a turnover, " +
+    "and so does every extreme corner tried outside the grid: across all of them it sits between " + pct(lo) + " and " + pct(hi) + " model error. " +
+    "What moves it is the declared price of a miss. At " + f2(DP0) + " sensitivity, going from " + ras[1] + " : 1 to " + ras[ras.length - 1] + " : 1 moves the turnover from " +
+    pct(shippedPeak(DP0, ras[1])) + " to " + pct(shippedPeak(DP0, ras[ras.length - 1])) + " &mdash; that is the whole control, and it is one line in a review guideline. " +
+    "Almost nobody writes it down, which means it is currently being chosen by whoever is doing the reviewing, from the feel of the last hundred items.");
+}
+
+/* --- stage 3: the criterion is a decision --- */
+function stage3(){
+  var rows = [], i, e, k, kg, sp = 8 / 400000;
+  for (i = 0; i < EPATH.length; i += 2){
+    e = EPATH[i]; k = bayesK(e, DP0, RATIO0); kg = gridBestK(e, DP0, RATIO0, -3, 5, 400000);
+    ok(Math.abs(k - kg) <= sp * 1.5, "the closed-form threshold is the brute-force minimum at model error " + pct1(e));
+    ok(Math.abs(lrAt(k, DP0) - betaOf(e, RATIO0)) < 1e-12, "the likelihood ratio at the threshold IS the odds against an error over the price of a miss, at " + pct1(e));
+    var worse = 0, kk, j;
+    for (j = 0; j <= 200; j++){ kk = -2 + 8 * j / 200; if (costAt(e, DP0, kk, RATIO0) < costAt(e, DP0, k, RATIO0) - 1e-12) worse++; }
+    ok(worse === 0, "no threshold on a 200-step sweep beats the closed form at model error " + pct1(e));
+    rows.push({ cells: [pct1(e), f4(betaOf(e, RATIO0)), f4(k), f4(kg), ex2(Math.abs(k - kg)), pct(catchAt(k, DP0)), f4(costAt(e, DP0, k, RATIO0))] });
+  }
+  tbl("tCrit", ["model error rate", "&beta; = odds against &divide; price", "threshold, closed form", "threshold, brute force", "gap", "errors caught", "expected cost"], rows);
+  set("fCrit", "The two threshold columns are computed by completely different means &mdash; one by differentiating the cost and solving, the other by evaluating the cost at four hundred thousand thresholds and taking the smallest &mdash; and they agree to the resolution of the search. " +
+    "So the collapse in the first table is not a modelling choice. It is what minimising that cost does.");
+
+  var rrows = [], fs = [0.01, 0.05, 0.10, 0.20, 0.50], dpq = [1, 2, 3];
+  for (i = 0; i < fs.length; i++){
+    var kf = -PhiInv(fs[i]);
+    ok(Math.abs(rocCatch(fs[i], DP0) - catchAt(kf, DP0)) < 1e-12, "the ROC identity holds at a false-alarm rate of " + pct(fs[i]));
+    rrows.push({ cells: [pct(fs[i]), f4(kf), pct(rocCatch(fs[i], 1)), pct(rocCatch(fs[i], DP0)), pct(rocCatch(fs[i], 3))] });
+  }
+  var qrow = ["area under the curve", "&mdash;"];
+  for (i = 0; i < dpq.length; i++){
+    ok(Math.abs(auc(dpq[i]) - aucQuad(dpq[i], 96)) < 1e-10, "the closed-form ROC area matches its own integral at d' " + dpq[i]);
+    qrow.push(pct(auc(dpq[i])));
+  }
+  rrows.push({ cls: "win", cells: qrow });
+  tbl("tRoc", ["false alarms", "threshold", "caught, d&prime;=1", "caught, d&prime;=" + f2(DP0), "caught, d&prime;=3"], rrows);
+  ok(Math.abs(auc(0) - 0.5) < 1e-15, "a reviewer who cannot tell the two piles apart has an ROC area of one half");
+  ok(auc(6) > 0.999, "and a reviewer with a very large d' is nearly perfect");
+  var maxd = 0;
+  for (i = 0; i <= 60; i++){ var d = Math.abs(auc(i / 10) - aucQuad(i / 10, 64)); if (d > maxd) maxd = d; }
+  ok(maxd < 1e-9, "closed form and quadrature agree across the whole sensitivity sweep");
+  set("fRoc", "The last row is the same area computed twice: once from the closed form <code>&Phi;(d&prime;/&radic;2)</code>, once by integrating the curve above it with Gauss&ndash;Legendre nodes generated by Newton iteration on the Legendre polynomial rather than looked up. " +
+    "Largest disagreement anywhere on the sweep: " + ex2(maxd) + ".");
+}
+
+/* --- stage 4: what it costs to hold the catch rate --- */
+function stage4(){
+  var kHigh = bayesK(EPATH[3], DP0, RATIO0), cHigh = catchAt(kHigh, DP0);
+  S.kHigh = kHigh; S.cHigh = cHigh;
+  var rows = [], i, e, k, c, f, need;
+  for (i = 3; i < EPATH.length; i++){
+    e = EPATH[i]; k = bayesK(e, DP0, RATIO0); c = catchAt(k, DP0); f = faAt(k);
+    need = ratioForCatch(e, DP0, cHigh);
+    ok(Math.abs(catchAt(bayesK(e, DP0, need), DP0) - cHigh) < 1e-9, "the implied price of a miss reproduces the target catch rate at model error " + pct1(e));
+    ok(costAt(e, DP0, k, RATIO0) <= costAt(e, DP0, kHigh, RATIO0) + 1e-15, "the reviewer's own threshold is cheaper than the frozen one at model error " + pct1(e));
+    rows.push({ cells: [pct1(e), pct(c), per1k(e * (1 - c)), pct(cHigh), per1k(e * (1 - cHigh)), pct(faAt(kHigh)) + " vs " + pct(f),
+      f2(costAt(e, DP0, kHigh, RATIO0) / costAt(e, DP0, k, RATIO0)) + "&times;", f2(need)] });
+  }
+  tbl("tHold", ["model error rate", "caught, threshold free", "reach customer / 1k", "caught, threshold frozen", "reach customer / 1k", "false alarms frozen vs free", "reviewer&rsquo;s cost, frozen", "price of a miss needed"], rows);
+  var last = EPATH[EPATH.length - 1], eOp = E0;
+  ok(ratioForCatch(eOp, DP0, cHigh) > RATIO0, "holding the old catch rate needs a HIGHER declared price than the one in force");
+  set("fHold", "<strong>The disagreement is not about competence. It is about a number nobody set.</strong> " +
+    "At a model error rate of " + pct1(eOp) + ", holding the catch rate the review layer had when the model was at " + pct1(EPATH[3]) +
+    " requires declaring a missed error worth " + f2(ratioForCatch(eOp, DP0, cHigh)) + " false alarms &mdash; up from " + RATIO0 +
+    ". At that declared price the reviewer moves there on their own, and every number on the row follows. " +
+    "Freeze the threshold without changing the price and you get the same catch rate anyway, at " +
+    f2(costAt(eOp, DP0, kHigh, RATIO0) / costAt(eOp, DP0, bayesK(eOp, DP0, RATIO0), RATIO0)) + "&times; the reviewer&rsquo;s own expected cost &mdash; " +
+    "which is precisely why they will not stay there, and why a policy that is not written down does not survive contact with a quarter of reviewing.");
+}
+
+/* --- stage 5: coverage and triage --- */
+function stage5(){
+  var dms = [0, 0.6, 1.2, 2.0, 3.0], rows = [], i, b, base = shippedAt(E0, DP0, RATIO0);
+  S.base = base;
+  for (i = 0; i < dms.length; i++){
+    b = bestCoverage(E0, DP0, RATIO0, dms[i], 1000);
+    ok(b.shipped <= base + 1e-15, "the best coverage never ships more than reviewing everything, at model d' " + dms[i]);
+    if (dms[i] === 0) ok(Math.abs(b.u - 1) < 1e-12, "with a confidence signal that carries nothing, the best coverage is every item");
+    rows.push({ cls: dms[i] === 0 ? "ctrl" : (Math.abs(dms[i] - DM0) < 1e-12 ? "win" : ""),
+      cells: [f2(dms[i]), pct(auc(dms[i])), pct1(b.u), per1k(b.shipped), per1k(base), f3(base / b.shipped) + "&times;", pct1(1 - b.u)] });
+  }
+  tbl("tCov", ["model confidence d&prime;", "ranking quality", "best coverage", "reach customer / 1k", "reviewing everything / 1k", "gain", "reviewer hours saved"], rows);
+  var bb = bestCoverage(E0, DP0, RATIO0, DM0, 1000), bh = bestCoverage(E0, DP0, RATIO0, 2.0, 1000);
+  ok(bh.u < 1 && bh.shipped < base, "with a good confidence signal, reviewing part of the stream beats reviewing all of it");
+  set("fCov", "<strong>&#128308; Reviewing everything is not the safest thing you can do with a reviewer.</strong> " +
+    "With a model whose own confidence separates its errors at " + pct(auc(2)) + " area under the curve, sending the worst " + pct1(bh.u) +
+    " of the stream to review ships " + per1k(bh.shipped) + " errors per thousand against " + per1k(base) + " for reviewing every single item &mdash; " +
+    f3(base / bh.shipped) + "&times; better on " + pct1(1 - bh.u) + " fewer reviewer hours. " +
+    "And the control is the top row: give the router a confidence signal that carries nothing and the best coverage is exactly every item, with the gain exactly one. " +
+    "The whole effect is bought by the ranking, and a stack that cannot rank its own errors should review everything.");
+
+  var us = [0.05, 0.10, 0.25, 0.50, 1.0], trows = [];
+  for (i = 0; i < us.length; i++){
+    var t = triageStudy(E0, DP0, RATIO0, DM0, us[i]);
+    var tot = t.shippedRandom - t.shippedFree, targ = t.shippedRandom - t.shippedFrozen, crit = t.shippedFrozen - t.shippedFree;
+    ok(Math.abs(tot - (targ + crit)) < 1e-15, "the two halves of triage's benefit add up exactly at coverage " + pct1(us[i]));
+    ok(t.er >= E0 - 1e-12, "routing by confidence never lowers the error rate the reviewer meets, at coverage " + pct1(us[i]));
+    ok(t.cFree >= t.cFrozen - 1e-12, "and a higher base rate never lowers the catch rate, at coverage " + pct1(us[i]));
+    if (Math.abs(us[i] - 1) < 1e-12){
+      ok(Math.abs(t.er - E0) < 1e-9 && Math.abs(t.share - 1) < 1e-9, "at full coverage the routed population IS the population");
+      ok(Math.abs(t.shippedFree - t.shippedRandom) < 1e-12, "and routing at full coverage is the same as not routing");
+    }
+    trows.push({ cls: Math.abs(us[i] - 1) < 1e-12 ? "ctrl" : "",
+      cells: [pct1(us[i]), pct(t.er), pct(t.share), pct(t.cFree), per1k(t.shippedRandom), per1k(t.shippedFrozen), per1k(t.shippedFree),
+        tot > 0 ? pct1(targ / tot) + " / " + pct1(crit / tot) : "&mdash;"] });
+  }
+  tbl("tTri", ["coverage", "error rate in the queue", "share of errors routed", "errors caught", "random pick / 1k", "+ targeting / 1k", "+ threshold moves / 1k", "split targeting / threshold"], trows);
+  var t25 = triageStudy(E0, DP0, RATIO0, DM0, 0.25);
+  var tt = t25.shippedRandom - t25.shippedFree, cc = t25.shippedFrozen - t25.shippedFree;
+  set("fTri", "<strong>" + pct1(cc / tt) + " of what triage buys is not the targeting.</strong> It is the reviewer&rsquo;s threshold coming back down, because the queue they are handed now has an error rate of " +
+    pct(t25.er) + " instead of " + pct(E0) + ". A cost-benefit analysis of a routing layer that counts only which items got looked at is missing that share of the answer, " +
+    "and it is the share that disappears the moment the routing is applied to a queue somebody else is working.");
+}
+
+/* --- stage 6: two reviewers --- */
+function stage6(){
+  var rhos = [0, 0.3, 0.6, 0.85], rows = [], i, k1 = bayesK(E0, DP0, RATIO0), base = shippedAt(E0, DP0, RATIO0);
+  var one = { c: catchAt(k1, DP0), f: faAt(k1) };
+  rows.push({ cls: "ctrl", cells: ["one reviewer", "&mdash;", f3(k1), pct(one.c), pct(one.f), per1k(base), "1.00", "1.000&times;"] });
+  S.pair = {};
+  for (i = 0; i < rhos.length; i++){
+    var rule, best = {};
+    for (var r2 = 0; r2 < 2; r2++){
+      rule = r2 ? "and" : "or";
+      var kb = bestPairK(E0, DP0, RATIO0, rhos[i], rule, -2, 6, 1200, 48);
+      var d = twoReviewerDesign(E0, DP0, kb, rhos[i], rule, 96);
+      ok(d.c >= 0 && d.c <= 1 && d.f >= 0 && d.f <= 1, "the pair's rates are probabilities at anchor " + rhos[i] + ", rule " + rule);
+      ok(d.shipped < base, "two reviewers still beat one at anchor " + rhos[i] + ", rule " + rule);
+      best[rule] = { k: kb, d: d };
+      rows.push({ cls: rule === "and" && rhos[i] === RHO0 ? "mid" : "",
+        cells: ["two reviewers, " + (rule === "and" ? "both must flag" : "either may flag"), pct(rhos[i]), f3(kb), pct(d.c), pct(d.f), per1k(d.shipped), "2.00", f3(base / d.shipped) + "&times;"] });
+    }
+    S.pair[rhos[i]] = best;
+    // at a common threshold the rules order: OR catches at least a soloist, AND at most
+    var kc = k1, po = twoReviewerDesign(E0, DP0, kc, rhos[i], "or", 96), pa = twoReviewerDesign(E0, DP0, kc, rhos[i], "and", 96);
+    ok(po.c >= one.c - 1e-12 && one.c >= pa.c - 1e-12, "at a common threshold, either-may-flag catches at least as much as one, which catches at least as much as both-must, at anchor " + rhos[i]);
+    ok(po.f >= one.f - 1e-12 && one.f >= pa.f - 1e-12, "and the false alarms order the same way, at anchor " + rhos[i]);
+  }
+  var seed = bestSeedRate(E0, DP0, RATIO0, U0, 999);
+  S.seedBest = seed;
+  rows.push({ cls: "win", cells: ["one reviewer + planted items", "&mdash;", f3(seedRun(E0, DP0, RATIO0, U0, seed.q).k), pct(seedRun(E0, DP0, RATIO0, U0, seed.q).c), pct(seedRun(E0, DP0, RATIO0, U0, seed.q).f), per1k(seed.shipped), "1.00", f3(base / seed.shipped) + "&times;"] });
+  tbl("tPair", ["design", "anchor", "threshold", "errors caught", "false alarms", "reach customer / 1k", "reviewer load", "vs one reviewer"], rows);
+  var p6 = S.pair[RHO0].and.d, p0 = S.pair[0].and.d, p85 = S.pair[0.85].and.d;
+  ok(p0.shipped < p6.shipped && p6.shipped < p85.shipped, "the more the two reviewers share, the less the second one is worth");
+  ok(seed.shipped < p6.shipped, "planting items into one reviewer's queue beats a second reviewer");
+  set("fPair", "<strong>&#128308; The second reviewer is dominated on both axes by the last row.</strong> " +
+    "At an anchor of " + pct(RHO0) + " &mdash; that share of what the second reviewer sees is the same evidence the first one saw, because they were both shown the model&rsquo;s answer &mdash; " +
+    "a second reviewer at their jointly best threshold takes the customer from " + per1k(base) + " to " + per1k(p6.shipped) + " errors per thousand, " +
+    f3(base / p6.shipped) + "&times;, for exactly double the reviewer bill. Planting known-bad items into the single reviewer&rsquo;s existing queue reaches " +
+    per1k(seed.shipped) + ", " + f3(base / seed.shipped) + "&times;, at the same load as doing nothing. " +
+    "At an anchor of " + pct(0.85) + " the pair is down to " + f3(base / p85.shipped) + "&times; for that doubled bill, and with the second reviewer fully independent it would be " +
+    f3(base / p0.shipped) + "&times; &mdash; so almost all of what you are buying is the independence, not the person.");
+
+  var lams = [1.0, 0.95, 0.9, 0.85, 0.8, 0.7], brows = [], anch = S.pair[RHO0].and.d.shipped;
+  for (i = 0; i < lams.length; i++){
+    var dpB = DP0 * lams[i];
+    var kB = bestPairK(E0, dpB, RATIO0, 0, "and", -2, 6, 800, 32);
+    var dB = twoReviewerDesign(E0, dpB, kB, 0, "and", 96);
+    brows.push({ cls: dB.shipped < anch ? "win" : "ctrl",
+      cells: [pct1(lams[i]), f3(dpB), pct(auc(dpB)), pct(dB.c), per1k(dB.shipped), per1k(anch), dB.shipped < anch ? "blind wins" : "anchored wins"] });
+  }
+  tbl("tBlind", ["second reviewer keeps", "their d&prime;", "ranking quality", "errors caught", "blind pair / 1k", "anchored pair / 1k", "which"], brows);
+  var lo = 0.3, hi = 1.0, mid;
+  for (i = 0; i < 40; i++){
+    mid = 0.5 * (lo + hi);
+    var kk = bestPairK(E0, DP0 * mid, RATIO0, 0, "and", -2, 6, 500, 24);
+    if (twoReviewerDesign(E0, DP0 * mid, kk, 0, "and", 48).shipped < anch) hi = mid; else lo = mid;
+  }
+  S.lamStar = 0.5 * (lo + hi);
+  ok(S.lamStar > 0 && S.lamStar < 1, "the blind-review trade has a crossover inside the range where it is a trade at all");
+  set("fBlind", "<strong>Blinding the second reviewer is the repair I expected to recommend, and it only pays above a crossover.</strong> " +
+    "Hiding the model&rsquo;s answer takes the anchor to zero, and it takes with it whatever that answer was worth as evidence. " +
+    "Against an anchored pair at " + pct(RHO0) + ", blind review wins only while the second reviewer keeps more than " + pct1(S.lamStar) +
+    " of their sensitivity &mdash; that is, only if not seeing the answer costs them less than " + pct1(1 - S.lamStar) + " of their ability to tell a wrong one from a right one. " +
+    "Nobody measures that number, so the recommendation is usually made without knowing which side of it the process is on.");
+}
+
+/* --- stage 7: planted items --- */
+function stage7(){
+  var qs = [0, 0.05, 0.10, S.seedBest.q, 0.20, 0.30, 0.50], rows = [], i, prev = null;
+  for (i = 0; i < qs.length; i++){
+    var r = seedRun(E0, DP0, RATIO0, U0, qs[i]);
+    ok(Math.abs(r.realCoverage - U0 * (1 - qs[i])) < 1e-15, "a planted item displaces exactly one real one, at rate " + pct1(qs[i]));
+    ok(r.load === U0, "and the reviewer's load does not change, at rate " + pct1(qs[i]));
+    if (prev){
+      ok(r.ePerceived > prev.ePerceived, "the error rate the reviewer meets rises with the planting rate, step " + i);
+      ok(r.k < prev.k, "so their threshold comes down, step " + i);
+      ok(r.c > prev.c, "and their catch rate on real errors goes up, step " + i);
+    }
+    prev = r;
+    rows.push({ cls: Math.abs(qs[i] - S.seedBest.q) < 1e-12 ? "win" : (qs[i] === 0 ? "ctrl" : ""),
+      cells: [pct1(qs[i]), pct(r.ePerceived), f3(r.k), pct(r.c), pct1(r.realCoverage), per1k(r.shipped), f3(S.base / r.shipped) + "&times;"] });
+  }
+  tbl("tSeed", ["planted share of the queue", "error rate the reviewer meets", "threshold", "errors caught", "real items still reviewed", "reach customer / 1k", "vs planting nothing"], rows);
+  ok(seedRun(E0, DP0, RATIO0, U0, 0.99).shipped > S.base, "planting almost the whole queue is worse than planting none of it");
+  ok(S.seedBest.q > 0 && S.seedBest.q < 1, "the best planting rate is interior, because the two effects pull opposite ways");
+  set("fSeed", "<strong>&#128308; Replacing " + pct1(S.seedBest.q) + " of the review queue with items you already know are wrong halves the errors reaching the customer, at no extra reviewer cost at all.</strong> " +
+    "Not because the reviewer tries harder &mdash; nothing in this engine models effort &mdash; but because the queue they are working now contains " + pct(seedRun(E0, DP0, RATIO0, U0, S.seedBest.q).ePerceived) +
+    " errors instead of " + pct(E0) + ", and the threshold that minimises their cost on <em>that</em> queue is " +
+    f3(seedRun(E0, DP0, RATIO0, U0, S.seedBest.q).k) + " instead of " + f3(bayesK(E0, DP0, RATIO0)) + ". " +
+    "They apply it to the real items too, because they cannot tell which is which &mdash; that is what makes a planted item useful and also what makes it honest. " +
+    "The cost is the last real items in the queue: " + pct1(1 - seedRun(E0, DP0, RATIO0, U0, S.seedBest.q).realCoverage) + " of them are no longer looked at, which is why the best rate is interior and not one.");
+
+  var dpsx = [1, 2, 3, 4, 4.5, 5], srows = [];
+  for (i = 0; i < dpsx.length; i++){
+    var b = bestSeedRate(E0, dpsx[i], RATIO0, U0, 999);
+    var bs = shippedAt(E0, dpsx[i], RATIO0);
+    ok(b.shipped <= bs + 1e-15, "planting never makes things worse when its rate is chosen, at d' " + dpsx[i]);
+    srows.push({ cls: b.q === 0 ? "ctrl" : "", cells: [f2(dpsx[i]), pct(auc(dpsx[i])), pct(catchAt(bayesK(E0, dpsx[i], RATIO0), dpsx[i])), pct1(b.q), per1k(bs), per1k(b.shipped), f3(bs / b.shipped) + "&times;"] });
+  }
+  tbl("tSeedNull", ["reviewer d&prime;", "ranking quality", "errors caught, nothing planted", "best planting rate", "reach customer / 1k", "with planting / 1k", "gain"], srows);
+  var lo = 1, hi = 12, mid;
+  for (i = 0; i < 40; i++){ mid = 0.5 * (lo + hi); if (bestSeedRate(E0, mid, RATIO0, U0, 399).q > 0) lo = mid; else hi = mid; }
+  S.dpStar = 0.5 * (lo + hi);
+  ok(bestSeedRate(E0, S.dpStar + 0.6, RATIO0, U0, 399).q === 0, "above the crossover the best planting rate is exactly zero");
+  var bias = [0, 0.25, 0.5, 1.0], brows = [], sq = seedRun(E0, DP0, RATIO0, U0, S.seedBest.q);
+  for (i = 0; i < bias.length; i++){
+    var rb = seedRun(E0, DP0, RATIO0, U0, S.seedBest.q, DP0 + bias[i]);
+    ok(rb.cSeed >= sq.c - 1e-12, "an easier planted item never reads lower than the truth, bump " + bias[i]);
+    brows.push({ cells: [f2(DP0 + bias[i]), pct(rb.cSeed), pct(rb.c), f3(rb.cSeed / rb.c) + "&times;"] });
+  }
+  set("fSeedNull", "<strong>It stops paying, and the boundary is computable.</strong> Above a reviewer sensitivity of about " + f2(S.dpStar) +
+    " &mdash; area under the curve " + pct(auc(S.dpStar)) + " &mdash; the best planting rate is exactly zero: a reviewer that good is limited by their eyes and not by their threshold, and every planted item is a real one not looked at. " +
+    "Below it the gain runs from " + f3(shippedAt(E0, dpsx[0], RATIO0) / bestSeedRate(E0, dpsx[0], RATIO0, U0, 999).shipped) + "&times; down to nothing. " +
+    "And the estimate it produces is only unbiased if the planted items are as hard as the real ones: bump a planted item&rsquo;s sensitivity by half and the measured catch rate reads " +
+    f3(seedRun(E0, DP0, RATIO0, U0, S.seedBest.q, DP0 + 0.5).cSeed / sq.c) + "&times; the truth &mdash; a review programme that plants obvious errors will report a catch rate it does not have.");
+}
+
+/* --- stage 8: identification --- */
+function stage8(){
+  var k = bayesK(E0, DP0, RATIO0), c = catchAt(k, DP0), f = faAt(k);
+  var C = E0 * c, F = C + (1 - E0) * f;
+  S.C = C; S.F = F;
+  var es = [C * 1.02, 0.010, 0.015, E0, 0.030, 0.050, 0.100], rows = [], i, L, cMin = 1, cMax = 0;
+  for (i = 0; i < es.length; i++){
+    L = levelSet(C, F, [es[i]])[0];
+    ok(Math.abs(L.e * L.c - C) < 1e-15, "every row on the curve reproduces the confirmed-wrong count exactly, row " + i);
+    ok(Math.abs(L.e * L.c + (1 - L.e) * L.f - F) < 1e-15, "and the flag count exactly, row " + i);
+    ok(L.feasible, "and every row is a possible world, row " + i);
+    if (L.c < cMin) cMin = L.c;
+    if (L.c > cMax) cMax = L.c;
+    rows.push({ cls: Math.abs(es[i] - E0) < 1e-12 ? "win" : "", cells: [pct(L.e), pct(L.c), pct(L.f), per1k(L.e * L.c), per1k(L.e * L.c + (1 - L.e) * L.f), per1k(L.e * (1 - L.c))] });
+  }
+  tbl("tId", ["if the model errs at", "then the catch rate is", "and false alarms are", "confirmed wrong / 1k", "flagged / 1k", "reach customer / 1k"], rows);
+  ok(Math.abs(identifyE(C, F, DP0) - E0) < 1e-6, "knowing the reviewer's sensitivity pins the model's error rate back down exactly");
+  S.cRange = cMax / cMin;
+  set("fId", "<strong>&#128308; The same two counts &mdash; " + per1k(F) + " flagged and " + per1k(C) + " confirmed wrong per thousand items &mdash; are consistent with a catch rate of " +
+    pct(cMin) + " and with one of " + pct(cMax) + ".</strong> That is a range of " + f2(S.cRange) + "&times; on the single number the whole review layer exists to deliver, from a dashboard where nothing looks wrong. " +
+    "Two unknowns short of three: a week of review counts two things and there are three quantities behind them. " +
+    "Add the reviewer&rsquo;s sensitivity and the system closes &mdash; the page recovers the true error rate to six decimals from those two counts alone &mdash; which is the argument for measuring sensitivity rather than counting catches.");
+
+  var ms = [[20, 19], [30, 28], [40, 2], [60, 1], [200, Math.round(200 * c)], [1000, Math.round(1000 * c)]], crows = [], out = 0;
+  for (i = 0; i < ms.length; i++){
+    var n = ms[i][0], x = ms[i][1], cp = cpInterval(n, x, 0.05), w = waldInterval(n, x, 1.959963985);
+    ok(cp.lo <= x / n + 1e-12 && cp.hi >= x / n - 1e-12, "the exact interval contains the count it was built from, case " + i);
+    ok(cp.hi >= cp.lo, "and it is an interval, case " + i);
+    if (w.lo < 0 || w.hi > 1) out++;
+    crows.push({ cls: (w.lo < 0 || w.hi > 1) ? "ctrl" : "",
+      cells: [n, x, pct(x / n), pct(cp.lo) + " &ndash; " + pct(cp.hi), pct(cp.hi - cp.lo),
+        (100 * w.lo).toFixed(2) + "% &ndash; " + (100 * w.hi).toFixed(2) + "%", pct(w.hi - w.lo), (w.lo < 0 || w.hi > 1) ? "outside [0,1]" : "&mdash;"] });
+  }
+  tbl("tCI", ["planted items", "caught", "point estimate", "exact interval", "width", "normal approximation", "width", "limits"], crows);
+  ok(out > 0, "the normal approximation leaves the unit interval on some of these counts, and the exact one cannot");
+  var n1 = 200, x1 = Math.round(200 * c), cp1 = cpInterval(n1, x1, 0.05);
+  ok(cp1.hi - cp1.lo < 1, "two hundred planted items already pin the catch rate to a usable width");
+  set("fCI", "The exact interval inverts the binomial tail directly, so it holds by construction and never leaves the unit interval. " +
+    "The normal approximation is narrower on every row here &mdash; which is the problem, not the feature &mdash; and on " + out + " of them it reports limits that are not probabilities. " +
+    "At " + n1 + " planted items the catch rate is pinned to " + pct(cp1.hi - cp1.lo) + " wide, against a range of " + f2(S.cRange) + "&times; with none planted at all.");
+
+  var ranges = [[1.5, 2.5], [1.0, 3.0], [0.5, 3.5]], qrows = [];
+  for (i = 0; i < ranges.length; i++){
+    var lo = ranges[i][0], hi = ranges[i][1], mid = 0.5 * (lo + hi);
+    var avg = catchOverSkill(E0, RATIO0, lo, hi, 96), pt = catchAt(bayesK(E0, mid, RATIO0), mid);
+    var avg2 = catchOverSkill(E0, RATIO0, lo, hi, 48);
+    ok(Math.abs(avg - avg2) < 1e-9, "the quadrature has converged at range " + i);
+    ok(avg >= catchAt(bayesK(E0, lo, RATIO0), lo) && avg <= catchAt(bayesK(E0, hi, RATIO0), hi), "the mean over the range lies between its endpoints, range " + i);
+    ok(avg < pt, "and it is below the midpoint value, range " + i);
+    qrows.push({ cells: [f2(lo) + " &ndash; " + f2(hi), pct(catchAt(bayesK(E0, lo, RATIO0), lo)), pct(catchAt(bayesK(E0, hi, RATIO0), hi)), pct(pt), pct(avg), f4(pt / avg) + "&times;"] });
+  }
+  tbl("tQuad", ["reviewer d&prime; somewhere in", "catch at the low end", "catch at the high end", "catch at the midpoint", "mean catch over the range", "midpoint overstates by"], qrows);
+  set("fQuad", "The catch rate is concave in sensitivity over this range, so the midpoint value is always the optimistic one and the gap widens with the range: " +
+    "over the widest band here, sizing a review programme from the middle of your uncertainty about your reviewers overstates the catch rate by " +
+    f4(catchAt(bayesK(E0, 2, RATIO0), 2) / catchOverSkill(E0, RATIO0, 0.5, 3.5, 96)) + "&times;. " +
+    "Small, and in the same direction as everything else on this page.");
+}
+
+/* --- stage 9: the simulations --- */
+function stage9(){
+  var k = bayesK(E0, DP0, RATIO0), rows = [], i;
+  var cfgs = [
+    { lab: "one reviewer", k: k, rho: 0, rule: null },
+    { lab: "two, either may flag, anchor " + pct(RHO0), k: k, rho: RHO0, rule: "or" },
+    { lab: "two, both must flag, anchor " + pct(RHO0), k: k, rho: RHO0, rule: "and" },
+    { lab: "two, both must flag, independent", k: 1.0, rho: 0, rule: "and" }
+  ];
+  for (i = 0; i < cfgs.length; i++){
+    var g = cfgs[i], nW = 30000, nR = 30000;
+    var sim = detectorSim(20260831 + i * 7919, nW, nR, DP0, g.k, g.rho, g.rule);
+    var cl = g.rule ? twoReviewerDesign(E0, DP0, g.k, g.rho, g.rule, 96) : { c: catchAt(g.k, DP0), f: faAt(g.k) };
+    var seC = Math.sqrt(cl.c * (1 - cl.c) / nW), seF = Math.sqrt(Math.max(cl.f, 1e-9) * (1 - cl.f) / nR);
+    ok(Math.abs(sim.c - cl.c) < 4.5 * seC, "the drawn catch rate matches the closed form, " + g.lab);
+    ok(Math.abs(sim.f - cl.f) < 4.5 * seF, "the drawn false-alarm rate matches the closed form, " + g.lab);
+    rows.push({ cells: [g.lab, pct(cl.c), pct(sim.c), f2(Math.abs(sim.c - cl.c) / seC), pct3(cl.f), pct3(sim.f), f2(Math.abs(sim.f - cl.f) / seF)] });
+  }
+  var n = 90000, q = S.seedBest.q, ss = streamSim(20260831, n, E0, DP0, RATIO0, U0, q), sr = seedRun(E0, DP0, RATIO0, U0, q);
+  var seS = Math.sqrt(sr.shipped * (1 - sr.shipped) / n), seQ = Math.sqrt(q * (1 - q) / n);
+  ok(ss.real === n, "the stream accounted for every item exactly once");
+  ok(Math.abs(ss.seeds / n - q) < 4.5 * seQ, "the planted share of the stream came out at the rate it was set to");
+  ok(Math.abs(ss.shipped - sr.shipped) < 4.5 * seS, "and the errors that slipped through match the closed form");
+  ok(Math.abs(ss.k - sr.k) < 1e-15, "the simulated reviewer used the same threshold the closed form did");
+  rows.push({ cls: "win", cells: ["whole stream, " + pct1(q) + " planted", per1k(sr.shipped) + " / 1k", per1k(ss.shipped) + " / 1k", f2(Math.abs(ss.shipped - sr.shipped) / seS), pct(sr.c), pct(ss.c), "&mdash;"] });
+  tbl("tSim", ["design", "closed form", "drawn", "z", "false alarms, closed", "drawn", "z"], rows);
+  set("fSim", "Thirty thousand items of each kind per row, plus a stream of " + (n / 1000).toFixed(0) + " thousand for the last one, drawn from the series LCG with a Marsaglia polar transform. " +
+    "The z column is how many standard errors the drawn rate sits from the closed form; the page fails itself above four and a half. " +
+    "This is where a wrong formula shows up, and where the pair rules had to be rewritten once already.");
+
+  set("fDeclare", "<strong>Three objects, and none of them is a language model.</strong> An item is a coin the model called right or wrong. A reviewer is two normal distributions and a threshold. " +
+    "A cost is one number. Everything else on this page &mdash; the turnover, the collapse in the catch rate, the value of a second reviewer, the best planting rate &mdash; is a consequence of those three, " +
+    "computed in closed form and checked against items drawn one at a time.");
+
+  set("fIdent", "<strong>What is checked as an identity rather than as a number:</strong> the likelihood ratio at the closed-form threshold equals the odds against an error divided by the declared price of a miss, exactly; " +
+    "the closed-form threshold is the minimum of the cost over a four-hundred-thousand-point search; the ROC relation reproduces the catch rate from the false-alarm rate at every sensitivity tried; " +
+    "the closed-form area under the ROC equals its own integral to " + ex2(1e-9) + "; the three outcomes of a reviewer pair sum to one and either-flags equals both-plus-exactly-one; " +
+    "a bivariate normal at zero correlation is the product of two univariate ones and at full correlation is a single one, and at the origin it is the arcsine law; " +
+    "the two halves of triage&rsquo;s benefit add up to the whole; a planted item displaces exactly one real one; every row of the identification curve reproduces both observed counts exactly; " +
+    "and every quadrature is run at two orders and must agree.");
+
+  set("fN1", "<strong>1. The claim I set out to make was &lsquo;a better model always ships more errors&rsquo;, and it is false.</strong> " +
+    "The shipped-error curve has a single maximum, so the reversal is a band and not a law: above " + pct(S.peak) + " model error, improving the model hurts; below it, improving the model helps, only heavily discounted. " +
+    "The honest version is the discount, and the reversal is what the discount looks like when it exceeds one hundred percent.");
+  set("fN2", "<strong>2. The reviewer who ignores the base rate ships fewer errors, and is genuinely more expensive.</strong> " +
+    "Freeze the threshold and the catch rate holds, at " + f2(costAt(E0, DP0, S.kHigh, RATIO0) / costAt(E0, DP0, bayesK(E0, DP0, RATIO0), RATIO0)) + "&times; the reviewer&rsquo;s own expected cost under the declared price of a miss. " +
+    "So this is not a story about a bad reviewer being replaced by a good one. Both are behaving correctly given what they were told, and what they were told is the only thing anybody can actually change.");
+  set("fN3", "<strong>3. &lsquo;Add a second reviewer&rsquo; is the reflex and it is dominated on both axes.</strong> " +
+    "Two reviewers at an anchor of " + pct(RHO0) + " buy " + f3(S.base / S.pair[RHO0].and.d.shipped) + "&times; for double the load; planting items in one reviewer&rsquo;s queue buys " +
+    f3(S.base / S.seedBest.shipped) + "&times; for the same load as doing nothing. I expected the pair to win and it does not, at any anchor above independence.");
+  set("fN4", "<strong>4. Triage and planting do not add up, because they are the same lever.</strong> " +
+    "Both work by raising the error rate the reviewer meets. Applied one after the other at a fixed reviewer load the second one buys almost nothing on top of the first, " +
+    "which is not what two separately sensible recommendations look like on a slide. The one that is cheaper to run is the one to run.");
+  set("fN5", "<strong>5. The measurement I wanted to recommend measures the wrong thing unless you build it carefully.</strong> " +
+    "Planted items give the catch rate a denominator &mdash; but only if they are as hard as the real errors. Make them a little more obvious and the number comes back " +
+    f3(seedRun(E0, DP0, RATIO0, U0, S.seedBest.q, DP0 + 0.5).cSeed / seedRun(E0, DP0, RATIO0, U0, S.seedBest.q).c) + "&times; too high, " +
+    "which is exactly the direction a programme staffed by people who want it to look good will drift.");
+
+  set("fCtrl", "<strong>What to actually do, in the order the page justifies it.</strong> " +
+    "<strong>1.</strong> Write down the price of a miss in false alarms. It is the only input that decides the threshold, it is currently being chosen by whoever is reviewing, and moving it from " +
+    RATIO0 + " to " + f2(ratioForCatch(E0, DP0, S.cHigh)) + " here is what holds a catch rate through a model improvement. " +
+    "<strong>2.</strong> Measure sensitivity, not catches. Two counts and three unknowns leaves a range of " + f2(S.cRange) + "&times;; " +
+    "a couple of hundred planted items closes it to " + pct(cpInterval(200, Math.round(200 * catchAt(bayesK(E0, DP0, RATIO0), DP0)), 0.05).hi - cpInterval(200, Math.round(200 * catchAt(bayesK(E0, DP0, RATIO0), DP0)), 0.05).lo) + " wide. " +
+    "<strong>3.</strong> Raise the error rate in the queue, by routing or by planting, whichever is cheaper &mdash; not both, they are one lever. " +
+    "<strong>4.</strong> Re-derive the catch rate every time the model ships. It moved, and nothing in your change log says so.");
+  set("fCtrl2", "<strong>And one thing not to do.</strong> Do not report a review layer&rsquo;s health with the flag count, the false-alarm rate, or the size of the queue. " +
+    "All three improve monotonically down the whole path in the first table, including across the stretch where the number of wrong answers reaching customers is going <em>up</em>. " +
+    "A review dashboard built from those three is not a weak signal about oversight. It is anti-correlated with it.");
+}
+
+/* --- stage 10: extra identities that need no table --- */
+function stage10(){
+  var i, x;
+  ok(Phi(0) === 0.5, "the normal law is exactly one half at zero");
+  var maxSym = 0, maxInv = 0, mono = true, prev = -1;
+  for (i = -600; i <= 600; i++){
+    x = i / 100;
+    maxSym = Math.max(maxSym, Math.abs(Phi(x) + Phi(-x) - 1));
+    if (Phi(x) < prev) mono = false;
+    prev = Phi(x);
+  }
+  ok(maxSym < 1e-15, "the normal law is symmetric about zero across the whole sweep");
+  ok(mono, "and monotone across it");
+  for (i = 1; i < 200; i++){
+    var p = i / 200;
+    maxInv = Math.max(maxInv, Math.abs(Phi(PhiInv(p)) - p));
+  }
+  ok(maxInv < 1e-14, "the inverse normal round-trips to the last digits across the sweep");
+  ok(PhiInv(0.5) === 0, "and the median is exactly zero");
+  // the pair identities
+  var cases = [[2.141, 2, 0.6], [1.0, 0, 0.3], [0.2, 2, 0.9], [-0.5, 0, 0.75]];
+  for (i = 0; i < cases.length; i++){
+    var ps = pairStats(cases[i][0], cases[i][1], cases[i][2], 96);
+    ok(Math.abs(ps.both + ps.exactlyOne + ps.neither - 1) < 1e-12, "the three outcomes of a reviewer pair sum to one, case " + i);
+    ok(Math.abs(ps.either - ps.both - ps.exactlyOne) < 1e-12, "either-flags is both plus exactly-one, case " + i);
+    ok(ps.both <= ps.one + 1e-12 && ps.one <= ps.either + 1e-12, "both-flag is at most one-flags is at most either-flags, case " + i);
+  }
+  var hs = [-1.4, 0, 0.7, 1.9];
+  for (i = 0; i < hs.length; i++){
+    ok(Math.abs(bvnEqual(hs[i], 0, 96) - Phi(hs[i]) * Phi(hs[i])) < 1e-14, "uncorrelated reviewers are independent, case " + i);
+    ok(Math.abs(bvnEqual(hs[i], 1, 96) - Phi(hs[i])) < 1e-14, "and fully correlated ones are one reviewer, case " + i);
+    ok(bvnEqual(hs[i], 0.7, 96) > bvnEqual(hs[i], 0.3, 96), "agreement rises with the anchor, case " + i);
+  }
+  var rhos = [0.2, 0.5, 0.9];
+  for (i = 0; i < rhos.length; i++)
+    ok(Math.abs(bvnEqual(0, rhos[i], 128) - (0.25 + Math.asin(rhos[i]) / (2 * Math.PI))) < 1e-10, "the bivariate normal at the origin is the arcsine law, case " + i);
+  // exact binomial
+  for (i = 8; i <= 24; i += 4){
+    var row = pascalRow(i), s = 0n, j;
+    for (j = 0; j < row.length; j++) s += row[j];
+    ok(s === (1n << BigInt(i)), "Pascal's row " + i + " sums to two to the " + i);
+    ok(Math.abs(binomCdfDyadic(i, i, 1, 1) - 1) < 1e-12, "a binomial tail over the whole range is one, at " + i + " trials");
+    ok(Math.abs(binomCdfDyadic(i, i >> 1, 1, 1) - binomCdf(i, i >> 1, 0.5) ) < 1e-12, "the exact BigInt tail matches the floating-point one, at " + i + " trials");
+    ok(Math.abs(binomCdfDyadic(i, i >> 1, 1, 2) - binomCdf(i, i >> 1, 0.25)) < 1e-12, "and at a quarter success rate, " + i + " trials");
+  }
+  // the LCG's own documented hazard
+  var l = new Lcg(12345), bits = [], hi2 = [];
+  for (i = 0; i < 40; i++) bits.push(l.nextInt() & 1);
+  var alt = true;
+  for (i = 1; i < bits.length; i++) if (bits[i] === bits[i - 1]) alt = false;
+  ok(alt, "the generator's raw low bit alternates every step, which is why % n is never used");
+  var l2 = new Lcg(12345), allAlt = true;
+  for (i = 0; i < 40; i++) hi2.push(l2.below(2));
+  for (i = 1; i < hi2.length; i++) if (hi2[i] === hi2[i - 1]) allAlt = false;
+  ok(!allAlt, "and the high-bit draw does not inherit that alternation");
+  // the gaussian stream
+  var g = new Lcg(777001), n = 40000, sum = 0, sq = 0, q4 = 0;
+  for (i = 0; i < n; i++){ x = g.gauss(); sum += x; sq += x * x; q4 += x * x * x * x; }
+  ok(Math.abs(sum / n) < 4 / Math.sqrt(n), "the gaussian stream has mean zero");
+  ok(Math.abs(sq / n - 1) < 8 / Math.sqrt(n), "and unit variance");
+  ok(Math.abs(q4 / n - 3) < 40 / Math.sqrt(n), "and the normal fourth moment");
+  // ratioForCatch round trip
+  var targets = [0.3, 0.6, 0.9];
+  for (i = 0; i < targets.length; i++){
+    var ra = ratioForCatch(E0, DP0, targets[i]);
+    ok(Math.abs(catchAt(bayesK(E0, DP0, ra), DP0) - targets[i]) < 1e-9, "the implied price of a miss round-trips to its target catch rate, case " + i);
+  }
+  document.getElementById("runNote").textContent = "";
+}
+
+/* --- stage 12: checks list + badge --- */
+function stageFinal(){
+  set("ulChecks", CHECKS.map(function(c){
+    return "<li><span class=\"pill " + (c.pass ? "ok\">PASS" : "no\">FAIL") + "</span> " + c.label + "</li>";
+  }).join(""));
+  var el = document.getElementById("selftest");
+  if (FAILED){
+    el.textContent = (CHECKS.length - FAILED) + " / " + CHECKS.length + " checks passed, " + FAILED + " FAILED";
+    el.style.background = "#7f1d1d";
+    if (typeof console !== "undefined") console.error("AI day76 assertions FAILED", CHECKS.filter(function(c){ return !c.pass; }));
+  } else {
+    el.textContent = CHECKS.length + " / " + CHECKS.length + " checks passed";
+  }
+  document.body.setAttribute("data-ready", "1");
+}
+
+/* tabs */
+Array.prototype.forEach.call(document.querySelectorAll(".tab[data-p]"), function(b){
+  b.addEventListener("click", function(){
+    Array.prototype.forEach.call(document.querySelectorAll(".tab[data-p]"), function(x){
+      x.setAttribute("aria-selected", x === b ? "true" : "false");
+    });
+    ["look", "understand", "build"].forEach(function(n){ document.getElementById("p-" + n).hidden = (n !== b.dataset.p); });
+  });
+});
+
+/* the BUILD tab re-runs the engine with your parameters */
+function clampInt(id, lo, hi, dflt){
+  var x = Math.round(+document.getElementById(id).value);
+  if (!isFinite(x)) x = dflt;
+  return Math.max(lo, Math.min(hi, x));
+}
+function runCustom(){
+  var e = clampInt("inE", 1, 450, 20) / 1000, dp = clampInt("inDp", 40, 600, 200) / 100;
+  var ratio = clampInt("inRatio", 1, 200, 5), dm = clampInt("inDm", 0, 400, 120) / 100;
+  var rho = clampInt("inRho", 0, 95, 60) / 100, u = clampInt("inU", 5, 100, 100) / 100;
+  var k = bayesK(e, dp, ratio), base = e * (1 - u * catchAt(k, dp));
+  var cov = bestCoverage(e, dp, ratio, dm, 400);
+  var seed = bestSeedRate(e, dp, ratio, u, 399);
+  var sr = seedRun(e, dp, ratio, u, seed.q);
+  var kp = bestPairK(e, dp, ratio, rho, "and", -2, 6, 600, 32);
+  var pr = twoReviewerDesign(e, dp, kp, rho, "and", 64);
+  var pk = shippedPeak(dp, ratio);
+  tbl("tRun", ["design", "threshold", "errors caught", "false alarms", "reach customer / 1k", "reviewer load", "vs reviewing everything"], [
+    { cls: "ctrl", cells: ["no review at all", "&mdash;", "0.00%", "0.00%", per1k(e), "0.00", f3(e / base) + "&times; worse"] },
+    { cells: ["review coverage " + pct1(u), f3(k), pct(catchAt(k, dp)), pct(faAt(k)), per1k(base), f2(u), "1.000&times;"] },
+    { cells: ["route the worst " + pct1(cov.u) + " by confidence", "&mdash;", "&mdash;", "&mdash;", per1k(cov.shipped), f2(cov.u), f3(base / cov.shipped) + "&times;"] },
+    { cls: "win", cells: ["plant " + pct1(seed.q) + " of the queue", f3(sr.k), pct(sr.c), pct(sr.f), per1k(seed.shipped), f2(u), f3(base / seed.shipped) + "&times;"] },
+    { cls: "mid", cells: ["two reviewers, anchor " + pct1(rho), f3(kp), pct(pr.c), pct(pr.f), per1k(e * (1 - u * pr.c)), f2(2 * u), f3(base / (e * (1 - u * pr.c))) + "&times;"] }
+  ]);
+  document.getElementById("runNote").textContent =
+    "reviewer ROC area " + pct(auc(dp)) +
+    " · turnover at " + (pk === null ? "nowhere" : pct(pk)) + " model error, so this model is " + (pk !== null && e > pk ? "ABOVE it — improving it ships MORE errors" : "below it") +
+    " · price of a miss needed to hold a " + pct(catchAt(bayesK(0.2, dp, ratio), dp)) + " catch rate here: " + f2(ratioForCatch(e, dp, catchAt(bayesK(0.2, dp, ratio), dp))) +
+    " · the queue is a real error " + pct(queuePrecision(e, dp, k)) + " of the time.";
+}
+document.getElementById("btnRun").addEventListener("click", runCustom);
+
+/* A plain setTimeout pump. No requestAnimationFrame, no IntersectionObserver:
+   a background tab must still finish this page, and rAF does not run there. */
+var STAGES = [stage1, stage2, stage3, stage4, stage5, stage6, stage7, stage8, stage9, stage10, runCustom, stageFinal], si = 0;
+function pump(){
+  var fn = STAGES[si++];
+  try { fn(); }
+  catch (err){
+    var el = document.getElementById("selftest");
+    el.textContent = "stage " + si + " threw: " + (err && err.message ? err.message : err);
+    el.style.background = "#7f1d1d";
+    if (typeof console !== "undefined") console.error("AI day76 stage " + si + " threw", err);
+    return;
+  }
+  if (si < STAGES.length) setTimeout(pump, 0);
+}
+setTimeout(pump, 0);
+</script>
+</body>
+</html>
