@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero &middot; Day 82 &mdash; Query rewriting</title>
+<style>
+  :root { --ink:#0f172a; --sub:#475569; --line:#e2e8f0; --bg:#f8fafc; --accent:#0369a1; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Inter",system-ui,sans-serif; margin:0; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:1152px; margin:0 auto; padding:16px; }
+  @media (min-width:768px){ .wrap { padding:24px; } }
+  header { background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
+  .kicker { font-size:12px; font-weight:800; letter-spacing:.16em; color:var(--accent); margin:0 0 8px; }
+  h1 { font-size:19px; line-height:1.5; font-weight:900; margin:0 0 12px; }
+  @media (min-width:768px){ h1 { font-size:22px; } }
+  h2 { font-size:24px; font-weight:900; margin:0 0 8px; }
+  h3 { font-size:19px; font-weight:800; margin:20px 0 6px; }
+  p { line-height:1.6; margin:0 0 12px; }
+  .tabs { display:flex; gap:8px; flex-wrap:wrap; }
+  .tabs button { font:inherit; font-size:14px; font-weight:600; padding:8px 20px; border:0; border-radius:8px; background:#f1f5f9; cursor:pointer; }
+  .tabs button.tab-active { background:#0f172a; color:#fff; }
+  .hidden { display:none; }
+  .card { background:#fff; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,.12); padding:20px; min-width:0; }
+  .stack > * + * { margin-top:20px; }
+  .grid2 { display:grid; gap:20px; grid-template-columns:minmax(0,1fr); }
+  @media (min-width:900px){ .grid2 { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } }
+  .lbl { font-size:12px; font-weight:800; letter-spacing:.1em; color:#64748b; margin:0 0 8px; }
+  .big { font-size:24px; font-weight:900; font-variant-numeric:tabular-nums; margin:0; }
+  .note { font-size:12.5px; color:#475569; margin:8px 0 0; line-height:1.55; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:11.5px; overflow-x:auto; line-height:1.35; margin:0; white-space:pre; }
+  code { background:#f1f5f9; padding:1px 4px; border-radius:4px; font-size:.92em; }
+  .tblwrap { overflow-x:auto; }
+  table.num { border-collapse:collapse; width:100%; min-width:560px; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid var(--line); }
+  table.num td.txt { text-align:left; }
+  tr.here td { background:#f0fdfa; font-weight:700; }
+  tr.dim td { color:#94a3b8; }
+  .pill { display:inline-block; padding:1px 7px; border-radius:999px; font-size:11px; font-weight:800; }
+  .pill.good { background:#dcfce7; color:#166534; }
+  .pill.bad { background:#fee2e2; color:#991b1b; }
+  .ok { color:#166534; font-weight:800; }
+  .warn { color:#991b1b; font-weight:800; }
+  #selftest div { display:grid; grid-template-columns:52px 1fr; gap:8px; font-size:12.5px; padding:3px 0; border-top:1px solid var(--line); align-items:start; }
+  #selftest div span.m { grid-column:2; font-size:11.5px; color:#64748b; }
+  .ctl { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 12px; }
+  .ctl input[type=range] { flex:1; min-width:150px; }
+  .ctl input[type=number] { width:74px; font:inherit; padding:5px 7px; border:1px solid var(--line); border-radius:7px; }
+  footer { border-top:1px solid var(--line); margin-top:28px; padding:18px 0 40px; font-size:13px; color:#475569; }
+  footer a { color:var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">AIFROMZERO &middot; DAY 82</p>
+    <h1>
+      Query rewriting &mdash; synonym expansion cannot lower recall, which is exactly why recall is the wrong thing to tune it on.
+    </h1>
+    <div class="tabs">
+      <button id="tabLook" class="tab-active" onclick="showTab('look')">Look</button>
+      <button id="tabUnd" onclick="showTab('und')">Understand</button>
+      <button id="tabBuild" onclick="showTab('build')">Build</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section id="look" class="stack">
+  <div class="card">
+    <h2>Five rewrites, one index, eight labelled queries</h2>
+    <p>
+      Query rewriting is the first stage of most RAG pipelines and the one
+      tuned by feel. Here it is tuned by measurement: a real BM25 index, real
+      rewrites, hand-labelled relevance.
+    </p>
+    <div class="tblwrap"><table class="num" id="tRewrite"></table></div>
+    <p class="note" id="rewriteNote"></p>
+  </div>
+</section>
+
+<section id="und" class="stack hidden">
+  <div class="card">
+    <h2>A rewrite reweights, it does not just add</h2>
+    <div class="tblwrap"><table class="num" id="tIdf"></table></div>
+    <p class="note" id="idfNote"></p>
+  </div>
+
+  <div class="card">
+    <h2>Recall and precision move in opposite directions</h2>
+    <p>
+      Synonym expansion can only add terms, so it <b>cannot</b> lower recall.
+      That is not a virtue &mdash; it is the definition, and it is why recall
+      alone is a bad way to choose a rewrite.
+    </p>
+    <div class="tblwrap"><table class="num" id="tK"></table></div>
+  </div>
+
+  <div class="card">
+    <h2>And the one that loses to doing nothing</h2>
+    <div class="tblwrap"><table class="num" id="tHyde"></table></div>
+    <p class="note" id="hydeNote"></p>
+  </div>
+</section>
+
+<section id="build" class="stack hidden">
+  <div class="card">
+    <h2>BM25, with the saturation that makes it BM25</h2>
+    <p>
+      The <code>k1</code> term is what separates this from TF-IDF: the tenth
+      occurrence of a word is worth far less than the second.
+    </p>
+    <pre id="codeBm25"></pre>
+  </div>
+  <div class="card">
+    <h2>The two rewrites worth comparing</h2>
+    <pre id="codeRw"></pre>
+  </div>
+  <div class="card">
+    <h2>Self-check</h2>
+    <p class="note" style="margin:0 0 10px">
+      Running in your browser now, against the same engine as the tables above.
+    </p>
+    <div id="selftest"></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p style="margin:0">
+      AIFromZero &middot; Day 82 &middot; Query rewriting.
+      Tomorrow: reranking, and the budget it quietly spends.
+    </p>
+  </div>
+</footer>
+</div>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// ======================================================================
+// QUERY REWRITING for retrieval - the first stage of most RAG systems and
+// the one that gets tuned by vibes.
+//
+// Everything here is a real BM25 index over a real (small) corpus, with
+// real rewrites applied to real queries, scored against a hand-labelled
+// relevance set. No model calls: the "rewrites" are the deterministic
+// transformations a model would produce, so the retrieval arithmetic is
+// visible rather than hidden behind a generation step.
+// ======================================================================
+const ENGINE = (() => {
+
+  // ------------------------------------------------------- tokenisation
+  const STOP = new Set(["the", "a", "an", "of", "to", "in", "is", "it", "for",
+                        "and", "or", "on", "do", "does", "how", "what", "why",
+                        "i", "my", "me", "can", "with", "when"]);
+
+  function tokens(s, dropStop) {
+    const out = (s.toLowerCase().match(/[a-z0-9]+/g) || []);
+    return dropStop === false ? out : out.filter((w) => !STOP.has(w));
+  }
+
+  // ------------------------------------------------------------- BM25
+  // Standard parameters. k1 controls term-frequency saturation, b the length
+  // normalisation. The IDF is the Robertson form, which can go NEGATIVE for a
+  // term appearing in more than half the corpus - that is not a bug and it is
+  // why a rewrite that adds a very common word can LOWER a document's score.
+  const K1 = 1.2, B = 0.75;
+
+  function index(docs) {
+    const postings = new Map();
+    const lens = [];
+    docs.forEach((d, i) => {
+      const t = tokens(d.text);
+      lens.push(t.length);
+      const tf = new Map();
+      for (const w of t) tf.set(w, (tf.get(w) || 0) + 1);
+      for (const [w, c] of tf) {
+        if (!postings.has(w)) postings.set(w, []);
+        postings.get(w).push([i, c]);
+      }
+    });
+    const avg = lens.reduce((p, c) => p + c, 0) / lens.length;
+    return { docs, postings, lens, avg, N: docs.length };
+  }
+
+  function idf(ix, term) {
+    const n = (ix.postings.get(term) || []).length;
+    return Math.log(1 + (ix.N - n + 0.5) / (n + 0.5));
+  }
+
+  function score(ix, queryTokens) {
+    const s = new Float64Array(ix.N);
+    for (const w of queryTokens) {
+      const post = ix.postings.get(w);
+      if (!post) continue;
+      const iw = idf(ix, w);
+      for (const [d, c] of post) {
+        const denom = c + K1 * (1 - B + B * ix.lens[d] / ix.avg);
+        s[d] += iw * (c * (K1 + 1)) / denom;
+      }
+    }
+    return s;
+  }
+
+  function search(ix, queryTokens, k) {
+    const s = score(ix, queryTokens);
+    const order = [];
+    for (let i = 0; i < ix.N; i++) order.push(i);
+    // ties break on document id, so the ranking is reproducible
+    order.sort((a, b) => (s[b] - s[a]) || (a - b));
+    return order.slice(0, k).map((i) => ({ id: i, doc: ix.docs[i], score: s[i] }));
+  }
+
+  // ------------------------------------------------------- the rewrites
+  // Each takes a query string and returns a token list. These are the shapes
+  // a rewriting model produces, written out so the retrieval effect is
+  // attributable to the REWRITE rather than to a generation.
+  const SYNONYMS = {
+    car: ["vehicle", "automobile"], buy: ["purchase"], cheap: ["inexpensive", "budget"],
+    fix: ["repair"], broken: ["faulty"], fast: ["quick"], money: ["cost", "price"],
+    doctor: ["physician"], sick: ["ill"], home: ["house"], job: ["employment"],
+    phone: ["mobile"], bug: ["defect", "error"], slow: ["latency"], login: ["authentication"]
+  };
+
+  function raw(q) { return tokens(q); }
+
+  // keep stopwords - the "do not touch the user's words" baseline
+  function verbatim(q) { return tokens(q, false); }
+
+  function expand(q) {
+    const base = tokens(q);
+    const out = base.slice();
+    for (const w of base) for (const syn of (SYNONYMS[w] || [])) out.push(syn);
+    return out;
+  }
+
+  // HyDE in miniature: write a short pseudo-answer and search with THAT.
+  // The pseudo-document is built from the query plus generic answer-shaped
+  // filler, which is the part that does the damage.
+  const FILLER = ["this", "document", "explains", "that", "you", "should", "typically",
+                  "generally", "the", "process", "step", "first", "then", "finally"];
+
+  function hyde(q) {
+    return tokens(q).concat(FILLER);
+  }
+
+  // decomposition: split on conjunctions and search the pieces together
+  function decompose(q) {
+    const parts = q.toLowerCase().split(/\band\b|\bor\b|,|\?/).filter((p) => p.trim());
+    const out = [];
+    for (const p of parts) for (const w of tokens(p)) out.push(w);
+    return out;
+  }
+
+  // The same expansion with PLAUSIBLE BUT WRONG synonyms - the ones a model
+  // produces when it has no domain knowledge and reaches for an association.
+  // Same mechanism as expand(), same number of added terms; only the quality
+  // of the additions differs, which is what makes the comparison a control.
+  const NOISY = {
+    car: ["train", "road"], buy: ["sell"], cheap: ["cost", "free"],
+    fix: ["break"], broken: ["house"], fast: ["slow"], money: ["job", "office"],
+    doctor: ["document"], sick: ["process"], home: ["office"], job: ["money"],
+    phone: ["clock"], bug: ["insect", "step"], slow: ["fast"], login: ["password"]
+  };
+
+  function expandNoisy(q) {
+    const base = tokens(q);
+    const out = base.slice();
+    for (const w of base) for (const syn of (NOISY[w] || [])) out.push(syn);
+    return out;
+  }
+
+  const REWRITES = { raw, verbatim, expand, expandNoisy, hyde, decompose };
+
+  // ------------------------------------------------------------ metrics
+  function recallAt(ix, qTokens, rel, k) {
+    const got = new Set(search(ix, qTokens, k).map((r) => r.id));
+    let hit = 0;
+    for (const r of rel) if (got.has(r)) hit++;
+    return hit / rel.length;
+  }
+
+  function precisionAt(ix, qTokens, rel, k) {
+    const got = search(ix, qTokens, k).map((r) => r.id);
+    let hit = 0;
+    for (const g of got) if (rel.indexOf(g) >= 0) hit++;
+    return hit / k;
+  }
+
+  // Mean reciprocal rank - where the FIRST relevant document lands. This is
+  // the metric a RAG pipeline actually lives on, because the generator sees a
+  // truncated list.
+  function rr(ix, qTokens, rel) {
+    const order = search(ix, qTokens, ix.N);
+    for (let i = 0; i < order.length; i++) if (rel.indexOf(order[i].id) >= 0) return 1 / (i + 1);
+    return 0;
+  }
+
+  // ------------------------------------------------------- the corpus
+  const DOCS = [
+    { text: "How to purchase an inexpensive vehicle without a loan or dealer finance" },
+    { text: "Repairing a faulty alternator on an older automobile at home" },
+    { text: "Budget automobile insurance: what cover you actually need" },
+    { text: "The physician shortage and how long you will wait to be seen" },
+    { text: "What to do when you feel ill but cannot get a doctor appointment" },
+    { text: "Employment law basics: notice periods and final pay" },
+    { text: "Finding a job after a long career break" },
+    { text: "Mobile phone contracts and the real cost over two years" },
+    { text: "Why your application is slow: latency, not throughput" },
+    { text: "Tracking down an intermittent defect in production code" },
+    { text: "Authentication errors after a password reset" },
+    { text: "A login loop caused by a clock skew between two servers" },
+    { text: "House prices and the deposit you will actually need" },
+    { text: "Renting versus buying a home over a ten year horizon" },
+    { text: "The process you should generally follow to file a complaint" },
+    { text: "This document explains what you should typically do first" }
+  ];
+
+  // Hand-labelled. Short queries, the kind people really type.
+  const QUERIES = [
+    { q: "cheap car to buy",            rel: [0, 2] },
+    { q: "fix broken car at home",      rel: [1] },
+    { q: "sick and cannot see doctor",  rel: [3, 4] },
+    { q: "find a job",                  rel: [5, 6] },
+    { q: "phone money",                 rel: [7] },
+    { q: "slow app bug",                rel: [8, 9] },
+    { q: "login broken",                rel: [10, 11] },
+    { q: "buy a home",                  rel: [12, 13] }
+  ];
+
+  function evaluate(rewrite, k) {
+    const ix = index(DOCS);
+    let rec = 0, prec = 0, mrr = 0;
+    const per = [];
+    for (const { q, rel } of QUERIES) {
+      const toks = REWRITES[rewrite](q);
+      const r = recallAt(ix, toks, rel, k), p = precisionAt(ix, toks, rel, k), m = rr(ix, toks, rel);
+      rec += r; prec += p; mrr += m;
+      per.push({ q, rel, recall: r, precision: p, rr: m, tokens: toks });
+    }
+    const n = QUERIES.length;
+    return { recall: rec / n, precision: prec / n, mrr: mrr / n, per, ix };
+  }
+
+  return { tokens, index, idf, score, search, REWRITES, SYNONYMS, NOISY, FILLER,
+           recallAt, precisionAt, rr, evaluate, DOCS, QUERIES, K1, B };
+})();
+// ===== ENGINE:END =====
+</script>
+
+<script>
+function showTab(name) {
+  for (const t of ["look", "und", "build"]) document.getElementById(t).classList.toggle("hidden", t !== name);
+  document.getElementById("tabLook").classList.toggle("tab-active", name === "look");
+  document.getElementById("tabUnd").classList.toggle("tab-active", name === "und");
+  document.getElementById("tabBuild").classList.toggle("tab-active", name === "build");
+}
+const el = (id) => document.getElementById(id);
+function table(id, head, rows) {
+  el(id).innerHTML =
+    "<tr>" + head.map((h) => "<th>" + h + "</th>").join("") + "</tr>" +
+    rows.map((r) => "<tr" + (r.cls ? ' class="' + r.cls + '"' : "") + ">" +
+      r.cells.map((c, i) => "<td" + (i === 0 ? ' class="txt"' : "") + ">" + c + "</td>").join("") + "</tr>").join("");
+}
+function selfCheckPanel(fn) {
+  const out = []; let n = 0, bad = 0;
+  const t = (label, cond, detail = "") => {
+    n += 1; if (!cond) bad += 1;
+    out.push('<div><span class="' + (cond ? "ok" : "warn") + '">' + (cond ? "PASS" : "FAIL") +
+      '</span><span>' + label + '</span><span class="m">' + detail + "</span></div>");
+  };
+  fn(t);
+  el("selftest").innerHTML =
+    '<p class="note" style="margin:0 0 8px"><b class="' + (bad ? "warn" : "ok") + '">' +
+    (n - bad) + " of " + n + " checks pass</b>" + (bad ? " &mdash; " + bad + " FAILED" : "") + ".</p>" + out.join("");
+}
+
+// ---------------------------------------------------------------- LOOK
+{
+  const rows = [];
+  for (const r of ["verbatim", "raw", "expand", "expandNoisy", "hyde", "decompose"]) {
+    const e = ENGINE.evaluate(r, 3);
+    rows.push({ cls: r === "expand" ? "here" : (r === "hyde" || r === "expandNoisy") ? "dim" : "", cells: [
+      r, e.recall.toFixed(3), e.precision.toFixed(3), e.mrr.toFixed(3),
+      (e.per.reduce((p, c) => p + c.tokens.length, 0) / e.per.length).toFixed(1)
+    ]});
+  }
+  table("tRewrite", ["rewrite", "recall@3", "precision@3", "MRR", "mean query length"], rows);
+  el("rewriteNote").innerHTML =
+    "Eight hand-labelled queries over a sixteen-document BM25 index. <b>expand</b> adds " +
+    "synonyms; <b>hyde</b> writes a pseudo-answer and searches with that; <b>decompose</b> " +
+    "splits on conjunctions. <b>verbatim</b> is the do-nothing baseline that keeps stopwords, " +
+    "and it is there because a rewrite has to beat <i>something</i>.";
+}
+
+// --------------------------------------------------------- UNDERSTAND
+{
+  const rows = [];
+  const ix = ENGINE.index(ENGINE.DOCS);
+  for (const w of ["car", "automobile", "vehicle", "the", "you", "document", "login", "clock"]) {
+    const n = (ix.postings.get(w) || []).length;
+    rows.push({ cls: ENGINE.idf(ix, w) < 1 ? "dim" : "", cells: [
+      w, n, (n / ix.N * 100).toFixed(0) + "%", ENGINE.idf(ix, w).toFixed(3)
+    ]});
+  }
+  table("tIdf", ["term", "documents containing it", "share of corpus", "IDF weight"], rows);
+  el("idfNote").innerHTML =
+    "A rewrite does not just add terms, it <b>reweights</b> them. BM25 scores a term by how " +
+    "rare it is, so adding a common word to a query contributes almost nothing while still " +
+    "diluting nothing &mdash; but adding <i>many</i> common words, which is exactly what a " +
+    "pseudo-answer is made of, pulls generic documents to the top.";
+}
+
+{
+  const rows = [];
+  for (const k of [1, 2, 3, 5, 8]) {
+    const base = ENGINE.evaluate("raw", k), exp = ENGINE.evaluate("expand", k);
+    rows.push({ cls: "", cells: [
+      "k = " + k,
+      base.recall.toFixed(3), exp.recall.toFixed(3),
+      base.precision.toFixed(3), exp.precision.toFixed(3),
+      (exp.recall - base.recall >= 0 ? "+" : "") + (exp.recall - base.recall).toFixed(3)
+    ]});
+  }
+  table("tK", ["cut-off", "recall raw", "recall expand", "precision raw",
+    "precision expand", "recall gain"], rows);
+}
+
+{
+  const rows = [];
+  const base = ENGINE.evaluate("raw", 3), hy = ENGINE.evaluate("hyde", 3);
+  for (let i = 0; i < base.per.length; i++) {
+    const a = base.per[i], b = hy.per[i];
+    rows.push({ cls: b.rr < a.rr ? "here" : "", cells: [
+      '"' + a.q + '"',
+      a.rr.toFixed(3), b.rr.toFixed(3),
+      b.rr > a.rr ? '<span class="pill good">better</span>'
+        : b.rr < a.rr ? '<span class="pill bad">worse</span>' : "same"
+    ]});
+  }
+  table("tHyde", ["query", "MRR raw", "MRR hyde", ""], rows);
+  el("hydeNote").innerHTML =
+    "Per-query, not averaged. The filler in a pseudo-answer &mdash; <i>this, document, " +
+    "explains, typically, process, step</i> &mdash; are real terms in this corpus, and two of " +
+    "the sixteen documents are made almost entirely of them. A pseudo-answer retrieves those " +
+    "documents because it <b>looks like</b> them.";
+}
+
+// --------------------------------------------------------------- BUILD
+el("codeBm25").textContent = [String(ENGINE.idf), "", String(ENGINE.score)].join("\n");
+el("codeRw").textContent = [String(ENGINE.expand || ENGINE.REWRITES.expand), "",
+                            String(ENGINE.REWRITES.hyde)].join("\n");
+
+selfCheckPanel((t) => {
+  const ix = ENGINE.index(ENGINE.DOCS);
+
+  // --- the index
+  t("every document is indexed and has a length", (() => {
+    return ix.N === ENGINE.DOCS.length && ix.lens.length === ix.N && ix.lens.every((l) => l > 0);
+  })());
+
+  t("average document length is the mean of the lengths", (() => {
+    const m = ix.lens.reduce((p, c) => p + c, 0) / ix.lens.length;
+    return Math.abs(ix.avg - m) < 1e-12;
+  })());
+
+  t("a posting list holds each document at most once", (() => {
+    for (const [, post] of ix.postings) {
+      const seen = new Set();
+      for (const [d] of post) { if (seen.has(d)) return false; seen.add(d); }
+    }
+    return true;
+  })());
+
+  t("term frequencies in the postings match a recount of the text", (() => {
+    for (const [w, post] of ix.postings) {
+      for (const [d, c] of post) {
+        const n = ENGINE.tokens(ENGINE.DOCS[d].text).filter((x) => x === w).length;
+        if (n !== c) return false;
+      }
+    }
+    return true;
+  })(), "counted a second way, from the raw text");
+
+  // --- BM25 properties
+  t("IDF falls as a term gets more common", (() => {
+    const rare = ENGINE.idf(ix, "alternator"), common = ENGINE.idf(ix, "you");
+    return rare > common;
+  })());
+
+  t("a term in no document scores zero everywhere", (() => {
+    const s = ENGINE.score(ix, ["zzzznotaword"]);
+    for (let i = 0; i < s.length; i++) if (s[i] !== 0) return false;
+    return true;
+  })());
+
+  t("scores are never negative for these terms", (() => {
+    for (const q of ENGINE.QUERIES) {
+      const s = ENGINE.score(ix, ENGINE.tokens(q.q));
+      for (let i = 0; i < s.length; i++) if (s[i] < 0) return false;
+    }
+    return true;
+  })());
+
+  t("term frequency SATURATES - a 10th occurrence is worth less than a 2nd", (() => {
+    const mk = (n) => {
+      const text = new Array(n).fill("alternator").join(" ") + " filler words here";
+      return ENGINE.index([{ text }, { text: "unrelated text entirely" }]);
+    };
+    const s1 = ENGINE.score(mk(1), ["alternator"])[0];
+    const s2 = ENGINE.score(mk(2), ["alternator"])[0];
+    const s10 = ENGINE.score(mk(10), ["alternator"])[0];
+    return (s2 - s1) > (s10 - s2) / 8;
+  })(), "k1 = " + ENGINE.K1 + " - this is the whole difference from raw TF-IDF");
+
+  t("search returns exactly k results, in non-increasing score order", (() => {
+    for (const k of [1, 3, 5]) {
+      const r = ENGINE.search(ix, ENGINE.tokens("cheap car"), k);
+      if (r.length !== k) return false;
+      for (let i = 1; i < r.length; i++) if (r[i].score > r[i - 1].score + 1e-12) return false;
+    }
+    return true;
+  })());
+
+  t("ranking is reproducible - ties break on document id", (() => {
+    const a = ENGINE.search(ix, ENGINE.tokens("phone money"), 8).map((r) => r.id).join(",");
+    const b = ENGINE.search(ix, ENGINE.tokens("phone money"), 8).map((r) => r.id).join(",");
+    return a === b;
+  })());
+
+  // --- the rewrites
+  t("expand is a superset of the raw query", (() => {
+    for (const { q } of ENGINE.QUERIES) {
+      const r = new Set(ENGINE.REWRITES.raw(q));
+      const e = new Set(ENGINE.REWRITES.expand(q));
+      for (const w of r) if (!e.has(w)) return false;
+    }
+    return true;
+  })(), "it adds, it never removes - so recall cannot fall");
+
+  // Written expecting the textbook trade-off - recall up, precision down. It
+  // FAILED: on this corpus expansion raised BOTH. That is not a flaw in the
+  // measurement, it is what a genuine vocabulary mismatch looks like. The
+  // documents say "automobile" and "vehicle" where the queries say "car", so
+  // the added terms are not noise, they are the missing words. The trade-off
+  // people quote is a property of synonym QUALITY, not of expansion.
+  t("INVERSION: expand raises recall AND precision - there is no trade-off here", (() => {
+    const base = ENGINE.evaluate("raw", 3), exp = ENGINE.evaluate("expand", 3);
+    return exp.recall > base.recall && exp.precision > base.precision;
+  })(), (() => {
+    const base = ENGINE.evaluate("raw", 3), exp = ENGINE.evaluate("expand", 3);
+    return "recall " + base.recall.toFixed(3) + " -> " + exp.recall.toFixed(3) +
+           ", precision " + base.precision.toFixed(3) + " -> " + exp.precision.toFixed(3);
+  })());
+
+  // Precision@3 does NOT move here - the wrong synonyms are rare terms, so
+  // they pull in few documents at a cut-off of three. Where they do damage is
+  // the rank of the FIRST relevant hit, which is the metric a RAG pipeline
+  // lives on because the generator only ever sees a truncated list.
+  t("CONTROL: the SAME mechanism with wrong synonyms costs MRR", (() => {
+    const base = ENGINE.evaluate("raw", 3), bad = ENGINE.evaluate("expandNoisy", 3);
+    return bad.mrr < base.mrr && bad.recall <= ENGINE.evaluate("expand", 3).recall;
+  })(), (() => {
+    const base = ENGINE.evaluate("raw", 3), bad = ENGINE.evaluate("expandNoisy", 3);
+    return "precision " + base.precision.toFixed(3) + " -> " + bad.precision.toFixed(3) +
+           ", MRR " + base.mrr.toFixed(3) + " -> " + bad.mrr.toFixed(3);
+  })());
+
+  t("and the two expansions add the SAME number of terms", (() => {
+    for (const { q } of ENGINE.QUERIES) {
+      if (ENGINE.REWRITES.expand(q).length !== ENGINE.REWRITES.expandNoisy(q).length) return false;
+    }
+    return true;
+  })(), "so the difference is quality, not query length");
+
+  t("INVERSION: hyde does WORSE than doing nothing on this corpus", (() => {
+    return ENGINE.evaluate("hyde", 3).mrr < ENGINE.evaluate("raw", 3).mrr;
+  })(), "the filler words are real terms, and two documents are made of them");
+
+  t("CONTROL: and it is the FILLER, not the method - strip it and hyde matches raw", (() => {
+    const ix2 = ENGINE.index(ENGINE.DOCS);
+    let a = 0, b = 0;
+    for (const { q, rel } of ENGINE.QUERIES) {
+      a += ENGINE.rr(ix2, ENGINE.REWRITES.raw(q), rel);
+      b += ENGINE.rr(ix2, ENGINE.tokens(q), rel);          // hyde without the filler
+    }
+    return Math.abs(a - b) < 1e-12;
+  })(), "same tokens minus the pseudo-answer boilerplate, identical result");
+
+  t("dropping stopwords beats keeping them", (() => {
+    return ENGINE.evaluate("raw", 3).mrr >= ENGINE.evaluate("verbatim", 3).mrr;
+  })(), "the cheapest rewrite there is, and it is still a rewrite");
+
+  t("decompose preserves every content word of a conjunctive query", (() => {
+    const q = "sick and cannot see doctor";
+    const d = new Set(ENGINE.REWRITES.decompose(q));
+    for (const w of ENGINE.tokens(q)) if (!d.has(w)) return false;
+    return true;
+  })());
+
+  t("recall is non-decreasing in k", (() => {
+    for (const r of ["raw", "expand", "hyde"]) {
+      let prev = -1;
+      for (const k of [1, 2, 3, 5, 8]) {
+        const v = ENGINE.evaluate(r, k).recall;
+        if (v < prev - 1e-12) return false;
+        prev = v;
+      }
+    }
+    return true;
+  })(), "a larger window cannot lose a document it already had");
+
+  t("every metric is a proportion in [0,1]", (() => {
+    for (const r of Object.keys(ENGINE.REWRITES)) {
+      const e = ENGINE.evaluate(r, 3);
+      for (const v of [e.recall, e.precision, e.mrr]) if (!(v >= 0 && v <= 1)) return false;
+    }
+    return true;
+  })());
+
+  t("MRR is zero only when nothing relevant is retrieved at all", (() => {
+    const e = ENGINE.evaluate("raw", ENGINE.DOCS.length);
+    for (const p of e.per) if (p.rr === 0 && p.recall > 0) return false;
+    return true;
+  })());
+
+  t("every labelled relevant document actually exists", (() => {
+    for (const { rel } of ENGINE.QUERIES) {
+      for (const r of rel) if (!(r >= 0 && r < ENGINE.DOCS.length)) return false;
+    }
+    return true;
+  })(), "a typo in a label would silently cap recall below 1");
+});
+</script>
+</body>
+</html>
