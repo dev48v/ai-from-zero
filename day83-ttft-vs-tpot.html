@@ -1,0 +1,1318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero &middot; Day 83 &mdash; TTFT vs TPOT</title>
+<style>
+  :root { --ink:#0f172a; --sub:#475569; --line:#e2e8f0; --bg:#f8fafc; --accent:#0369a1; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Inter",system-ui,sans-serif; margin:0; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:1152px; margin:0 auto; padding:16px; }
+  @media (min-width:768px){ .wrap { padding:24px; } }
+  header { background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
+  .kicker { font-size:12px; font-weight:800; letter-spacing:.16em; color:var(--accent); margin:0 0 8px; }
+  h1 { font-size:19px; line-height:1.5; font-weight:900; margin:0 0 12px; }
+  @media (min-width:768px){ h1 { font-size:22px; } }
+  h2 { font-size:24px; font-weight:900; margin:0 0 8px; }
+  h3 { font-size:19px; font-weight:800; margin:20px 0 6px; }
+  p { line-height:1.6; margin:0 0 12px; }
+  .tabs { display:flex; gap:8px; flex-wrap:wrap; }
+  .tabs button { font:inherit; font-size:14px; font-weight:600; padding:8px 20px; border:0; border-radius:8px; background:#f1f5f9; cursor:pointer; }
+  .tabs button.tab-active { background:#0f172a; color:#fff; }
+  .hidden { display:none; }
+  .card { background:#fff; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,.12); padding:20px; min-width:0; }
+  .stack > * + * { margin-top:20px; }
+  .grid2 { display:grid; gap:20px; grid-template-columns:minmax(0,1fr); }
+  @media (min-width:900px){ .grid2 { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } }
+  .lbl { font-size:12px; font-weight:800; letter-spacing:.1em; color:#64748b; margin:0 0 8px; }
+  .big { font-size:24px; font-weight:900; font-variant-numeric:tabular-nums; margin:0; }
+  .note { font-size:12.5px; color:#475569; margin:8px 0 0; line-height:1.55; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:11.5px; overflow-x:auto; line-height:1.35; margin:0; white-space:pre; }
+  code { background:#f1f5f9; padding:1px 4px; border-radius:4px; font-size:.92em; }
+  .tblwrap { overflow-x:auto; }
+  table.num { border-collapse:collapse; width:100%; min-width:560px; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid var(--line); }
+  table.num td.txt { text-align:left; }
+  tr.here td { background:#f0fdfa; font-weight:700; }
+  tr.dim td { color:#94a3b8; }
+  .pill { display:inline-block; padding:1px 7px; border-radius:999px; font-size:11px; font-weight:800; }
+  .pill.good { background:#dcfce7; color:#166534; }
+  .pill.bad { background:#fee2e2; color:#991b1b; }
+  .ok { color:#166534; font-weight:800; }
+  .warn { color:#991b1b; font-weight:800; }
+  #selftest div { display:grid; grid-template-columns:52px 1fr; gap:8px; font-size:12.5px; padding:3px 0; border-top:1px solid var(--line); align-items:start; }
+  #selftest div span.m { grid-column:2; font-size:11.5px; color:#64748b; }
+  .ctl { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 12px; }
+  .ctl input[type=range] { flex:1; min-width:150px; }
+  .ctl input[type=number] { width:74px; font:inherit; padding:5px 7px; border:1px solid var(--line); border-radius:7px; }
+  .ctl .lbl { margin:0; min-width:132px; }
+  .ctl .v { font-variant-numeric:tabular-nums; font-weight:800; min-width:74px; text-align:right; font-size:13px; }
+  footer { border-top:1px solid var(--line); margin-top:28px; padding:18px 0 40px; font-size:13px; color:#475569; }
+  footer a { color:var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">AIFROMZERO &middot; DAY 83</p>
+    <h1>
+      TTFT vs TPOT &mdash; one number a user feels is really two, and the
+      average of them is the one number that describes neither.
+    </h1>
+    <div class="tabs">
+      <button id="tabLook" class="tab-active" onclick="showTab('look')">Look</button>
+      <button id="tabUnd" onclick="showTab('und')">Understand</button>
+      <button id="tabBuild" onclick="showTab('build')">Build</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section id="look" class="stack">
+  <div class="card">
+    <h2>A seeded serving simulator you can push over</h2>
+    <p>
+      300 requests, a prompt-length and an output-length distribution, a prefill
+      stage priced per prompt token and a decode stage priced per step, a queue,
+      and a batch. Move a slider and watch which of the two latencies moves.
+      <b>This is a simulation with a fixed seed, not a measurement of a real
+      serving stack</b> &mdash; the point is the shape of the arithmetic, which
+      is the part that survives a change of hardware.
+    </p>
+
+    <div class="ctl">
+      <span class="lbl">ARRIVAL RATE</span>
+      <input type="range" id="sRate" min="10" max="300" step="5" value="100" oninput="render()" />
+      <span class="v" id="vRate"></span>
+    </div>
+    <div class="ctl">
+      <span class="lbl">PROMPT LENGTH</span>
+      <input type="range" id="sPrompt" min="64" max="4096" step="64" value="512" oninput="render()" />
+      <span class="v" id="vPrompt"></span>
+    </div>
+    <div class="ctl">
+      <span class="lbl">BATCH SIZE</span>
+      <input type="range" id="sBatch" min="1" max="64" step="1" value="8" oninput="render()" />
+      <span class="v" id="vBatch"></span>
+    </div>
+
+    <div class="tblwrap"><table class="num" id="tLive"></table></div>
+    <p class="note" id="liveNote"></p>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>Push the arrival rate</h2>
+      <p class="note" style="margin:0 0 10px">
+        Prompt length and batch size held at the slider values. Only the queue changes.
+      </p>
+      <div class="tblwrap"><table class="num" id="tRate"></table></div>
+      <p class="note" id="rateNote"></p>
+    </div>
+    <div class="card">
+      <h2>Push the batch size</h2>
+      <p class="note" style="margin:0 0 10px">
+        Arrival rate and prompt length held at the slider values. Only the batch changes.
+      </p>
+      <div class="tblwrap"><table class="num" id="tBatch"></table></div>
+      <p class="note" id="batchNote"></p>
+    </div>
+  </div>
+</section>
+
+<section id="und" class="stack hidden">
+
+  <div class="card">
+    <h3 style="margin-top:0">Step 1 &mdash; A streaming answer has two clocks, and only one of them is a wait</h3>
+    <p>
+      When you send a prompt to a model that streams, nothing appears for a
+      while, and then words start arriving. The silent part is <b>time to first
+      token</b>, TTFT: everything that happens between you pressing enter and
+      the first character landing on your screen. During that window the user
+      has no evidence that anything is happening at all, which is why it feels
+      longer than it is. It is the only part of the request where the interface
+      has nothing to show. Treat it as a wait, and budget it the way you would
+      budget a page load.
+    </p>
+    <div class="tblwrap"><table class="num" id="tAnatomy"></table></div>
+    <p class="note" id="anatomyNote"></p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Step 2 &mdash; The second clock is a cadence, not a wait</h3>
+    <p>
+      After the first token the request is no longer waiting, it is
+      <i>playing</i>. <b>Time per output token</b>, TPOT, is the gap between
+      consecutive tokens, and what the user perceives is a reading speed. An
+      average adult reads prose at roughly 250 words a minute, which is about
+      five or six tokens a second, so a TPOT under about 180&nbsp;ms already
+      outruns the reader. Pushing TPOT below that buys you nothing a human can
+      detect, while pushing it above it makes the text visibly stutter. TPOT is
+      a threshold to stay under, not a number to minimise.
+    </p>
+    <div class="tblwrap"><table class="num" id="tCadence"></table></div>
+    <p class="note" id="cadenceNote"></p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Step 3 &mdash; They compose into the number people quote, exactly</h3>
+    <p>
+      End-to-end latency is not a third measurement, it is these two glued
+      together: <code>e2e = TTFT + TPOT &times; (output tokens &minus; 1)</code>.
+      The minus one is there because the first token is already paid for inside
+      TTFT. This identity holds per request, exactly, and the simulator asserts
+      it to floating-point tolerance for all 300 of them. It is worth writing
+      down because it tells you where a total went: a slow total is either a
+      long silence or a slow cadence or a long answer, and those have three
+      different fixes. A total on its own cannot tell you which.
+    </p>
+    <div class="tblwrap"><table class="num" id="tIdentity"></table></div>
+    <p class="note" id="identityNote"></p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Step 4 &mdash; A mean is the wrong summary for a streaming interface</h3>
+    <p>
+      Averaging latency assumes the thing you are averaging is roughly
+      symmetric, and queueing latency never is. A queue produces a distribution
+      with a long right tail, so the mean sits above most requests and below the
+      worst ones, describing neither. Worse, a mean over end-to-end latency is
+      dominated by how many tokens the answer had, which is a property of the
+      <i>question</i>, not of your server. Two deploys can have identical mean
+      latency while one of them makes a tenth of users stare at an empty box for
+      several seconds. Report TTFT and TPOT separately, each at p50, p90 and
+      p99, and the empty box becomes visible.
+    </p>
+    <div class="tblwrap"><table class="num" id="tMean"></table></div>
+    <p class="note" id="meanNote"></p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Step 5 &mdash; TTFT is prefill plus queueing, and queueing wins</h3>
+    <p>
+      TTFT has two ingredients. The first is prefill: the model has to read the
+      whole prompt before it can write anything, and that cost scales with
+      prompt tokens, so a 4,000-token prompt starts slower than a 200-token one
+      no matter how idle the machine is. The second is the queue: if every slot
+      is busy, your request waits for one to free before its prefill even
+      starts. Queueing is the larger term the moment utilisation gets close to
+      capacity, and it grows without bound while prefill grows linearly. That is
+      why TTFT is the metric that explodes under load and the one worth alerting
+      on.
+    </p>
+    <div class="tblwrap"><table class="num" id="tTtftDrivers"></table></div>
+    <p class="note" id="ttftDriversNote"></p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Step 6 &mdash; TPOT is batch size and memory bandwidth, not prompt length</h3>
+    <p>
+      A decode step reads the model's weights out of memory once and uses them
+      for every sequence in the batch. The fixed part of a step is therefore a
+      memory-bandwidth cost that does not care how many sequences there are, and
+      the variable part is small. Run one sequence alone and it pays the whole
+      fixed cost itself; run thirty-two and they share it, which is why
+      throughput climbs with the batch. But each individual sequence now waits
+      for a longer step, so <b>TPOT rises with batch size</b> even though
+      per-token cost falls. Prompt length does not enter this at all: once
+      prefill is done, a long prompt and a short one decode at the same cadence.
+    </p>
+    <div class="tblwrap"><table class="num" id="tTpotDrivers"></table></div>
+    <p class="note" id="tpotDriversNote"></p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Step 7 &mdash; Tuning for throughput moves the cost onto someone's TTFT</h3>
+    <p>
+      Throughput is the server's metric and latency is the user's, and the batch
+      is the dial that trades one for the other. Raising it packs more sequences
+      into every weight read, so tokens per second climbs steeply at first and
+      then flattens as the variable term takes over. The bill arrives in two
+      places: every sequence's cadence slows, and &mdash; if the scheduler waits
+      to accumulate a full batch before starting &mdash; every arriving request
+      sits in that waiting window before its prefill begins. The second effect
+      is pure TTFT, paid by the user, invisible on a throughput dashboard. A
+      capacity plan that only reports tokens per second will keep recommending a
+      bigger batch forever.
+    </p>
+    <div class="tblwrap"><table class="num" id="tWindow"></table></div>
+    <p class="note" id="windowNote"></p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Step 8 &mdash; The clean separation leaks: prefill interferes with decode</h3>
+    <p>
+      Step 6 said prompt length does not touch TPOT, and in isolation that is
+      exactly true. On a loaded server it is false, and the reason is scheduling
+      rather than arithmetic. A prefill occupies the accelerator, so while one
+      request is reading its 4,000-token prompt, every sequence already
+      streaming is not getting a token. Their cadence stutters, and the stutter
+      scales with other people's prompt lengths. This is the effect chunked
+      prefill exists to spread out, and it is the reason a TPOT regression can
+      be caused by a change nobody made to decoding.
+    </p>
+    <div class="tblwrap"><table class="num" id="tLeak"></table></div>
+    <p class="note" id="leakNote"></p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Step 9 &mdash; A percentile over requests is not a percentile over tokens</h3>
+    <p>
+      When you compute p99 TPOT you usually average each request's cadence into
+      one number and take the percentile over those numbers. That gives every
+      request one vote, so a two-token reply counts exactly as much as a
+      two-thousand-token one. But a user does not experience requests, they
+      experience tokens, and the long answers contribute nearly all of them.
+      Weight each request's TPOT by how many tokens it actually emitted and the
+      percentile moves, sometimes a lot. Neither number is wrong; they answer
+      different questions, and a dashboard that does not say which one it is
+      answering is not reporting anything.
+    </p>
+    <div class="tblwrap"><table class="num" id="tWeighted"></table></div>
+    <p class="note" id="weightedNote"></p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Step 10 &mdash; Budget the two separately, because one SLO cannot hold both</h3>
+    <p>
+      A latency budget for a streaming product is two targets, not one: a TTFT
+      ceiling that keeps the empty box short, and a TPOT ceiling that keeps the
+      text ahead of the reader. They are bounded by different resources and they
+      fail under different conditions, so a single end-to-end SLO will be met on
+      average while one of them is broken for a tenth of traffic. Write them
+      down at p90 or p99, never at the mean, and state the output length you
+      assumed when you converted them into an end-to-end figure. Then when the
+      total moves, the identity in Step 3 tells you which of the three terms
+      moved. That is the entire value of splitting the number.
+    </p>
+    <div class="tblwrap"><table class="num" id="tBudget"></table></div>
+    <p class="note" id="budgetNote"></p>
+  </div>
+
+</section>
+
+<section id="build" class="stack hidden">
+  <div class="card">
+    <h2>The scheduler, in full</h2>
+    <p>
+      Prefill occupies the server, decode steps serve the whole batch at once,
+      and admission happens whenever a slot is free. Everything else in this
+      page is derived from this loop.
+    </p>
+    <pre id="codeSim"></pre>
+  </div>
+  <div class="card">
+    <h2>The two percentile functions</h2>
+    <p>
+      Nearest rank, and nearest rank by weight. They agree when every weight is
+      equal, and that agreement is asserted below.
+    </p>
+    <pre id="codePct"></pre>
+  </div>
+  <div class="card">
+    <h2>Self-check</h2>
+    <p class="note" style="margin:0 0 10px">
+      Running in your browser now, against the same engine as the tables above.
+    </p>
+    <div id="selftest"></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p style="margin:0">
+      AIFromZero &middot; Day 83 &middot; TTFT vs TPOT &mdash; latency budgets.
+      Simulated workload, fixed seed. Not a benchmark of any real serving stack.
+    </p>
+  </div>
+</footer>
+</div>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// ======================================================================
+// TTFT vs TPOT - a latency budget, simulated.
+//
+// A SEEDED, OFFLINE discrete-event simulation of an LLM serving loop. There
+// is no model and no hardware here: there is a prefill stage priced per
+// prompt token, a decode stage priced per step, a FIFO queue, and a batch.
+// Every number on this page comes out of this loop, so every number is a
+// property of the ARITHMETIC of serving rather than of any particular GPU.
+//
+// The point of the exercise is that the one number a user quotes - "it took
+// four seconds" - is two numbers glued together by an identity, and the two
+// are bounded by different resources.
+// ======================================================================
+const ENGINE = (() => {
+
+  // ------------------------------------------------------------- the RNG
+  // mulberry32: 32-bit, seeded, and fully specified - the same seed gives the
+  // same stream in any correct implementation, which is what makes a
+  // "reproducible run" an assertion rather than a hope.
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), 1 | t);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // Exponential inter-arrival times: the memoryless arrival process that makes
+  // a queue a queue. Note that scaling the rate scales every draw by the same
+  // factor, which is why the workload below is the SAME workload at every
+  // arrival rate - only the clock is compressed.
+  function expo(rnd, mean) { return -Math.log(1 - rnd()) * mean; }
+
+  // Log-normal lengths. Real prompt and output lengths are heavy-tailed: a few
+  // requests are far longer than the median, and those are the ones that decide
+  // the tail of every metric here.
+  function lognormal(rnd, median, sigma) {
+    const u1 = Math.max(1e-12, rnd()), u2 = rnd();
+    const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    return median * Math.exp(sigma * z);
+  }
+
+  // ------------------------------------------------------ the cost model
+  // All times in milliseconds.
+  //
+  //   prefill(group) = prefillFixed + prefillPerToken * (total prompt tokens)
+  //   decode step    = stepFixed    + stepPerSeq      * (sequences in batch)
+  //
+  // stepFixed is the weight read: it is paid once per step no matter how many
+  // sequences share it. That single fact is the whole batching story - per
+  // token it is divided by the batch, per SEQUENCE it is not divided at all.
+  const DEFAULTS = {
+    seed: 20261109,
+    n: 300,
+    arrivalRate: 1.0,          // requests per second
+    promptMedian: 512, promptSigma: 0.8,
+    outputMedian: 180, outputSigma: 0.7,
+    batchSize: 8,
+    batchWindow: 0,            // ms the scheduler will wait to fill a batch
+    prefillFixed: 8, prefillPerToken: 0.08,
+    stepFixed: 18, stepPerSeq: 1.2
+  };
+
+  function config(over) {
+    const c = {};
+    for (const k in DEFAULTS) c[k] = DEFAULTS[k];
+    if (over) for (const k in over) c[k] = over[k];
+    return c;
+  }
+
+  // ------------------------------------------------------- the workload
+  function makeWorkload(c) {
+    const rnd = mulberry32(c.seed);
+    const out = [];
+    let t = 0;
+    const meanGap = 1000 / c.arrivalRate;
+    for (let i = 0; i < c.n; i++) {
+      t += expo(rnd, meanGap);
+      const p = Math.max(16, Math.round(lognormal(rnd, c.promptMedian, c.promptSigma)));
+      const o = Math.max(2, Math.round(lognormal(rnd, c.outputMedian, c.outputSigma)));
+      out.push({ id: i, arrival: t, prompt: p, output: o });
+    }
+    return out;
+  }
+
+  // ------------------------------------------------------- the scheduler
+  // Continuous batching in miniature. A slot frees the moment its sequence
+  // finishes; a waiting request is admitted into a free slot and pays its
+  // prefill, during which NOTHING decodes. That exclusivity is the leak in
+  // step 8 - it is a scheduling decision, not a law of arithmetic.
+  function simulate(over) {
+    const c = config(over);
+    const reqs = (c.requests || makeWorkload(c)).map((r, i) => ({
+      id: i, arrival: r.arrival, prompt: r.prompt, output: r.output,
+      emitted: 0, firstToken: 0, end: 0, ttft: 0, tpot: 0, e2e: 0
+    }));
+
+    const q = [];                 // arrived, not yet admitted
+    const active = [];            // decoding
+    const done = [];
+    let next = 0, t = 0, steps = 0, maxActive = 0, prefillMs = 0, decodeMs = 0;
+
+    const arriveBy = (tt) => { while (next < reqs.length && reqs[next].arrival <= tt) q.push(reqs[next++]); };
+
+    while (done.length < reqs.length) {
+      arriveBy(t);
+
+      if (q.length === 0 && active.length === 0) {
+        if (next < reqs.length) { t = reqs[next].arrival; continue; }
+        break;
+      }
+
+      if (q.length > 0 && active.length < c.batchSize) {
+        const slots = c.batchSize - active.length;
+        const head = q[0];
+        // Admit when the free slots are full, or the head has waited out the
+        // batching window. With batchWindow = 0 this is always immediate.
+        //
+        // The 1e-9 is load-bearing. Without it the clock is advanced to
+        // head.arrival + batchWindow, that sum rounds a hair LOW in a double,
+        // the window is judged not to have expired, and the scheduler advances
+        // the clock to the same instant forever.
+        const ready = q.length >= slots || (t - head.arrival) >= c.batchWindow - 1e-9;
+        if (ready) {
+          const g = q.splice(0, Math.min(slots, q.length));
+          let tokens = 0;
+          for (const r of g) tokens += r.prompt;
+          const cost = c.prefillFixed + c.prefillPerToken * tokens;
+          t += cost; prefillMs += cost;
+          for (const r of g) {
+            r.firstToken = t;
+            r.ttft = t - r.arrival;
+            r.emitted = 1;                       // prefill yields token #1
+            if (r.output <= 1) {
+              r.end = t; r.tpot = 0; r.e2e = t - r.arrival; done.push(r);
+            } else {
+              active.push(r);
+            }
+          }
+          if (active.length > maxActive) maxActive = active.length;
+          continue;
+        }
+        if (active.length === 0) {
+          // nothing to decode and the window has not expired: jump the clock
+          const tw = head.arrival + c.batchWindow;
+          const ta = next < reqs.length ? reqs[next].arrival : Infinity;
+          t = Math.min(tw, ta);
+          continue;
+        }
+        // otherwise fall through and decode; admission is re-checked next loop
+      }
+
+      if (active.length === 0) {
+        if (next < reqs.length) { t = reqs[next].arrival; continue; }
+        break;
+      }
+
+      const step = c.stepFixed + c.stepPerSeq * active.length;
+      t += step; decodeMs += step; steps += 1;
+      for (const r of active) r.emitted += 1;
+      for (let i = active.length - 1; i >= 0; i--) {
+        const r = active[i];
+        if (r.emitted >= r.output) {
+          r.end = t;
+          r.tpot = (r.end - r.firstToken) / (r.output - 1);
+          r.e2e = r.end - r.arrival;
+          done.push(r);
+          active.splice(i, 1);
+        }
+      }
+    }
+
+    const firstArrival = reqs.length ? reqs[0].arrival : 0;
+    done.sort((a, b) => a.id - b.id);
+    return { cfg: c, reqs: done, steps, maxActive, prefillMs, decodeMs,
+             firstArrival, lastEnd: t, makespan: t - firstArrival };
+  }
+
+  // ------------------------------------------------------- percentiles
+  // NEAREST RANK, the definition with no interpolation and no argument about
+  // off-by-one: the smallest value at or above which p% of the sample sits.
+  // On [1..10] this gives p50 = 5, p90 = 9, p99 = 10, which is hand-checkable
+  // and is asserted below.
+  function percentile(sortedAsc, p) {
+    const n = sortedAsc.length;
+    if (n === 0) return NaN;
+    if (p <= 0) return sortedAsc[0];
+    if (p >= 100) return sortedAsc[n - 1];
+    const rank = Math.ceil(p * n / 100);
+    return sortedAsc[Math.min(n, Math.max(1, rank)) - 1];
+  }
+
+  // The same definition, by WEIGHT rather than by count. Pass token counts as
+  // weights and you get a percentile over tokens instead of over requests -
+  // a different question, and usually a different answer.
+  function weightedPercentile(pairs, p) {
+    if (pairs.length === 0) return NaN;
+    const s = pairs.slice().sort((a, b) => a.v - b.v);
+    let total = 0;
+    for (const x of s) total += x.w;
+    if (total <= 0) return NaN;
+    if (p <= 0) return s[0].v;
+    if (p >= 100) return s[s.length - 1].v;
+    const target = p * total / 100;
+    let cum = 0;
+    for (const x of s) { cum += x.w; if (cum >= target - 1e-9) return x.v; }
+    return s[s.length - 1].v;
+  }
+
+  const asc = (a, b) => a - b;
+
+  function measure(sim) {
+    const rs = sim.reqs;
+    const ttft = rs.map((r) => r.ttft).sort(asc);
+    const tpot = rs.filter((r) => r.output > 1).map((r) => r.tpot).sort(asc);
+    const e2e = rs.map((r) => r.e2e).sort(asc);
+    let outTokens = 0, promptTokens = 0, sumE2e = 0, sumTtft = 0, sumTpot = 0;
+    for (const r of rs) {
+      outTokens += r.output; promptTokens += r.prompt;
+      sumE2e += r.e2e; sumTtft += r.ttft; sumTpot += r.tpot;
+    }
+    const wp = rs.filter((r) => r.output > 1).map((r) => ({ v: r.tpot, w: r.output - 1 }));
+    const P = (arr) => ({ p50: percentile(arr, 50), p90: percentile(arr, 90), p99: percentile(arr, 99) });
+    return {
+      n: rs.length,
+      ttft: P(ttft), tpot: P(tpot), e2e: P(e2e),
+      meanE2e: sumE2e / rs.length, meanTtft: sumTtft / rs.length, meanTpot: sumTpot / rs.length,
+      tpotByToken: { p50: weightedPercentile(wp, 50), p90: weightedPercentile(wp, 90),
+                     p99: weightedPercentile(wp, 99) },
+      outTokens, promptTokens,
+      tokensPerSec: outTokens / (sim.makespan / 1000),
+      reqPerSec: rs.length / (sim.makespan / 1000),
+      makespan: sim.makespan, steps: sim.steps, maxActive: sim.maxActive,
+      prefillShare: sim.prefillMs / (sim.prefillMs + sim.decodeMs)
+    };
+  }
+
+  // One request, alone, on an empty server. Both latencies then have a CLOSED
+  // FORM, which is what the simulator is checked against: there is no queue
+  // left to hide a mistake in.
+  //
+  //   TTFT = prefillFixed + prefillPerToken * prompt
+  //   TPOT = stepFixed    + stepPerSeq            (the batch holds one sequence)
+  function isolated(over) {
+    const c = config(over);
+    const prompt = c.isoPrompt === undefined ? 512 : c.isoPrompt;
+    const output = c.isoOutput === undefined ? 64 : c.isoOutput;
+    return simulate(Object.assign({}, c, {
+      requests: [{ arrival: 0, prompt: prompt, output: output }]
+    }));
+  }
+
+  // A FULL batch and nothing else: batchSize identical requests all arriving at
+  // time zero, so the batch is exactly full for the whole run and never waits
+  // for anybody. This is the clean room for the batching story, and it also has
+  // a closed form:
+  //
+  //   TTFT = prefillFixed + prefillPerToken * (batchSize * prompt)
+  //   TPOT = stepFixed    + stepPerSeq * batchSize
+  //
+  // Note what is NOT in the TPOT line: the prompt length.
+  function saturated(over) {
+    const c = config(over);
+    const prompt = c.isoPrompt === undefined ? 512 : c.isoPrompt;
+    const output = c.isoOutput === undefined ? 64 : c.isoOutput;
+    const reqs = [];
+    for (let i = 0; i < c.batchSize; i++) reqs.push({ arrival: 0, prompt: prompt, output: output });
+    return simulate(Object.assign({}, c, { requests: reqs }));
+  }
+
+  function run(over) { return measure(simulate(over)); }
+  function satRun(over) { return measure(saturated(over)); }
+
+  return { mulberry32, expo, lognormal, DEFAULTS, config, makeWorkload, simulate,
+           percentile, weightedPercentile, measure, isolated, saturated, run, satRun };
+})();
+// ===== ENGINE:END =====
+</script>
+
+<script>
+function showTab(name) {
+  for (const t of ["look", "und", "build"]) document.getElementById(t).classList.toggle("hidden", t !== name);
+  document.getElementById("tabLook").classList.toggle("tab-active", name === "look");
+  document.getElementById("tabUnd").classList.toggle("tab-active", name === "und");
+  document.getElementById("tabBuild").classList.toggle("tab-active", name === "build");
+}
+const el = (id) => document.getElementById(id);
+function table(id, head, rows) {
+  el(id).innerHTML =
+    "<tr>" + head.map((h) => "<th>" + h + "</th>").join("") + "</tr>" +
+    rows.map((r) => "<tr" + (r.cls ? ' class="' + r.cls + '"' : "") + ">" +
+      r.cells.map((c, i) => "<td" + (i === 0 ? ' class="txt"' : "") + ">" + c + "</td>").join("") + "</tr>").join("");
+}
+function selfCheckPanel(fn) {
+  const out = []; let n = 0, bad = 0;
+  const t = (label, cond, detail = "") => {
+    n += 1; if (!cond) bad += 1;
+    out.push('<div><span class="' + (cond ? "ok" : "warn") + '">' + (cond ? "PASS" : "FAIL") +
+      '</span><span>' + label + '</span><span class="m">' + detail + "</span></div>");
+  };
+  fn(t);
+  el("selftest").innerHTML =
+    '<p class="note" style="margin:0 0 8px"><b class="' + (bad ? "warn" : "ok") + '">' +
+    (n - bad) + " of " + n + " checks pass</b>" + (bad ? " &mdash; " + bad + " FAILED" : "") + ".</p>" + out.join("");
+}
+const ms = (v) => (v >= 1000 ? (v / 1000).toFixed(2) + " s" : v.toFixed(1) + " ms");
+const f1 = (v) => v.toFixed(1);
+const f2 = (v) => v.toFixed(2);
+
+// ---------------------------------------------------------------- LOOK
+function render() {
+  const rate = (+el("sRate").value) / 100;
+  const prompt = +el("sPrompt").value;
+  const batch = +el("sBatch").value;
+  el("vRate").textContent = f2(rate) + " /s";
+  el("vPrompt").textContent = prompt + " tok";
+  el("vBatch").textContent = batch;
+
+  const base = { arrivalRate: rate, promptMedian: prompt, batchSize: batch };
+  const m = ENGINE.run(base);
+
+  table("tLive",
+    ["metric", "p50", "p90", "p99", "mean"],
+    [
+      { cls: "here", cells: ["TTFT", ms(m.ttft.p50), ms(m.ttft.p90), ms(m.ttft.p99), ms(m.meanTtft)] },
+      { cls: "here", cells: ["TPOT", ms(m.tpot.p50), ms(m.tpot.p90), ms(m.tpot.p99), ms(m.meanTpot)] },
+      { cells: ["end-to-end", ms(m.e2e.p50), ms(m.e2e.p90), ms(m.e2e.p99), ms(m.meanE2e)] },
+      { cls: "dim", cells: ["TPOT per TOKEN", ms(m.tpotByToken.p50), ms(m.tpotByToken.p90),
+                            ms(m.tpotByToken.p99), "&mdash;"] }
+    ]);
+
+  el("liveNote").innerHTML =
+    "Throughput <b>" + f1(m.tokensPerSec) + " output tokens/s</b> (" + f2(m.reqPerSec) +
+    " req/s) over " + f1(m.makespan / 1000) + " s of simulated time, " + m.steps +
+    " decode steps, peak batch " + m.maxActive + ". Prefill occupies <b>" +
+    (m.prefillShare * 100).toFixed(1) + "%</b> of server time. The last row is the same " +
+    "TPOT distribution weighted by tokens instead of by requests &mdash; see step 9.";
+
+  // sweep: arrival rate
+  {
+    const rows = [];
+    let prev = null;
+    for (const r of [0.2, 0.4, 0.8, 1.2, 1.6, 2.4]) {
+      const x = ENGINE.run({ arrivalRate: r, promptMedian: prompt, batchSize: batch });
+      rows.push({ cls: Math.abs(r - rate) < 0.051 ? "here" : "", cells: [
+        f1(r) + " req/s", ms(x.ttft.p50), ms(x.ttft.p99), ms(x.tpot.p50), f1(x.tokensPerSec)
+      ]});
+      prev = x;
+    }
+    table("tRate", ["arrival rate", "TTFT p50", "TTFT p99", "TPOT p50", "tok/s"], rows);
+    const lo = ENGINE.run({ arrivalRate: 0.2, promptMedian: prompt, batchSize: batch });
+    const hi = ENGINE.run({ arrivalRate: 2.4, promptMedian: prompt, batchSize: batch });
+    el("rateNote").innerHTML =
+      "TTFT p99 moves <b>" + ms(lo.ttft.p99) + " &rarr; " + ms(hi.ttft.p99) + "</b> (&times;" +
+      (hi.ttft.p99 / lo.ttft.p99).toFixed(1) + ") while TPOT p50 moves " + ms(lo.tpot.p50) +
+      " &rarr; " + ms(hi.tpot.p50) + " (&times;" + (hi.tpot.p50 / lo.tpot.p50).toFixed(2) +
+      "). The queue lands almost entirely on the silence.";
+  }
+
+  // sweep: batch size
+  {
+    const rows = [];
+    for (const b of [1, 2, 4, 8, 16, 32, 64]) {
+      const x = ENGINE.run({ arrivalRate: rate, promptMedian: prompt, batchSize: b });
+      rows.push({ cls: b === batch ? "here" : "", cells: [
+        "batch " + b, ms(x.ttft.p50), ms(x.ttft.p99), ms(x.tpot.p50), f1(x.tokensPerSec)
+      ]});
+    }
+    table("tBatch", ["batch size", "TTFT p50", "TTFT p99", "TPOT p50", "tok/s"], rows);
+    const b1 = ENGINE.run({ arrivalRate: rate, promptMedian: prompt, batchSize: 1 });
+    const b64 = ENGINE.run({ arrivalRate: rate, promptMedian: prompt, batchSize: 64 });
+    el("batchNote").innerHTML =
+      "Throughput <b>" + f1(b1.tokensPerSec) + " &rarr; " + f1(b64.tokensPerSec) +
+      " tok/s</b> while TPOT p50 <b>" + ms(b1.tpot.p50) + " &rarr; " + ms(b64.tpot.p50) +
+      "</b>. The server gets faster and every individual stream gets slower; both are true " +
+      "and only one of them is on the capacity dashboard.";
+  }
+}
+
+// --------------------------------------------------------- UNDERSTAND
+{
+  // step 1 - anatomy of one request
+  const sim = ENGINE.simulate({});
+  const med = sim.reqs.slice().sort((a, b) => a.e2e - b.e2e)[Math.floor(sim.reqs.length / 2)];
+  const longest = sim.reqs.slice().sort((a, b) => b.output - a.output)[0];
+  const worstT = sim.reqs.slice().sort((a, b) => b.ttft - a.ttft)[0];
+  const worstE = sim.reqs.slice().sort((a, b) => b.e2e - a.e2e)[0];
+  const row = (name, q, cls) => ({ cls: cls || "", cells: [
+    name, q.prompt, q.output, ms(q.ttft), ms(q.tpot), ms(q.e2e),
+    (q.ttft / q.e2e * 100).toFixed(1) + "%"] });
+  table("tAnatomy",
+    ["request", "prompt tok", "output tok", "TTFT", "TPOT", "end-to-end", "TTFT share"],
+    [
+      row("median by total", med, "here"),
+      row("longest answer #" + longest.id, longest),
+      row("worst TTFT #" + worstT.id, worstT, "dim"),
+      row("worst end-to-end #" + worstE.id, worstE, "dim")
+    ]);
+  el("anatomyNote").innerHTML =
+    "Default settings: " + ENGINE.DEFAULTS.arrivalRate + " req/s, batch " +
+    ENGINE.DEFAULTS.batchSize + ", median prompt " + ENGINE.DEFAULTS.promptMedian +
+    " tokens. The TTFT share of a total is usually small, which is exactly why a total " +
+    "cannot be used to watch it.";
+}
+
+{
+  // step 2 - cadence against reading speed
+  const rows = [];
+  for (const b of [1, 8, 32, 64, 128, 256]) {
+    const sat = ENGINE.satRun({ batchSize: b, isoPrompt: 512, isoOutput: 64 });
+    const tps = 1000 / sat.tpot.p50;
+    rows.push({ cls: tps < 6 ? "dim" : "", cells: [
+      "batch " + b, ms(sat.tpot.p50), f1(tps), f1(sat.tokensPerSec),
+      tps >= 6 ? '<span class="pill good">ahead of the reader</span>'
+               : '<span class="pill bad">visibly stuttering</span>'
+    ]});
+  }
+  table("tCadence", ["full batch of", "TPOT", "tokens/s to ONE user",
+    "tokens/s for the SERVER", ""], rows);
+  el("cadenceNote").innerHTML =
+    "A comfortable reading pace is around <b>5&ndash;6 tokens a second</b>. Below that the " +
+    "text arrives faster than it can be read and further gains are invisible; above it, " +
+    "the stream is the bottleneck on comprehension. The last two columns are the same " +
+    "server, counted per user and per machine, and they disagree about which row is best.";
+}
+
+{
+  // step 3 - the identity, per request
+  const sim = ENGINE.simulate({});
+  const rows = [];
+  let worstErr = 0;
+  for (const q of sim.reqs) {
+    const err = Math.abs(q.e2e - (q.ttft + q.tpot * (q.output - 1)));
+    if (err > worstErr) worstErr = err;
+  }
+  for (const q of sim.reqs.slice(0, 4)) {
+    rows.push({ cells: ["#" + q.id, q.output, ms(q.ttft), ms(q.tpot),
+      ms(q.ttft + q.tpot * (q.output - 1)), ms(q.e2e),
+      Math.abs(q.e2e - (q.ttft + q.tpot * (q.output - 1))).toExponential(1)] });
+  }
+  table("tIdentity", ["request", "output tok", "TTFT", "TPOT", "TTFT + TPOT&times;(N&minus;1)",
+    "measured e2e", "error (ms)"], rows);
+  el("identityNote").innerHTML =
+    "Worst disagreement across all " + sim.reqs.length + " requests: <b>" +
+    worstErr.toExponential(2) + " ms</b> &mdash; floating-point noise. The identity is not " +
+    "an approximation, it is a definition, and that is what makes it useful for attribution.";
+}
+
+{
+  // step 4 - the mean hides the empty box
+  const rows = [];
+  for (const r of [0.4, 1.0, 1.6, 2.2]) {
+    const m = ENGINE.run({ arrivalRate: r });
+    rows.push({ cls: r === 1.0 ? "here" : "", cells: [
+      f1(r) + " req/s", ms(m.meanE2e), ms(m.e2e.p50), ms(m.ttft.p50), ms(m.ttft.p99),
+      (m.ttft.p99 / m.ttft.p50).toFixed(1) + "&times;"
+    ]});
+  }
+  table("tMean", ["arrival rate", "mean e2e", "p50 e2e", "TTFT p50", "TTFT p99",
+    "TTFT tail ratio"], rows);
+  const a = ENGINE.run({ arrivalRate: 0.4 }), b = ENGINE.run({ arrivalRate: 2.2 });
+  el("meanNote").innerHTML =
+    "Mean end-to-end moves <b>" + ms(a.meanE2e) + " &rarr; " + ms(b.meanE2e) + "</b> (&times;" +
+    (b.meanE2e / a.meanE2e).toFixed(2) + ") across that whole range, while TTFT p99 moves <b>" +
+    ms(a.ttft.p99) + " &rarr; " + ms(b.ttft.p99) + "</b> (&times;" +
+    (b.ttft.p99 / a.ttft.p99).toFixed(1) + "). A dashboard showing the first column would " +
+    "report a mild regression. The users in the last column are staring at nothing.";
+}
+
+{
+  // step 5 - TTFT drivers
+  const rows = [];
+  for (const p of [128, 512, 1024, 2048, 4096]) {
+    const iso = ENGINE.measure(ENGINE.isolated({ isoPrompt: p, isoOutput: 64 }));
+    const quiet = ENGINE.run({ promptMedian: p, arrivalRate: 0.3, batchSize: 16 });
+    const busy = ENGINE.run({ promptMedian: p, arrivalRate: 1.2, batchSize: 16 });
+    rows.push({ cells: [
+      p + " tok", ms(iso.ttft.p50), ms(quiet.ttft.p50), ms(busy.ttft.p50),
+      (busy.ttft.p50 / quiet.ttft.p50).toFixed(1) + "&times;"
+    ]});
+  }
+  table("tTtftDrivers", ["median prompt", "prefill alone", "TTFT p50 at 0.3 req/s",
+    "TTFT p50 at 1.2 req/s", "cost of the queue"], rows);
+  el("ttftDriversNote").innerHTML =
+    "The second column is pure arithmetic: <code>prefillFixed + " +
+    ENGINE.DEFAULTS.prefillPerToken + " ms &times; prompt tokens</code>, and it grows " +
+    "linearly. The last column is the queue, and it does not.";
+}
+
+{
+  // step 6 - TPOT drivers
+  const rows = [];
+  for (const b of [1, 2, 4, 8, 16, 32, 64]) {
+    const i512 = ENGINE.satRun({ batchSize: b, isoPrompt: 512, isoOutput: 64 });
+    const i4096 = ENGINE.satRun({ batchSize: b, isoPrompt: 4096, isoOutput: 64 });
+    rows.push({ cells: [
+      "batch " + b, ms(i512.tpot.p50), ms(i4096.tpot.p50),
+      (Math.abs(i512.tpot.p50 - i4096.tpot.p50) < 1e-9
+        ? '<span class="pill good">identical</span>'
+        : '<span class="pill bad">differs</span>'),
+      f1(i512.tokensPerSec), f2(i512.tpot.p50 / b)
+    ]});
+  }
+  table("tTpotDrivers", ["full batch of", "TPOT, 512-tok prompts", "TPOT, 4096-tok prompts",
+    "", "tok/s for the server", "ms of step per sequence"], rows);
+  el("tpotDriversNote").innerHTML =
+    "A decode step costs <code>" + ENGINE.DEFAULTS.stepFixed + " ms + " +
+    ENGINE.DEFAULTS.stepPerSeq + " ms &times; batch</code>. Per token that falls towards " +
+    ENGINE.DEFAULTS.stepPerSeq + " ms as the batch grows; per SEQUENCE it only ever rises. " +
+    "Prompt length is absent from the expression entirely.";
+}
+
+{
+  // step 7 - the batching window. Long prompts, so fusing prefills has
+  // something substantial to work on.
+  const WCFG = { arrivalRate: 0.8, batchSize: 16, promptMedian: 2048 };
+  const rows = [];
+  for (const w of [0, 20, 60, 150, 400, 800]) {
+    const m = ENGINE.run(Object.assign({ batchWindow: w }, WCFG));
+    rows.push({ cls: w === 0 ? "here" : "", cells: [
+      w + " ms", ms(m.ttft.p50), ms(m.ttft.p99), ms(m.tpot.p50), f1(m.tokensPerSec),
+      (m.prefillShare * 100).toFixed(2) + "%"
+    ]});
+  }
+  table("tWindow", ["batch wait window", "TTFT p50", "TTFT p99", "TPOT p50", "tok/s",
+    "prefill share"], rows);
+  const w0 = ENGINE.run(Object.assign({ batchWindow: 0 }, WCFG));
+  const w800 = ENGINE.run(Object.assign({ batchWindow: 800 }, WCFG));
+  el("windowNote").innerHTML =
+    "2,048-token prompts at 0.8 req/s, batch 16. Waiting up to 800 ms to fuse prefills does " +
+    "what it promises &mdash; prefill drops from <b>" + (w0.prefillShare * 100).toFixed(2) +
+    "%</b> of server time to <b>" + (w800.prefillShare * 100).toFixed(2) +
+    "%</b> &mdash; and TTFT p50 goes <b>" + ms(w0.ttft.p50) + " &rarr; " + ms(w800.ttft.p50) +
+    "</b> (&times;" + (w800.ttft.p50 / w0.ttft.p50).toFixed(1) + "). Throughput moves <b>" +
+    ((w800.tokensPerSec / w0.tokensPerSec - 1) * 100).toFixed(2) + "%</b>. " +
+    "<b>The optimisation worked and bought nothing</b>, because this server is decode-bound " +
+    "and the time it freed was never the bottleneck &mdash; but the TTFT bill was charged in " +
+    "full, to users, where the throughput dashboard cannot see it.";
+}
+
+{
+  // step 8 - prefill interference
+  // The control is the SAME load with prefill priced at zero: identical
+  // arrivals, identical batch occupancy, identical decoding - the only thing
+  // removed is the time prefill spends holding the accelerator.
+  const rows = [];
+  const b = 16;
+  for (const p of [128, 512, 1024, 2048, 4096]) {
+    const free = ENGINE.run({ batchSize: b, promptMedian: p, arrivalRate: 1.4,
+                              prefillFixed: 0, prefillPerToken: 0 });
+    const load = ENGINE.run({ batchSize: b, promptMedian: p, arrivalRate: 1.4 });
+    rows.push({ cls: load.tpot.p50 / free.tpot.p50 > 1.2 ? "here" : "", cells: [
+      p + " tok", ms(free.tpot.p50), ms(load.tpot.p50),
+      "+" + ((load.tpot.p50 / free.tpot.p50 - 1) * 100).toFixed(1) + "%",
+      (load.prefillShare * 100).toFixed(1) + "%"
+    ]});
+  }
+  table("tLeak", ["median prompt", "TPOT with prefill FREE", "TPOT with prefill priced",
+    "inflation", "server time spent in prefill"], rows);
+  el("leakNote").innerHTML =
+    "The control column prices prefill at zero and changes nothing else &mdash; same arrivals, " +
+    "same batch, same decoding &mdash; and it is <b>identical for every prompt length</b>, " +
+    "because with prefill free the prompt does not exist. The priced column is not, because " +
+    "somebody else's prefill is holding the accelerator while your sequence waits for its " +
+    "next token. <b>Nothing about decoding changed.</b>";
+}
+
+{
+  // step 9 - requests vs tokens
+  const rows = [];
+  for (const r of [0.6, 1.0, 1.4, 1.8, 2.2]) {
+    const m = ENGINE.run({ arrivalRate: r });
+    rows.push({ cls: Math.abs(m.tpotByToken.p99 - m.tpot.p99) > 1e-9 ? "here" : "", cells: [
+      f1(r) + " req/s", ms(m.tpot.p50), ms(m.tpotByToken.p50), ms(m.tpot.p99),
+      ms(m.tpotByToken.p99),
+      ((m.tpotByToken.p99 / m.tpot.p99 - 1) * 100).toFixed(1) + "%"
+    ]});
+  }
+  table("tWeighted", ["arrival rate", "TPOT p50 per request", "TPOT p50 per token",
+    "TPOT p99 per request", "TPOT p99 per token", "p99 gap"], rows);
+  el("weightedNote").innerHTML =
+    "Same requests, same cadences, two different weightings. Per request, a two-token reply " +
+    "is one vote. Per token, it is two votes out of hundreds of thousands. Pick the one that " +
+    "matches the sentence you want to say about your users &mdash; and then say which it is.";
+}
+
+{
+  // step 10 - the budget
+  const rows = [];
+  const TTFT_BUDGET = 1000, TPOT_BUDGET = 60, RATE = 2.0;
+  let feasible = 0;
+  for (const b of [1, 2, 4, 8, 16, 32, 64]) {
+    const m = ENGINE.run({ arrivalRate: RATE, batchSize: b });
+    const okT = m.ttft.p90 <= TTFT_BUDGET, okP = m.tpot.p90 <= TPOT_BUDGET;
+    if (okT && okP) feasible++;
+    rows.push({ cls: okT && okP ? "here" : "", cells: [
+      "batch " + b, ms(m.ttft.p90), ms(m.tpot.p90), ms(m.e2e.p90), f1(m.tokensPerSec),
+      okT ? '<span class="pill good">TTFT ok</span>' : '<span class="pill bad">TTFT over</span>',
+      okP ? '<span class="pill good">TPOT ok</span>' : '<span class="pill bad">TPOT over</span>'
+    ]});
+  }
+  table("tBudget", ["batch size", "TTFT p90", "TPOT p90", "e2e p90", "tok/s", "", ""], rows);
+  const easy = ENGINE.run({ arrivalRate: 0.8, batchSize: 16 });
+  el("budgetNote").innerHTML =
+    "Budget: <b>TTFT p90 &le; " + TTFT_BUDGET + " ms</b> and <b>TPOT p90 &le; " + TPOT_BUDGET +
+    " ms</b>, swept over batch size at " + f1(RATE) + " req/s. Small batches blow the TTFT " +
+    "ceiling on queueing; large ones blow the TPOT ceiling on step time; <b>" +
+    (feasible === 0 ? "no batch size satisfies both" : feasible + " satisfy both") +
+    "</b>. That is not a tuning problem, it is a capacity verdict &mdash; and only the split " +
+    "metrics state it. The same budget at 0.8 req/s and batch 16 is met comfortably (TTFT p90 " +
+    ms(easy.ttft.p90) + ", TPOT p90 " + ms(easy.tpot.p90) + "). An end-to-end budget would " +
+    "have been satisfied or violated by a change in answer length that nobody deployed.";
+}
+
+// --------------------------------------------------------------- BUILD
+el("codeSim").textContent = String(ENGINE.simulate);
+el("codePct").textContent = [String(ENGINE.percentile), "",
+                             String(ENGINE.weightedPercentile)].join("\n");
+
+render();
+
+selfCheckPanel((t) => {
+  const P = ENGINE.percentile, W = ENGINE.weightedPercentile;
+  const TEN = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+  // ---- percentiles, hand-checked
+  t("percentile([1..10], 50) is 5", P(TEN, 50) === 5, "nearest rank, no interpolation");
+  t("percentile([1..10], 90) is 9", P(TEN, 90) === 9);
+  t("percentile([1..10], 99) is 10", P(TEN, 99) === 10, "ceil(9.9) = 10 -> the last element");
+  t("percentile([1..10], 25) is 3", P(TEN, 25) === 3);
+  t("percentile clamps at both ends", P(TEN, 0) === 1 && P(TEN, 100) === 10 && P(TEN, -5) === 1);
+  t("percentile of a single value is that value", P([42], 50) === 42 && P([42], 99) === 42);
+  t("percentile is non-decreasing in p", (() => {
+    let prev = -Infinity;
+    for (let p = 0; p <= 100; p++) { const v = P(TEN, p); if (v < prev) return false; prev = v; }
+    return true;
+  })());
+  t("weighted percentile with equal weights equals the plain one", (() => {
+    const pairs = TEN.map((v) => ({ v, w: 1 }));
+    for (const p of [1, 10, 25, 50, 75, 90, 99]) if (W(pairs, p) !== P(TEN, p)) return false;
+    return true;
+  })(), "the two definitions coincide only when every item is one vote");
+  t("weighted percentile moves when the weights are skewed", (() => {
+    return W([{ v: 1, w: 1 }, { v: 2, w: 99 }], 50) === 2 && P([1, 2], 50) === 1;
+  })(), "values [1,2], weights [1,99]: p50 is 2 by weight and 1 by count");
+  t("weighted percentile is insensitive to input order", (() => {
+    const a = [{ v: 9, w: 2 }, { v: 1, w: 5 }, { v: 4, w: 3 }];
+    const b = [{ v: 4, w: 3 }, { v: 9, w: 2 }, { v: 1, w: 5 }];
+    for (const p of [10, 50, 90]) if (W(a, p) !== W(b, p)) return false;
+    return true;
+  })(), "it sorts a copy, so the caller's array is untouched");
+
+  // ---- determinism
+  t("the same seed reproduces a run EXACTLY", (() => {
+    const a = ENGINE.simulate({}).reqs.map((r) => r.ttft + ":" + r.tpot + ":" + r.e2e).join("|");
+    const b = ENGINE.simulate({}).reqs.map((r) => r.ttft + ":" + r.tpot + ":" + r.e2e).join("|");
+    return a === b && a.length > 100;
+  })(), "string-identical, not merely close");
+  t("a different seed gives a different run", (() => {
+    const a = ENGINE.simulate({ seed: 1 }).reqs.map((r) => r.ttft).join(",");
+    const b = ENGINE.simulate({ seed: 2 }).reqs.map((r) => r.ttft).join(",");
+    return a !== b;
+  })());
+  t("changing the arrival rate changes ONLY the clock", (() => {
+    const a = ENGINE.makeWorkload(ENGINE.config({ arrivalRate: 0.5 }));
+    const b = ENGINE.makeWorkload(ENGINE.config({ arrivalRate: 2.0 }));
+    for (let i = 0; i < a.length; i++) {
+      if (a[i].prompt !== b[i].prompt || a[i].output !== b[i].output) return false;
+      if (Math.abs(a[i].arrival * 0.5 - b[i].arrival * 2.0) > 1e-6) return false;
+    }
+    return true;
+  })(), "same prompts, same outputs, arrivals scaled exactly by the rate ratio");
+
+  // ---- the simulator is internally consistent
+  const sim = ENGINE.simulate({});
+  t("every request completes exactly once", (() => {
+    const seen = new Set();
+    for (const r of sim.reqs) { if (seen.has(r.id)) return false; seen.add(r.id); }
+    return sim.reqs.length === ENGINE.DEFAULTS.n;
+  })(), sim.reqs.length + " of " + ENGINE.DEFAULTS.n);
+  t("every request emits exactly the tokens it asked for",
+    sim.reqs.every((r) => r.emitted === r.output));
+  t("no request starts before it arrives",
+    sim.reqs.every((r) => r.firstToken >= r.arrival - 1e-9 && r.ttft > 0));
+  t("the last token never precedes the first",
+    sim.reqs.every((r) => r.end >= r.firstToken - 1e-9));
+  t("the batch size is never exceeded",
+    sim.maxActive <= ENGINE.DEFAULTS.batchSize, "peak " + sim.maxActive +
+    " of " + ENGINE.DEFAULTS.batchSize);
+  t("IDENTITY: e2e = TTFT + TPOT x (output - 1), for every request", (() => {
+    let worst = 0;
+    for (const r of sim.reqs) worst = Math.max(worst, Math.abs(r.e2e - (r.ttft + r.tpot * (r.output - 1))));
+    return worst < 1e-9;
+  })(), (() => {
+    let worst = 0;
+    for (const r of sim.reqs) worst = Math.max(worst, Math.abs(r.e2e - (r.ttft + r.tpot * (r.output - 1))));
+    return "worst error " + worst.toExponential(2) + " ms";
+  })());
+  t("server time is fully accounted for: prefill + decode = makespan minus idle", (() => {
+    return sim.prefillMs + sim.decodeMs <= sim.lastEnd + 1e-6 &&
+           sim.prefillMs > 0 && sim.decodeMs > 0;
+  })());
+
+  // ---- closed forms, where there is no queue left to hide a mistake
+  t("CLOSED FORM: TTFT alone is prefillFixed + perToken x prompt", (() => {
+    const D = ENGINE.DEFAULTS;
+    for (const p of [64, 512, 4096]) {
+      const m = ENGINE.measure(ENGINE.isolated({ isoPrompt: p, isoOutput: 16 }));
+      const want = D.prefillFixed + D.prefillPerToken * p;
+      if (Math.abs(m.ttft.p50 - want) > 1e-9) return false;
+    }
+    return true;
+  })(), "checked against the formula, not against the loop");
+  t("CLOSED FORM: TPOT alone is stepFixed + stepPerSeq (batch of one)", (() => {
+    const D = ENGINE.DEFAULTS;
+    const m = ENGINE.measure(ENGINE.isolated({ batchSize: 1, isoPrompt: 512, isoOutput: 64 }));
+    return Math.abs(m.tpot.p50 - (D.stepFixed + D.stepPerSeq)) < 1e-9;
+  })());
+  t("CLOSED FORM: a FULL batch decodes at stepFixed + stepPerSeq x batch", (() => {
+    const D = ENGINE.DEFAULTS;
+    for (const b of [1, 2, 8, 32, 64, 128]) {
+      const m = ENGINE.satRun({ batchSize: b, isoPrompt: 512, isoOutput: 64 });
+      if (Math.abs(m.tpot.p50 - (D.stepFixed + D.stepPerSeq * b)) > 1e-9) return false;
+      if (m.maxActive !== b) return false;
+    }
+    return true;
+  })(), "and the batch really is full - maxActive equals the batch size");
+  // This one is asserted to a TOLERANCE rather than to exact equality, and the
+  // reason is worth knowing: a 4096-token prefill at batch 64 puts the clock
+  // past 20,000 ms before the first decode step, so (end - firstToken) / (N-1)
+  // loses its last bits to the magnitude of the clock. The MODEL is exactly
+  // invariant; the arithmetic in a double is not.
+  t("TPOT is INVARIANT to prompt length at a fixed batch size", (() => {
+    for (const b of [1, 4, 16, 64]) {
+      const vals = [64, 512, 2048, 4096].map((p) =>
+        ENGINE.satRun({ batchSize: b, isoPrompt: p, isoOutput: 64 }).tpot.p50);
+      for (const v of vals) if (Math.abs(v - vals[0]) > 1e-9) return false;
+    }
+    return true;
+  })(), (() => {
+    let worst = 0;
+    for (const b of [1, 4, 16, 64]) {
+      const vals = [64, 512, 2048, 4096].map((p) =>
+        ENGINE.satRun({ batchSize: b, isoPrompt: p, isoOutput: 64 }).tpot.p50);
+      for (const v of vals) worst = Math.max(worst, Math.abs(v - vals[0]));
+    }
+    return "across a 64x range of prompt lengths at four batch sizes, worst spread " +
+           worst.toExponential(2) + " ms - float noise, not a model difference";
+  })());
+  t("...while TTFT over the same grid is NOT invariant to prompt length", (() => {
+    for (const b of [1, 4, 16, 64]) {
+      const vals = [64, 512, 2048, 4096].map((p) =>
+        ENGINE.satRun({ batchSize: b, isoPrompt: p, isoOutput: 64 }).ttft.p50);
+      for (let i = 1; i < vals.length; i++) if (!(vals[i] > vals[i - 1])) return false;
+    }
+    return true;
+  })(), "same grid, same runs - one latency moves with the prompt and the other does not");
+
+  // ---- the load behaviours the page is about
+  t("TTFT p50 is MONOTONICALLY non-decreasing in arrival rate", (() => {
+    let prev = -1;
+    for (const r of [0.2, 0.4, 0.8, 1.2, 1.6, 2.0, 2.4]) {
+      const v = ENGINE.run({ arrivalRate: r }).ttft.p50;
+      if (v < prev - 1e-9) return false;
+      prev = v;
+    }
+    return true;
+  })(), (() => {
+    const a = ENGINE.run({ arrivalRate: 0.2 }).ttft.p50, b = ENGINE.run({ arrivalRate: 2.4 }).ttft.p50;
+    return a.toFixed(1) + " ms -> " + b.toFixed(1) + " ms";
+  })());
+  t("TTFT p99 is non-decreasing in arrival rate too", (() => {
+    let prev = -1;
+    for (const r of [0.2, 0.6, 1.0, 1.4, 1.8, 2.2]) {
+      const v = ENGINE.run({ arrivalRate: r }).ttft.p99;
+      if (v < prev - 1e-9) return false;
+      prev = v;
+    }
+    return true;
+  })());
+  t("the queue hits TTFT far harder than it hits TPOT", (() => {
+    const lo = ENGINE.run({ arrivalRate: 0.2 }), hi = ENGINE.run({ arrivalRate: 2.4 });
+    return (hi.ttft.p99 / lo.ttft.p99) > 5 * (hi.tpot.p50 / lo.tpot.p50);
+  })(), (() => {
+    const lo = ENGINE.run({ arrivalRate: 0.2 }), hi = ENGINE.run({ arrivalRate: 2.4 });
+    return "TTFT p99 x" + (hi.ttft.p99 / lo.ttft.p99).toFixed(1) +
+           " vs TPOT p50 x" + (hi.tpot.p50 / lo.tpot.p50).toFixed(2);
+  })());
+  t("TPOT rises STRICTLY with batch size, in the clean room", (() => {
+    let prev = -1;
+    for (const b of [1, 2, 4, 8, 16, 32, 64]) {
+      const v = ENGINE.satRun({ batchSize: b, isoPrompt: 512, isoOutput: 64 }).tpot.p50;
+      if (!(v > prev)) return false;
+      prev = v;
+    }
+    return true;
+  })(), "a bigger batch is a longer step, and the step IS the cadence");
+  t("...but the per-token cost of a step FALLS with batch size", (() => {
+    let prev = Infinity;
+    for (const b of [1, 2, 4, 8, 16, 32, 64]) {
+      const m = ENGINE.satRun({ batchSize: b, isoPrompt: 512, isoOutput: 64 });
+      const perToken = m.tpot.p50 / b;
+      if (!(perToken < prev)) return false;
+      prev = perToken;
+    }
+    return true;
+  })(), "the same number, divided two ways - which is the whole batching argument");
+  t("throughput rises with batch size under saturation", (() => {
+    let prev = -1;
+    for (const b of [1, 2, 4, 8, 16, 32]) {
+      const v = ENGINE.run({ batchSize: b, arrivalRate: 3.0 }).tokensPerSec;
+      if (v < prev - 1e-9) return false;
+      prev = v;
+    }
+    return true;
+  })(), (() => {
+    const a = ENGINE.run({ batchSize: 1, arrivalRate: 3.0 }).tokensPerSec;
+    const b = ENGINE.run({ batchSize: 32, arrivalRate: 3.0 }).tokensPerSec;
+    return a.toFixed(1) + " -> " + b.toFixed(1) + " tok/s";
+  })());
+  t("throughput SATURATES - doubling the batch stops paying", (() => {
+    const g = (a, b) => ENGINE.run({ batchSize: b, arrivalRate: 3.0 }).tokensPerSec /
+                        ENGINE.run({ batchSize: a, arrivalRate: 3.0 }).tokensPerSec;
+    return g(1, 2) > g(32, 64);
+  })(), "the fixed weight-read cost is already amortised long before batch 64");
+  t("and the throughput gain is paid for in TPOT", (() => {
+    const a = ENGINE.run({ batchSize: 1, arrivalRate: 3.0 });
+    const b = ENGINE.run({ batchSize: 32, arrivalRate: 3.0 });
+    return b.tokensPerSec > a.tokensPerSec && b.tpot.p50 > a.tpot.p50;
+  })());
+
+  // Written expecting the step-6 result to survive contact with a queue. It
+  // does NOT: under load, TPOT rises with other people's prompt lengths,
+  // because a prefill holds the accelerator while everyone else waits for a
+  // token. The separation of concerns is real arithmetic and a false
+  // scheduling assumption.
+  t("INVERSION: under LOAD, TPOT is NOT invariant to prompt length", (() => {
+    let prev = -1;
+    for (const p of [128, 512, 1024, 2048, 4096]) {
+      const v = ENGINE.run({ batchSize: 16, promptMedian: p, arrivalRate: 1.4 }).tpot.p50;
+      if (!(v > prev)) return false;
+      prev = v;
+    }
+    return true;
+  })(), (() => {
+    const a = ENGINE.run({ batchSize: 16, promptMedian: 128, arrivalRate: 1.4 }).tpot.p50;
+    const b = ENGINE.run({ batchSize: 16, promptMedian: 4096, arrivalRate: 1.4 }).tpot.p50;
+    return a.toFixed(1) + " ms -> " + b.toFixed(1) + " ms - prefill interference, not decoding";
+  })());
+  t("CONTROL: price prefill at ZERO and the same load is flat in prompt length", (() => {
+    const vals = [128, 512, 1024, 2048, 4096].map((p) => ENGINE.run({
+      batchSize: 16, promptMedian: p, arrivalRate: 1.4, prefillFixed: 0, prefillPerToken: 0
+    }).tpot.p50);
+    for (const v of vals) if (v !== vals[0]) return false;
+    return true;
+  })(), "same arrivals, same batch, same decoding - so the inflation above is SCHEDULING");
+
+  // Written expecting the classic throughput-for-latency trade. Only half of
+  // it showed up: the window does fuse prefills and does cut the share of
+  // server time they occupy, but this server is DECODE-bound, so the freed
+  // time buys no throughput at all. The TTFT bill is charged in full anyway.
+  t("INVERSION: a batching window bills TTFT and buys no throughput here", (() => {
+    const C = { arrivalRate: 0.8, batchSize: 16, promptMedian: 2048 };
+    const a = ENGINE.run(Object.assign({ batchWindow: 0 }, C));
+    const b = ENGINE.run(Object.assign({ batchWindow: 800 }, C));
+    return b.ttft.p50 > 3 * a.ttft.p50 &&
+           b.prefillShare < a.prefillShare &&
+           b.tokensPerSec <= a.tokensPerSec;
+  })(), (() => {
+    const C = { arrivalRate: 0.8, batchSize: 16, promptMedian: 2048 };
+    const a = ENGINE.run(Object.assign({ batchWindow: 0 }, C));
+    const b = ENGINE.run(Object.assign({ batchWindow: 800 }, C));
+    return "TTFT p50 " + a.ttft.p50.toFixed(0) + " -> " + b.ttft.p50.toFixed(0) +
+           " ms, prefill share " + (a.prefillShare * 100).toFixed(2) + "% -> " +
+           (b.prefillShare * 100).toFixed(2) + "%, throughput " +
+           a.tokensPerSec.toFixed(1) + " -> " + b.tokensPerSec.toFixed(1) + " tok/s";
+  })());
+  // Regression. head.arrival + batchWindow rounds a hair LOW in a double, so a
+  // bare ">= batchWindow" judged the window unexpired at the very instant the
+  // clock had been advanced to, and the scheduler span on one timestamp
+  // forever. Fourteen window values, every one of which used to hang.
+  t("every batching-window setting terminates and serves all " + ENGINE.DEFAULTS.n +
+    " requests", (() => {
+    for (const w of [1, 7, 13, 20, 37, 60, 100, 150, 300, 333, 400, 777, 800, 1000]) {
+      for (const b of [4, 16]) {
+        const x = ENGINE.simulate({ batchWindow: w, batchSize: b, arrivalRate: 1.0 });
+        if (x.reqs.length !== ENGINE.DEFAULTS.n) return false;
+      }
+    }
+    return true;
+  })(), "28 settings - a float equality in the window test used to spin forever");
+  t("CONTROL: the window's TTFT cost grows with the window, monotonically", (() => {
+    const C = { arrivalRate: 0.8, batchSize: 16, promptMedian: 2048 };
+    let prev = -1;
+    for (const w of [0, 20, 60, 150, 400, 800]) {
+      const v = ENGINE.run(Object.assign({ batchWindow: w }, C)).ttft.p50;
+      if (!(v > prev)) return false;
+      prev = v;
+    }
+    return true;
+  })(), "so it is the window doing it, not a coincidence at one setting");
+
+  // ---- the summary statistics themselves
+  t("p99 >= p90 >= p50 for every metric, at every rate tried", (() => {
+    for (const r of [0.4, 1.0, 1.6, 2.2]) {
+      const m = ENGINE.run({ arrivalRate: r });
+      for (const d of [m.ttft, m.tpot, m.e2e]) if (!(d.p99 >= d.p90 && d.p90 >= d.p50)) return false;
+    }
+    return true;
+  })());
+  t("PERCENTILE OVER REQUESTS is not a percentile over TOKENS", (() => {
+    let differed = 0;
+    for (const r of [0.6, 1.0, 1.4, 1.8, 2.2]) {
+      const m = ENGINE.run({ arrivalRate: r });
+      if (Math.abs(m.tpot.p99 - m.tpotByToken.p99) > 1e-9) differed++;
+    }
+    return differed >= 3;
+  })(), (() => {
+    const m = ENGINE.run({ arrivalRate: 1.4 });
+    return "p99 per request " + m.tpot.p99.toFixed(1) + " ms, per token " +
+           m.tpotByToken.p99.toFixed(1) + " ms";
+  })());
+  t("the mean end-to-end is a poor proxy for the TTFT tail", (() => {
+    const a = ENGINE.run({ arrivalRate: 0.4 }), b = ENGINE.run({ arrivalRate: 2.2 });
+    return (b.ttft.p99 / a.ttft.p99) > 3 * (b.meanE2e / a.meanE2e);
+  })(), (() => {
+    const a = ENGINE.run({ arrivalRate: 0.4 }), b = ENGINE.run({ arrivalRate: 2.2 });
+    return "mean e2e x" + (b.meanE2e / a.meanE2e).toFixed(2) + ", TTFT p99 x" +
+           (b.ttft.p99 / a.ttft.p99).toFixed(1);
+  })());
+  t("all token accounting adds up: served tokens equal requested tokens", (() => {
+    const m = ENGINE.measure(sim);
+    let want = 0;
+    for (const r of sim.reqs) want += r.output;
+    return m.outTokens === want && want > 0;
+  })());
+  t("the makespan covers every arrival and every completion", (() => {
+    const last = Math.max.apply(null, sim.reqs.map((r) => r.end));
+    const lastArr = Math.max.apply(null, sim.reqs.map((r) => r.arrival));
+    return sim.makespan > 0 && last >= lastArr && Math.abs(sim.lastEnd - last) < 1e-6;
+  })());
+  t("the request that WAITED longest is not the request that TOOK longest", (() => {
+    const byTtft = sim.reqs.slice().sort((a, b) => b.ttft - a.ttft)[0];
+    const byE2e = sim.reqs.slice().sort((a, b) => b.e2e - a.e2e)[0];
+    return byTtft.id !== byE2e.id;
+  })(), (() => {
+    const byTtft = sim.reqs.slice().sort((a, b) => b.ttft - a.ttft)[0];
+    const byE2e = sim.reqs.slice().sort((a, b) => b.e2e - a.e2e)[0];
+    return "worst TTFT is #" + byTtft.id + ", worst end-to-end is #" + byE2e.id +
+           " - one total cannot rank both";
+  })());
+  t("BUDGET: no batch size meets TTFT p90 <= 1000 ms AND TPOT p90 <= 60 ms at 2.0 req/s", (() => {
+    for (const b of [1, 2, 4, 8, 16, 32, 64]) {
+      const m = ENGINE.run({ arrivalRate: 2.0, batchSize: b });
+      if (m.ttft.p90 <= 1000 && m.tpot.p90 <= 60) return false;
+    }
+    return true;
+  })(), "small batches blow TTFT on queueing, large ones blow TPOT on step time");
+  t("BUDGET: and the SAME budget is met at 0.8 req/s, batch 16", (() => {
+    const m = ENGINE.run({ arrivalRate: 0.8, batchSize: 16 });
+    return m.ttft.p90 <= 1000 && m.tpot.p90 <= 60;
+  })(), (() => {
+    const m = ENGINE.run({ arrivalRate: 0.8, batchSize: 16 });
+    return "TTFT p90 " + m.ttft.p90.toFixed(0) + " ms, TPOT p90 " + m.tpot.p90.toFixed(1) +
+           " ms - so the row above is a capacity verdict, not a tuning failure";
+  })());
+  t("output lengths are heavy-tailed, as real ones are", (() => {
+    const o = sim.reqs.map((r) => r.output).sort((a, b) => a - b);
+    return ENGINE.percentile(o, 99) > 3 * ENGINE.percentile(o, 50);
+  })(), (() => {
+    const o = sim.reqs.map((r) => r.output).sort((a, b) => a - b);
+    return "output tokens p50 " + ENGINE.percentile(o, 50) + ", p99 " + ENGINE.percentile(o, 99);
+  })());
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero &middot; Day 79 &mdash; Embedding drift</title>
+<style>
+  :root { --ink:#0f172a; --sub:#475569; --line:#e2e8f0; --bg:#f8fafc; --accent:#0369a1; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Inter",system-ui,sans-serif; margin:0; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:1152px; margin:0 auto; padding:16px; }
+  @media (min-width:768px){ .wrap { padding:24px; } }
+  header { background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
+  .kicker { font-size:12px; font-weight:800; letter-spacing:.16em; color:var(--accent); margin:0 0 8px; }
+  h1 { font-size:19px; line-height:1.5; font-weight:900; margin:0 0 12px; }
+  @media (min-width:768px){ h1 { font-size:22px; } }
+  h2 { font-size:24px; font-weight:900; margin:0 0 8px; }
+  h3 { font-size:19px; font-weight:800; margin:20px 0 6px; }
+  p { line-height:1.6; margin:0 0 12px; }
+  .tabs { display:flex; gap:8px; flex-wrap:wrap; }
+  .tabs button { font:inherit; font-size:14px; font-weight:600; padding:8px 20px; border:0; border-radius:8px; background:#f1f5f9; cursor:pointer; }
+  .tabs button.tab-active { background:#0f172a; color:#fff; }
+  .hidden { display:none; }
+  .card { background:#fff; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,.12); padding:20px; min-width:0; }
+  .stack > * + * { margin-top:20px; }
+  .grid2 { display:grid; gap:20px; grid-template-columns:minmax(0,1fr); }
+  .grid3 { display:grid; gap:16px; grid-template-columns:minmax(0,1fr); }
+  .grid4 { display:grid; gap:16px; grid-template-columns:minmax(0,1fr); }
+  @media (min-width:900px){ .grid2 { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } }
+  @media (min-width:768px){ .grid3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+                            .grid4 { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+  .lbl { font-size:12px; font-weight:800; letter-spacing:.1em; color:#64748b; margin:0 0 8px; }
+  .big { font-size:24px; font-weight:900; font-variant-numeric:tabular-nums; margin:0; }
+  .note { font-size:12.5px; color:#475569; margin:8px 0 0; line-height:1.55; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:11.5px; overflow-x:auto; line-height:1.35; margin:0; white-space:pre; }
+  code { background:#f1f5f9; padding:1px 4px; border-radius:4px; font-size:.92em; }
+  .tblwrap { overflow-x:auto; }
+  table.num { border-collapse:collapse; width:100%; min-width:520px; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid var(--line); }
+  table.num tr.here td { background:#eef2ff; font-weight:700; }
+  table.num tr.dim td { color:#94a3b8; }
+  table.num td.txt { text-align:left; font-size:11.5px; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:99px; font-size:11px; font-weight:800; }
+  .good { background:#dcfce7; color:#166534; }
+  .stop { background:#fef3c7; color:#92400e; }
+  .bad { background:#fee2e2; color:#991b1b; }
+  .ok { color:#166534; font-weight:800; }
+  .warn { color:#991b1b; font-weight:800; }
+  select, input[type=range], input[type=text] { border:1px solid #cbd5e1; border-radius:8px; padding:7px 10px; font:inherit; font-size:13px; width:100%; margin-top:4px; background:#fff; }
+  input[type=range] { padding:0; }
+  label.f { font-size:13px; display:block; }
+  .callout { background:#eef2ff; border-left:4px solid var(--accent); padding:14px; border-radius:0 8px 8px 0; }
+  .callout p { font-size:13.5px; margin:0; }
+  a { color:var(--accent); }
+  .prose { max-width:760px; margin:0 auto; }
+  .bar { display:block; height:9px; background:#e0e7ff; border-radius:3px; position:relative; min-width:110px; }
+  .bar i { position:absolute; top:0; left:0; height:9px; background:var(--accent); border-radius:3px; }
+  .sc { font-size:12.5px; line-height:1.6; }
+  .sc div { display:flex; gap:8px; align-items:baseline; }
+  .sc .m { color:#94a3b8; font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">AIFROMZERO &middot; DAY 79</p>
+    <h1>
+      &#129513; Embedding drift &mdash; the provider ships v2, or someone changes the tokenizer, and the
+      index is still there, still returning five results, still with plausible scores.
+      <strong>Nothing here calls an embedding API and nothing is a black box</strong>: the embedder is a
+      hashed bag-of-tokens implemented in full &mdash; FNV-1a with a stated seed, the signed hashing
+      trick, optional idf, L2 normalisation, cosine &mdash; so a &ldquo;version&rdquo; is a concrete
+      configuration and a version change is one people actually make. The corpus is synthetic and
+      declared, 12 topics &times; 10 documents, so every retrieval can be scored for
+      <strong>correctness</strong> rather than only for agreement with an earlier run. Healthy
+      precision@5 is <strong>0.9417</strong>; chance is <strong>0.0833</strong>. &#128308;
+      <strong>The version changes your vector store can catch are the ones that barely matter, and the
+      ones it cannot catch are the ones that destroy retrieval.</strong> Change the width and the vector
+      is the wrong shape, so a typed index rejects it outright &mdash; and even if it did not, precision
+      only falls to 0.7750. Change the hash seed or the tokenizer and the width is
+      <em>identical</em>, nothing rejects anything, and precision falls to <strong>0.0917</strong>,
+      <strong>0.1000</strong> and <strong>0.0333</strong> &mdash; at or below chance. &#128308;
+      <strong>Re-embed only the new documents and they become nearly invisible</strong>: the 60 freshly
+      embedded ones take <strong>21.67%</strong> of the top-5 slots where a single-version index gives
+      them 52.50%. &#128308; And the alarm you would rely on is the wrong shape too &mdash; on that
+      half-migrated index the mean top-1 cosine falls <strong>29.8%</strong> while precision falls
+      <strong>50.4%</strong>, so a score threshold set to catch the total failure sails straight past the
+      partial one, which is the one that actually happens.
+    </h1>
+
+    <div class="tabs">
+      <button id="tabLook" class="tab-active" onclick="showTab('look')">&#128065; LOOK</button>
+      <button id="tabUnd" onclick="showTab('und')">&#129504; UNDERSTAND</button>
+      <button id="tabBuild" onclick="showTab('build')">&#128296; BUILD</button>
+    </div>
+  </div>
+</header>
+
+<main id="look" class="wrap stack">
+  <div class="callout">
+    <p>
+      <strong>The vectors carry no version tag.</strong> An index is an array of numbers; a query is an
+      array of numbers; cosine is happy to compare any two of the same length. There is no place in that
+      path where a mismatch can be detected, and that is the whole subject of this page &mdash; not that
+      re-embedding is hard, but that <em>not</em> re-embedding is silent.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>One query, two embedders</h2>
+    <div class="grid2" style="margin:12px 0">
+      <label class="f">Query
+        <select id="qSel"></select>
+      </label>
+      <label class="f">The query&rsquo;s embedder version
+        <select id="vSel"></select>
+      </label>
+    </div>
+    <p class="note" style="margin-top:0" id="qNote"></p>
+    <div class="tblwrap"><table class="num" id="tQuery"></table></div>
+    <p class="note">
+      The index is always the same one, built once with the base version. Only the embedder that turns
+      the question into a vector changes. Where a row is marked wrong, the retrieval returned a document
+      about a different topic entirely &mdash; with a score, and with no error.
+    </p>
+  </div>
+
+  <div class="grid4">
+    <div class="card"><p class="lbl">HEALTHY PRECISION@5</p><p class="big ok" id="kBase">&mdash;</p>
+      <p class="note">chance is <span id="kChance"></span></p></div>
+    <div class="card"><p class="lbl">WORST SILENT MISMATCH</p><p class="big bad" id="kSilent">&mdash;</p>
+      <p class="note" id="kSilentNote"></p></div>
+    <div class="card"><p class="lbl">NEW DOCS&rsquo; SHARE OF TOP-5, HALF-MIGRATED</p><p class="big bad" id="kSplit">&mdash;</p>
+      <p class="note" id="kSplitNote"></p></div>
+    <div class="card"><p class="lbl">SCORE DIP vs PRECISION LOSS THERE</p><p class="big warn" id="kScore" style="font-size:16px">&mdash;</p>
+      <p class="note">what a threshold would see</p></div>
+  </div>
+</main>
+
+<main id="und" class="wrap stack hidden">
+  <div class="card">
+    <h3 style="margin-top:0">1. The detectable failures are the mild ones</h3>
+    <div class="tblwrap"><table class="num" id="tVar"></table></div>
+    <p class="note">
+      &#128308; Sort this table by damage and you get almost exactly the reverse of sorting it by
+      detectability. A width change produces a vector of the wrong length, which any typed vector store
+      refuses before the query runs &mdash; and it is the <em>least</em> harmful of the changes here. A
+      seed or tokenizer change produces a vector of exactly the right length, full of plausible floats,
+      which nothing anywhere will object to &mdash; and it takes retrieval to chance. The 3-gram row
+      lands at <strong>0.0333</strong>, which is <em>below</em> the 0.0833 you would get by returning
+      five documents at random.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">2. Re-embedding only the new documents</h3>
+    <div class="tblwrap"><table class="num" id="tSplit"></table></div>
+    <p class="note">
+      &#128308; This is the version of the mistake that actually gets made: the migration script runs on
+      new ingests and nobody backfills. Half the index is in one space, half in another, and the query
+      can only be in one of them. The documents that do not match the query&rsquo;s version are not
+      wrong, they are <strong>unreachable</strong> &mdash; they take 21.67% of the slots where an
+      even-handed index gives them 52.50%. The failure has no error message and no empty result set: the
+      system returns five documents every time, drawn from the half that happens to still line up.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">3. The score is a weak alarm, and weakest where it matters</h3>
+    <div class="tblwrap"><table class="num" id="tScore"></table></div>
+    <p class="note">
+      The obvious monitor is the similarity score, and on a <em>total</em> mismatch it does move: mean
+      top-1 cosine falls from 0.5689 to about 0.23. So a threshold would catch the case where somebody
+      swapped the embedder wholesale. &#128308; On the half-migrated index it falls only to
+      <strong>0.3992</strong> &mdash; a <strong>29.8%</strong> dip &mdash; while precision falls
+      <strong>50.4%</strong>. Every query still has a well-matched document somewhere in the half that
+      lines up, so the top score stays respectable while half the corpus has quietly left the building.
+      A threshold tuned on the loud failure will not fire on the quiet one.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">4. Even the correct migration moves your answers</h3>
+    <div class="tblwrap"><table class="num" id="tOverlap"></table></div>
+    <p class="note">
+      Re-embedding everything is the right fix and it works: precision comes back to 0.858&ndash;0.958,
+      in one case slightly <em>above</em> the original. But the top-5 overlap with the old index runs
+      from <strong>0.933</strong> down to <strong>0.725</strong>, so between <strong>6.7% and 27.5%</strong>
+      of the retrieved documents are different afterwards &mdash; least for the idf change, most for
+      switching tokenizer. Nothing is broken. It is simply that any prompt, cache, evaluation set or
+      human sign-off that was pinned to the old results is now pinned to results that no longer come
+      back &mdash; and unlike the failures above, this one happens on the day you do everything right.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">What this covers, and what it does not</h3>
+    <p class="note" style="margin-top:0">
+      The embedder is a <strong>hashed bag-of-tokens, not a neural model</strong>. That matters for how
+      you read the rows: a hash-seed change produces two <em>unrelated</em> spaces, which is the extreme
+      case and an upper bound, not a prediction for what v1&rarr;v2 of a trained model does &mdash; two
+      versions of a real model usually stay far closer than that. The tokenizer rows are the better
+      analogue, and they are nearly as bad. Nothing here models <strong>semantic</strong> drift: there is
+      no meaning in this corpus beyond term overlap, so this page says nothing about a v2 that is simply
+      better at understanding a question. The corpus is synthetic, 120 documents with one topic each,
+      24 queries, top-5, plain cosine, no chunking, no reranker, no hybrid keyword leg &mdash; each of
+      which would change the numbers. The claim is narrow and it is about plumbing: a vector index cannot
+      tell you which embedder produced it, and every consequence above follows from that.
+    </p>
+  </div>
+</main>
+
+<main id="build" class="wrap stack hidden">
+  <div class="card prose">
+    <h2>How it works</h2>
+    <pre>// the signed hashing trick - a real embedder, ~15 lines
+const h    = fnv1a(token, cfg.seed);
+const slot = h % cfg.dim;
+const sign = (h &gt;&gt;&gt; 31) &amp; 1 ? -1 : 1;
+v[slot] += sign * weight;
+
+// and the line that has nowhere to fail
+const qv = embed(query.text, queryCfg, queryIdf);   // queryCfg need not match
+scored = index.vecs.map((v, i) =&gt; ({ i, score: cosine(qv, v) }));</pre>
+    <h3>Self-check</h3>
+    <p class="note">
+      Runs on load. The controls carry the argument: &ldquo;a mismatch destroys retrieval&rdquo; means
+      nothing unless the <em>matched</em> case is checked to work, unless the same-version row is checked
+      to be bit-identical, and unless the chance baseline is computed rather than asserted.
+    </p>
+    <div class="sc" id="selfcheck"></div>
+    <p style="margin-top:20px"><a href="../../aifromzero.php">&larr; AIFromZero</a></p>
+  </div>
+</main>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// ---------------------------------------------------------------------------
+// Embedding drift: what actually happens when the embedder version moves.
+//
+// A RAG index is a pile of vectors produced by one specific embedder. Then the
+// provider ships v2, or someone changes the tokenizer, or the dimension, or a
+// hash seed - and the index is still there, still returning five results, still
+// with plausible scores.
+//
+// Nothing here calls an embedding API and nothing is a black box. The embedder
+// is a HASHED BAG-OF-TOKENS - a real, standard, dependency-free scheme - and it
+// is implemented in full: FNV-1a with a stated seed, the signed hashing trick,
+// optional idf, L2 normalisation, cosine similarity. A "version" is a concrete
+// configuration of that embedder, so a version change here is a change people
+// actually make: a different tokenizer, a different width, a different seed.
+//
+// The corpus is SYNTHETIC and declared: 12 topics x 8 characteristic terms,
+// 10 documents each, built deterministically from Park-Miller. Because the
+// topic of every document is known by construction, retrieval can be scored for
+// CORRECTNESS and not only for agreement with an earlier run.
+//
+// DOM-free, clock-free, Math.random-free.
+// ---------------------------------------------------------------------------
+
+function Rng(seed) {
+  let s = seed % 2147483647;
+  if (s <= 0) s += 2147483646;
+  this.nextInt = () => (s = (s * 16807) % 2147483647);
+  this.below = (n) => Math.floor((this.nextInt() * n) / 2147483648);
+}
+
+// ------------------------------------------------------------- the vocabulary
+const TOPICS = [
+  ["invoice", "billing", "payment", "receipt", "refund", "charge", "ledger", "settle"],
+  ["shipment", "freight", "carrier", "pallet", "consign", "tracking", "customs", "manifest"],
+  ["kernel", "driver", "syscall", "interrupt", "scheduler", "paging", "kmalloc", "preempt"],
+  ["antibody", "protein", "enzyme", "receptor", "peptide", "assay", "binding", "residue"],
+  ["mortgage", "collateral", "amortise", "escrow", "lien", "appraisal", "principal", "arrears"],
+  ["turbine", "rotor", "torque", "gearbox", "bearing", "nacelle", "yaw", "vibration"],
+  ["sonnet", "stanza", "metaphor", "iambic", "verse", "elegy", "couplet", "prosody"],
+  ["glacier", "moraine", "crevasse", "ablation", "firn", "calving", "albedo", "sediment"],
+  ["compiler", "parser", "bytecode", "register", "inline", "closure", "linker", "optimiser"],
+  ["vaccine", "cohort", "placebo", "efficacy", "adverse", "titre", "booster", "arm"],
+  ["harvest", "irrigate", "topsoil", "fallow", "pollinate", "cultivar", "silage", "furrow"],
+  ["latency", "throughput", "shard", "replica", "quorum", "backoff", "cache", "eviction"],
+];
+const FILLER = ["the", "and", "with", "from", "this", "that", "under", "after", "into",
+                "over", "each", "when", "before", "while", "about", "against"];
+const DOCS_PER_TOPIC = 10;
+const QUERIES_PER_TOPIC = 2;
+const TOPK = 5;
+
+function buildCorpus(seed) {
+  const r = new Rng(seed);
+  const docs = [];
+  TOPICS.forEach((terms, ti) => {
+    for (let d = 0; d < DOCS_PER_TOPIC; d++) {
+      const toks = [];
+      for (let i = 0; i < 6; i++) toks.push(terms[r.below(terms.length)]);
+      for (let i = 0; i < 4; i++) toks.push(FILLER[r.below(FILLER.length)]);
+      // a deterministic shuffle so topic terms are not always first
+      for (let i = toks.length - 1; i > 0; i--) {
+        const j = r.below(i + 1); const t = toks[i]; toks[i] = toks[j]; toks[j] = t;
+      }
+      docs.push({ id: docs.length, topic: ti, text: toks.join(" ") });
+    }
+  });
+  const queries = [];
+  TOPICS.forEach((terms, ti) => {
+    for (let q = 0; q < QUERIES_PER_TOPIC; q++) {
+      const toks = [];
+      for (let i = 0; i < 3; i++) toks.push(terms[r.below(terms.length)]);
+      queries.push({ id: queries.length, topic: ti, text: toks.join(" ") });
+    }
+  });
+  return { docs, queries };
+}
+
+// ------------------------------------------------------------- the embedder
+// FNV-1a, seeded. The seed is what a provider silently changes between model
+// versions; nothing about the output announces which seed produced it.
+function fnv1a(str, seed) {
+  let h = (2166136261 ^ seed) >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
+function tokenize(text, kind) {
+  if (kind === "word") return text.split(" ").filter(Boolean);
+  const n = kind === "char3" ? 3 : 4;
+  const s = " " + text.replace(/\s+/g, " ") + " ";
+  const out = [];
+  for (let i = 0; i + n <= s.length; i++) out.push(s.slice(i, i + n));
+  return out;
+}
+
+// A configuration IS a version. Every field is something a real upgrade moves.
+function cfg(tok, dim, seed, idf) { return { tok, dim, seed, idf, key: `${tok}/${dim}/s${seed}/${idf ? "idf" : "raw"}` }; }
+
+function idfTable(docs, c) {
+  const df = new Map();
+  for (const d of docs) {
+    for (const t of new Set(tokenize(d.text, c.tok))) df.set(t, (df.get(t) || 0) + 1);
+  }
+  return { df, N: docs.length };
+}
+
+function embed(text, c, idf) {
+  const v = new Float64Array(c.dim);
+  for (const t of tokenize(text, c.tok)) {
+    const h = fnv1a(t, c.seed);
+    const slot = h % c.dim;
+    const sign = (h >>> 31) & 1 ? -1 : 1;      // the signed hashing trick
+    let w = 1;
+    if (c.idf && idf) {
+      const d = idf.df.get(t) || 0;
+      w = Math.log((idf.N + 1) / (d + 1)) + 1;
+    }
+    v[slot] += sign * w;
+  }
+  let n = 0;
+  for (let i = 0; i < c.dim; i++) n += v[i] * v[i];
+  n = Math.sqrt(n);
+  if (n > 0) for (let i = 0; i < c.dim; i++) v[i] /= n;
+  return v;
+}
+
+function cosine(a, b) {
+  const n = Math.min(a.length, b.length);
+  let s = 0;
+  for (let i = 0; i < n; i++) s += a[i] * b[i];
+  return s;
+}
+
+// ------------------------------------------------------------- an index
+// `docCfg` embedded the documents; `queryCfg` embeds the question. In a healthy
+// system they are the same object. Nothing in the retrieval path checks that.
+function buildIndex(corpus, c) {
+  const idf = c.idf ? idfTable(corpus.docs, c) : null;
+  return { c, idf, vecs: corpus.docs.map((d) => embed(d.text, c, idf)) };
+}
+
+function retrieve(index, corpus, query, queryCfg, queryIdf, k) {
+  // the query is embedded with whatever config the CALLER passes - the index
+  // has no way to object, because the vectors carry no version tag
+  const qv = embed(query.text, queryCfg, queryIdf === undefined ? index.idf : queryIdf);
+  const scored = index.vecs.map((v, i) => ({ i, score: cosine(qv, v), topic: corpus.docs[i].topic }));
+  scored.sort((a, b) => (b.score - a.score) || (a.i - b.i));
+  return scored.slice(0, k === undefined ? TOPK : k);
+}
+
+function evaluate(corpus, index, queryCfg, queryIdf) {
+  let hits = 0, total = 0, scoreSum = 0, top1 = 0;
+  const perQuery = [];
+  for (const q of corpus.queries) {
+    const res = retrieve(index, corpus, q, queryCfg, queryIdf);
+    const good = res.filter((r) => r.topic === q.topic).length;
+    hits += good; total += res.length;
+    scoreSum += res.reduce((s, r) => s + r.score, 0) / res.length;
+    top1 += res[0].score;
+    perQuery.push({ q: q.id, topic: q.topic, good, ids: res.map((r) => r.i), scores: res.map((r) => r.score) });
+  }
+  return {
+    precision: hits / total,
+    meanScore: scoreSum / corpus.queries.length,
+    meanTop1: top1 / corpus.queries.length,
+    perQuery,
+  };
+}
+
+const overlap = (a, b) => {
+  const s = new Set(a);
+  return b.filter((x) => s.has(x)).length / Math.max(1, b.length);
+};
+
+// ---------------------------------------------------------------- the report
+const BASE = cfg("char4", 128, 1, false);
+const VARIANTS = [
+  { label: "same version (control)", c: BASE, why: "nothing changed" },
+  { label: "width 128 &rarr; 256", c: cfg("char4", 256, 1, false), why: "a strictly bigger index" },
+  { label: "width 128 &rarr; 64", c: cfg("char4", 64, 1, false), why: "a smaller one" },
+  { label: "hash seed 1 &rarr; 2", c: cfg("char4", 128, 2, false), why: "invisible from the outside" },
+  { label: "4-grams &rarr; 3-grams", c: cfg("char3", 128, 1, false), why: "a tokenizer tweak" },
+  { label: "4-grams &rarr; words", c: cfg("word", 128, 1, false), why: "a different tokenizer entirely" },
+  { label: "idf weighting on", c: cfg("char4", 128, 1, true), why: "a scoring improvement" },
+];
+
+function report() {
+  const corpus = buildCorpus(20260908);
+  const baseIdx = buildIndex(corpus, BASE);
+  const baseEval = evaluate(corpus, baseIdx, BASE);
+
+  const rows = VARIANTS.map((v) => {
+    // (a) the honest upgrade: re-embed everything with the new version
+    const newIdx = buildIndex(corpus, v.c);
+    const reindexed = evaluate(corpus, newIdx, v.c, newIdx.idf);
+    // (b) the mistake: index still on the old version, queries on the new one.
+    // The new embedder brings its own idf table - it does not borrow the old
+    // index's - so this is the whole v2 embedder pointed at a v1 index.
+    const mismatched = evaluate(corpus, baseIdx, v.c, newIdx.idf);
+    // how much of the answer changed
+    const ovReindex = corpus.queries.map((q, i) =>
+      overlap(baseEval.perQuery[i].ids, reindexed.perQuery[i].ids));
+    const ovMismatch = corpus.queries.map((q, i) =>
+      overlap(baseEval.perQuery[i].ids, mismatched.perQuery[i].ids));
+    const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+    return {
+      label: v.label, why: v.why, key: v.c.key,
+      // a typed vector store rejects a wrong-width vector before it ever runs;
+      // it has no way at all to notice a wrong seed or a wrong tokenizer
+      dimOk: v.c.dim === BASE.dim,
+      reindexed, mismatched,
+      overlapReindex: mean(ovReindex),
+      overlapMismatch: mean(ovMismatch),
+    };
+  });
+
+  return { corpus, baseIdx, baseEval, rows, base: BASE, variants: VARIANTS, topk: TOPK, split: splitIndex(corpus) };
+}
+
+// ------------------------------------------------- the half-migrated index
+// The most common way this actually happens: someone re-embeds the NEW
+// documents with v2 and leaves the old ones alone. Half the index is in one
+// space and half in another, and the query can only match one of them.
+function splitIndex(corpus) {
+  const v1 = BASE, v2 = cfg("char4", 128, 2, false);
+  const half = Math.floor(corpus.docs.length / 2);
+  const vecs = corpus.docs.map((d, i) => embed(d.text, i < half ? v1 : v2, null));
+  const idx = { c: v1, idf: null, vecs };
+  let oldSlots = 0, newSlots = 0, hits = 0, total = 0, top1 = 0;
+  for (const q of corpus.queries) {
+    const res = retrieve(idx, corpus, q, v1, null);
+    for (const r of res) { if (r.i < half) oldSlots++; else newSlots++; }
+    hits += res.filter((r) => r.topic === q.topic).length;
+    total += res.length;
+    top1 += res[0].score;
+  }
+  // the fair baseline: with a single-version index, how many top-5 slots come
+  // from the first half? Anything far from that is the version talking.
+  const fair = buildIndex(corpus, v1);
+  let fairOld = 0, fairNew = 0, fairTop1 = 0;
+  for (const q of corpus.queries) {
+    const res = retrieve(fair, corpus, q, v1, null);
+    for (const r of res) { if (r.i < half) fairOld++; else fairNew++; }
+    fairTop1 += res[0].score;
+  }
+  return {
+    half, oldSlots, newSlots, slots: oldSlots + newSlots,
+    oldShare: oldSlots / (oldSlots + newSlots),
+    fairOldShare: fairOld / (fairOld + fairNew),
+    precision: hits / total,
+    // the label-free signal: what a score monitor would see
+    meanTop1: top1 / corpus.queries.length,
+    fairMeanTop1: fairTop1 / corpus.queries.length,
+  };
+}
+
+const ENGINE = {
+  Rng, TOPICS, FILLER, TOPK, DOCS_PER_TOPIC, QUERIES_PER_TOPIC,
+  buildCorpus, fnv1a, tokenize, cfg, idfTable, embed, cosine,
+  buildIndex, retrieve, evaluate, overlap, splitIndex,
+  BASE, VARIANTS, report,
+};
+if (typeof module !== "undefined" && module.exports) module.exports = ENGINE;
+
+// ===== ENGINE:END =====
+</script>
+
+<script>
+function showTab(name) {
+  for (const t of ["look", "und", "build"]) document.getElementById(t).classList.toggle("hidden", t !== name);
+  document.getElementById("tabLook").classList.toggle("tab-active", name === "look");
+  document.getElementById("tabUnd").classList.toggle("tab-active", name === "und");
+  document.getElementById("tabBuild").classList.toggle("tab-active", name === "build");
+}
+const el = (id) => document.getElementById(id);
+function table(id, head, rows) {
+  el(id).innerHTML =
+    "<tr>" + head.map((h) => "<th>" + h + "</th>").join("") + "</tr>" +
+    rows.map((r) => "<tr" + (r.cls ? ' class="' + r.cls + '"' : "") + ">" +
+      r.cells.map((c, i) => "<td" + (i === 0 ? ' class="txt"' : "") + ">" + c + "</td>").join("") + "</tr>").join("");
+}
+function selfCheckPanel(fn) {
+  const out = []; let n = 0, bad = 0;
+  const t = (label, cond, detail = "") => {
+    n += 1; if (!cond) bad += 1;
+    out.push('<div><span class="' + (cond ? "ok" : "warn") + '">' + (cond ? "PASS" : "FAIL") +
+      '</span><span>' + label + '</span><span class="m">' + detail + "</span></div>");
+  };
+  fn(t);
+  el("selfcheck").innerHTML =
+    '<p class="note" style="margin:0 0 8px"><b class="' + (bad ? "warn" : "ok") + '">' +
+    (n - bad) + " of " + n + " checks pass</b>" + (bad ? " &mdash; " + bad + " FAILED" : "") + ".</p>" + out.join("");
+}
+
+const R = ENGINE.report();
+const C = R.corpus;
+const CHANCE = 1 / ENGINE.TOPICS.length;
+const f4 = (v) => v.toFixed(4);
+const pc = (v) => (v * 100).toFixed(2) + "%";
+const topicName = (t) => ENGINE.TOPICS[t][0] + "&hellip;";
+
+el("kBase").textContent = f4(R.baseEval.precision);
+el("kChance").innerHTML = "<b>" + f4(CHANCE) + "</b>";
+
+const silent = R.rows.filter((r) => r.dimOk && r.label !== "same version (control)" &&
+                                    r.mismatched.precision < 0.5);
+const worst = silent.slice().sort((a, b) => a.mismatched.precision - b.mismatched.precision)[0];
+el("kSilent").textContent = f4(worst.mismatched.precision);
+el("kSilentNote").innerHTML = worst.label + " &mdash; same width, nothing rejects it";
+
+const S = R.split;
+el("kSplit").textContent = pc(1 - S.oldShare);
+el("kSplitNote").innerHTML = "an even-handed index gives them <b>" + pc(1 - S.fairOldShare) + "</b>";
+const scoreDrop = 1 - S.meanTop1 / S.fairMeanTop1;
+const precDrop = 1 - S.precision / R.baseEval.precision;
+el("kScore").innerHTML = "&minus;" + (scoreDrop * 100).toFixed(1) + "% vs &minus;" +
+  (precDrop * 100).toFixed(1) + "%";
+
+// ------------------------------------------------------------ the explorer
+el("qSel").innerHTML = C.queries.map((q, i) =>
+  '<option value="' + i + '">' + q.text + "</option>").join("");
+el("vSel").innerHTML = R.variants.map((v, i) =>
+  '<option value="' + i + '"' + (i === 3 ? " selected" : "") + ">" +
+  v.label.replace(/&rarr;/g, "->").replace(/&[a-z]+;/g, "") + "</option>").join("");
+
+function renderQuery() {
+  const qi = parseInt(el("qSel").value, 10), vi = parseInt(el("vSel").value, 10);
+  const q = C.queries[qi], v = R.variants[vi];
+  const newIdx = ENGINE.buildIndex(C, v.c);
+  const res = ENGINE.retrieve(R.baseIdx, C, q, v.c, newIdx.idf);
+  const good = res.filter((r) => r.topic === q.topic).length;
+  el("qNote").innerHTML =
+    "The index was built with <code>" + R.base.key + "</code>. This query is embedded with <code>" +
+    v.c.key + "</code>. <b>" + good + " of " + res.length + "</b> results are on the right topic" +
+    (v.c.dim === R.base.dim ? " &mdash; and the two vectors are the same width, so nothing in the stack objects."
+      : ' &mdash; and this one is the <span class="ok">easy case</span>: the widths differ, so a typed vector store refuses the query outright.');
+  table("tQuery", ["rank", "score", "document", "its topic", ""],
+    res.map((r, i) => ({
+      cls: r.topic !== q.topic ? "here" : "",
+      cells: [i + 1, f4(r.score), "<code>" + C.docs[r.i].text + "</code>",
+        topicName(r.topic),
+        r.topic === q.topic ? '<span class="pill good">on topic</span>'
+                            : '<span class="pill bad">wrong</span>'],
+    })));
+}
+renderQuery();
+el("qSel").addEventListener("change", renderQuery);
+el("vSel").addEventListener("change", renderQuery);
+
+// ------------------------------------------------------------- the tables
+table("tVar", ["version change", "does a typed store catch it?", "precision@5 after a full re-index",
+               "precision@5 if only the query moves", "vs chance"],
+  R.rows.map((r) => ({
+    cls: r.dimOk && r.mismatched.precision < 0.15 ? "here" : "",
+    cells: [r.label + ' <span class="note">' + r.why + "</span>",
+      r.dimOk ? '<span class="pill bad">no &mdash; same width</span>'
+              : '<span class="pill good">yes &mdash; wrong width</span>',
+      f4(r.reindexed.precision),
+      '<b class="' + (r.mismatched.precision < 0.15 ? "bad" : r.mismatched.precision < 0.85 ? "warn" : "ok") + '">' +
+        f4(r.mismatched.precision) + "</b>",
+      r.mismatched.precision <= CHANCE ? '<span class="bad">at or below chance</span>'
+        : (r.mismatched.precision / CHANCE).toFixed(1) + "×"],
+  })));
+
+table("tSplit", ["", "half-migrated index", "single-version index", "difference"],
+  [["documents embedded with the NEW version", pc(1 - S.oldShare), pc(1 - S.fairOldShare),
+    "&minus;" + ((S.fairOldShare - S.oldShare) * 100).toFixed(2) + " points of top-5"],
+   ["precision@5", f4(S.precision), f4(R.baseEval.precision),
+    "&minus;" + (precDrop * 100).toFixed(1) + "%"],
+   ["mean top-1 cosine", f4(S.meanTop1), f4(S.fairMeanTop1),
+    "&minus;" + (scoreDrop * 100).toFixed(1) + "%"],
+   ["queries that returned five documents", "24 of 24", "24 of 24", "none"]]
+    .map((cells, i) => ({ cls: i === 0 ? "here" : "", cells })));
+
+table("tScore", ["situation", "precision@5", "mean top-1 cosine", "what a score threshold sees"],
+  [{ cls: "", cells: ["healthy", f4(R.baseEval.precision), f4(R.baseEval.meanTop1), "&mdash;"] }]
+    .concat(silent.map((r) => ({
+      cells: ["total mismatch: " + r.label, f4(r.mismatched.precision), f4(r.mismatched.meanTop1),
+        '<span class="ok">a ' + ((1 - r.mismatched.meanTop1 / R.baseEval.meanTop1) * 100).toFixed(0) +
+        "% drop &mdash; catchable</span>"],
+    })))
+    .concat([{ cls: "here", cells: ["half-migrated index", f4(S.precision), f4(S.meanTop1),
+      '<span class="bad">only a ' + (scoreDrop * 100).toFixed(1) + "% drop &mdash; missed</span>"] }]));
+
+table("tOverlap", ["version change", "precision@5 before", "precision@5 after a correct re-index",
+                   "top-5 overlap with the old answers", "answers that changed"],
+  R.rows.filter((r) => r.label !== "same version (control)").map((r) => ({
+    cls: r.overlapReindex < 0.76 ? "here" : "",
+    cells: [r.label, f4(R.baseEval.precision), f4(r.reindexed.precision),
+      f4(r.overlapReindex),
+      '<b class="warn">' + ((1 - r.overlapReindex) * 100).toFixed(1) + "%</b>"],
+  })));
+
+selfCheckPanel((t) => {
+  const E = ENGINE;
+
+  // --- the corpus is what it says
+  t("120 documents in 12 topics", C.docs.length === 120 && new Set(C.docs.map((d) => d.topic)).size === 12);
+  t("ten documents per topic",
+    E.TOPICS.every((_, i) => C.docs.filter((d) => d.topic === i).length === 10));
+  t("24 queries, two per topic",
+    C.queries.length === 24 && E.TOPICS.every((_, i) => C.queries.filter((q) => q.topic === i).length === 2));
+  t("every document carries filler as well as topic terms", (() => {
+    const fill = new Set(E.FILLER);
+    return C.docs.every((d) => d.text.split(" ").some((w) => fill.has(w)));
+  })());
+  t("the corpus is reproducible from its seed",
+    E.buildCorpus(20260908).docs.map((d) => d.text).join("|") === C.docs.map((d) => d.text).join("|"));
+
+  // --- the embedder is a real one
+  t("the hash is deterministic", E.fnv1a("shipment", 1) === E.fnv1a("shipment", 1));
+  t("and the seed genuinely changes it", E.fnv1a("shipment", 1) !== E.fnv1a("shipment", 2));
+  t("vectors are L2-normalised", (() => {
+    const v = E.embed("invoice billing payment", R.base, null);
+    let n = 0; for (let i = 0; i < v.length; i++) n += v[i] * v[i];
+    return Math.abs(Math.sqrt(n) - 1) < 1e-12;
+  })());
+  t("a vector's self-similarity is exactly 1", (() => {
+    const v = E.embed("turbine rotor torque", R.base, null);
+    return Math.abs(E.cosine(v, v) - 1) < 1e-12;
+  })());
+  t("the signed trick really does produce negative components", (() => {
+    const v = E.embed(C.docs[0].text, R.base, null);
+    return Array.from(v).some((x) => x < 0);
+  })());
+  t("4-gram tokenisation of a 3-word phrase gives many more tokens than word tokenisation",
+    E.tokenize("invoice billing payment", "char4").length > 4 * E.tokenize("invoice billing payment", "word").length);
+
+  // --- CONTROLS: the matched case works, and works identically
+  t("CONTROL: matched retrieval is far above chance",
+    R.baseEval.precision > 0.9 && R.baseEval.precision > 10 * CHANCE,
+    f4(R.baseEval.precision) + " vs chance " + f4(CHANCE));
+  t("CONTROL: the same-version row is bit-identical, not merely close",
+    R.rows[0].overlapMismatch === 1 && R.rows[0].mismatched.precision === R.baseEval.precision);
+  t("CONTROL: the chance baseline is computed from the corpus, not asserted",
+    Math.abs(CHANCE - 1 / E.TOPICS.length) < 1e-15);
+
+  // --- the headline
+  t("every same-width mismatch collapses to at or near chance",
+    silent.every((r) => r.mismatched.precision < 2 * CHANCE),
+    silent.map((r) => f4(r.mismatched.precision)).join(" "));
+  t("one of them lands BELOW chance", silent.some((r) => r.mismatched.precision < CHANCE));
+  t("CONTROL: while the width changes - the ones a store rejects - stay well above it",
+    R.rows.filter((x) => !x.dimOk).every((x) => x.mismatched.precision > 6 * CHANCE),
+    R.rows.filter((x) => !x.dimOk).map((x) => f4(x.mismatched.precision)).join(" "));
+  t("so the detectable changes are the mild ones and the silent ones are the fatal ones",
+    Math.min(...R.rows.filter((x) => !x.dimOk).map((x) => x.mismatched.precision)) >
+    Math.max(...silent.map((x) => x.mismatched.precision)));
+
+  // --- the half-migrated index
+  t("half the documents are re-embedded", S.half === 60 && S.half * 2 === C.docs.length);
+  t("the new half is squeezed out of the results", 1 - S.oldShare < 0.25, pc(1 - S.oldShare));
+  t("CONTROL: an even-handed index gives them roughly half the slots",
+    Math.abs(1 - S.fairOldShare - 0.5) < 0.1, pc(1 - S.fairOldShare));
+  t("and every query still returned a full page of results",
+    S.slots === C.queries.length * E.TOPK, S.slots + " slots");
+
+  // --- the weak alarm
+  t("the score dip is smaller than the precision loss", scoreDrop < precDrop,
+    pc(scoreDrop) + " vs " + pc(precDrop));
+  t("CONTROL: on a TOTAL mismatch the score does drop enough to catch",
+    silent.every((r) => 1 - r.mismatched.meanTop1 / R.baseEval.meanTop1 > 0.5));
+
+  // --- the correct migration still moves answers
+  t("a correct re-index keeps precision high",
+    R.rows.every((r) => r.reindexed.precision > 0.85));
+  t("but changes between 6.7% and 27.5% of the retrieved documents", (() => {
+    const o = R.rows.filter((r) => r.label !== "same version (control)").map((r) => r.overlapReindex);
+    return Math.min(...o) > 0.72 && Math.min(...o) < 0.73 && Math.max(...o) > 0.93 && Math.max(...o) < 0.94;
+  })());
+  t("the smallest change is idf and the largest is the tokenizer", (() => {
+    const rows = R.rows.filter((r) => r.label !== "same version (control)");
+    const lo = rows.slice().sort((a, b) => a.overlapReindex - b.overlapReindex)[0];
+    const hi = rows.slice().sort((a, b) => b.overlapReindex - a.overlapReindex)[0];
+    return /words/.test(lo.label) && /idf/.test(hi.label);
+  })());
+
+  // --- determinism
+  t("a repeated report is identical",
+    ENGINE.report().baseEval.precision === R.baseEval.precision &&
+    ENGINE.report().split.oldShare === S.oldShare);
+});
+
+</script>
+</body>
+</html>

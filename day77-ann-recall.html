@@ -1,0 +1,1308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIFromZero &middot; Day 77 &mdash; Approximate nearest neighbour: the knob that fixes neither the bill nor the recall</title>
+<style>
+:root{
+  --bg:#f6f7fb; --card:#ffffff; --ink:#111327; --dim:#4a4c66; --line:#e2e3ef;
+  --accent:#4338ca; --accent-soft:#e8e7fd; --good:#046c4e; --bad:#b42318; --warn:#b45309;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55}
+header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.wrap{max-width:1100px;margin:0 auto;padding:18px 20px}
+.kicker{font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--accent);margin:0 0 8px}
+h1{font-size:20px;line-height:1.35;margin:0 0 10px;font-weight:800}
+h2{font-size:17px;margin:26px 0 10px;font-weight:800}
+h3{font-size:14px;margin:18px 0 6px;font-weight:700;color:var(--dim)}
+p{margin:0 0 12px}
+.lede{color:var(--dim);font-size:14px}
+.tabs{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 15px;font-size:13px;
+     font-weight:700;cursor:pointer;color:var(--dim)}
+.tab[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+main{max-width:1100px;margin:0 auto;padding:8px 20px 70px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+.scrollx{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;font-family:var(--mono)}
+th,td{border-bottom:1px solid var(--line);padding:6px 9px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{color:var(--dim);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+tr.win td{background:#ecfdf5}
+tr.ctrl td{background:#fef2f2}
+tr.mid td{background:#fffbeb}
+code,kbd{font-family:var(--mono);font-size:12.5px;background:#f1f1f9;border-radius:4px;padding:1px 5px}
+.big{font-size:26px;font-weight:800;font-family:var(--mono)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px}
+.stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:#fff}
+.stat .lab{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+.flag{border-left:4px solid var(--accent);background:var(--accent-soft);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+.flag.bad{border-color:var(--bad);background:#fef2f2}
+.flag.good{border-color:var(--good);background:#ecfdf5}
+.flag.warn{border-color:var(--warn);background:#fffbeb}
+.pill{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.pill.ok{background:#dcfce7;color:var(--good)}
+.pill.no{background:#fee2e2;color:var(--bad)}
+#selftest{position:fixed;right:14px;bottom:14px;background:#111327;color:#e8e7fd;font-family:var(--mono);
+  font-size:11.5px;padding:8px 12px;border-radius:8px;z-index:40;max-width:340px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+.panel[hidden]{display:none}
+.muted{color:var(--dim);font-size:13px}
+ul{margin:0 0 12px 18px;padding:0}
+li{margin:0 0 6px}
+input[type=number]{width:100%;font-family:var(--mono);font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:6px}
+button.go{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:8px 16px;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <p class="kicker">AIFROMZERO &middot; DAY 77</p>
+    <h1>&#127919; Approximate nearest neighbour &mdash; a vector database ships one knob for how hard to look, and <strong>it fixes neither the bill nor the recall</strong>. At the setting tuned to hit the recall target, the index spends <em>more</em> on the queries it was already answering perfectly and least on the ones it gets wrong.</h1>
+    <p class="lede">Same corpus, same index, same target, one query at a time. Nothing here simulates language: the engine simulates the <strong>partition</strong> &mdash; documents in cells, a query that opens some of them, and brute force standing next to it the whole way as the only ground truth on the page. <code>nprobe</code> is a count of <em>cells</em>, and a cell is not a unit of work, so the number a team sets is a proxy for two quantities and a promise about neither. Every figure below is computed in your browser on load and every headline is a comparison at an equal bill.</p>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true"  data-p="look">&#128064; LOOK</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="understand">&#129504; UNDERSTAND</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="build">&#128296; BUILD</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="panel" id="p-look">
+    <div class="card">
+      <h2>Turning the only knob there is</h2>
+      <p class="muted" id="mScope">running&hellip;</p>
+      <div class="scrollx"><table id="tSweep"></table></div>
+      <div class="flag" id="fShip"></div>
+    </div>
+
+    <div class="card">
+      <h2>It is not a cost, and it is not a recall</h2>
+      <p class="muted">Both columns of the table above are averages, and both of the things they average are spread out. The shipped setting opens the same number of cells for every query &mdash; and the cells are not the same size, so the work is not the same work. Read the two spreads side by side: at no setting does one number describe either quantity.</p>
+      <div class="scrollx"><table id="tSpread"></table></div>
+      <div class="flag bad" id="fSpread"></div>
+    </div>
+
+    <div class="card">
+      <h2>Where the money actually goes</h2>
+      <p class="muted">Sort the queries by what the index spent on them at the shipped setting and cut into quarters. Nothing about the queries is different in kind &mdash; they are drawn from one distribution &mdash; and the only thing that varies is which cells they happened to land next to.</p>
+      <div class="scrollx"><table id="tQuart"></table></div>
+      <div class="flag bad" id="fMoney"></div>
+      <div class="grid">
+        <div class="stat"><div class="lab">spent on the half it was already getting right</div><div class="big" id="sSpend">&mdash;</div><div class="muted">relative to the half it gets wrong</div></div>
+        <div class="stat"><div class="lab">miss rate, cheap half vs dear half</div><div class="big" id="sMiss">&mdash;</div><div class="muted">same index, same setting, same bill per cell</div></div>
+        <div class="stat"><div class="lab">cost, median to worst case</div><div class="big" id="sTail">&mdash;</div><div class="muted">distance computations at the shipped setting</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>The control: budget the search in documents</h2>
+      <p class="muted">Same index, same probe order, same everything &mdash; walk the cells and stop after a fixed number of <em>documents</em> instead of a fixed number of cells, cutting mid-cell if that is where the budget falls. That makes the bill an integer that is the same for every query, and it moves the work off the queries that did not need it. The comparison is at a matched mean bill, so neither row is buying its result.</p>
+      <div class="scrollx"><table id="tPolicy"></table></div>
+      <div class="flag good" id="fPolicy"></div>
+      <p class="muted">One matched pair could be a lucky bill. Here is the same comparison repeated at every cell setting worth shipping, each against a document budget chosen to cost the same to the nearest whole computation.</p>
+      <div class="scrollx"><table id="tMatch"></table></div>
+      <div class="flag good" id="fMatch"></div>
+      <p class="muted">And the other direction: hold the recall and read off the bill. The cell knob cannot even land on a target &mdash; there is nothing between one cell and the next, so a team that wants a stated recall buys the first setting that clears it and pays for the overshoot.</p>
+      <div class="scrollx"><table id="tEqual"></table></div>
+      <div class="flag" id="fEqual"></div>
+    </div>
+
+    <div class="card">
+      <h2>Stopping on a bound instead of on a count</h2>
+      <p class="muted">There is a rule that fixes the recall exactly. Every member of a cell is at least as far from the query as the cell&rsquo;s centroid is, minus the cell&rsquo;s radius &mdash; that is the triangle inequality and nothing else &mdash; so once that lower bound clears the k-th best distance already in hand, no unopened cell can hold a better neighbour and the search is <em>finished</em>. The page checks that against brute force one query at a time, and the check is an identity: the two result lists must be the same list.</p>
+      <div class="scrollx"><table id="tBound"></table></div>
+      <div class="flag good" id="fBound"></div>
+      <div class="flag bad" id="fNaive"></div>
+      <p class="muted">What it costs is a tail. Exactness has no fixed price, and the price it does have is set by the query, so a latency budget has to cap it &mdash; and the cap is the only thing on this page that can make the rule wrong.</p>
+      <div class="scrollx"><table id="tCap"></table></div>
+      <div class="flag warn" id="fCap"></div>
+    </div>
+
+    <div class="card">
+      <h2>The order that makes the stop safe is the wrong order to truncate</h2>
+      <p class="muted">The bound rule cannot walk the cells by centroid distance. A large loose cell can sit behind a small tight one under that order, so the first cell that fails the test is not the last one that would &mdash; the search has to walk by the bound itself. That is a different order, and truncating it at a fixed number of cells is worse than truncating the ordinary one. The recommendation and the algorithm want opposite things.</p>
+      <div class="scrollx"><table id="tOrder"></table></div>
+      <div class="flag warn" id="fOrder"></div>
+    </div>
+
+    <div class="card">
+      <h2>Which documents disappear</h2>
+      <p class="muted">A miss is not an event that happens to a query. It happens to a document, and the same documents keep having it happen to them. The split below is by the size of the cell a document landed in &mdash; a property of the shape of the corpus around it, decided at build time, and nothing to do with what the document says.</p>
+      <div class="scrollx"><table id="tDocs"></table></div>
+      <div class="flag bad" id="fDocs"></div>
+    </div>
+
+    <div class="card">
+      <h2>Recall is agreement with brute force, and brute force is not the same as right</h2>
+      <p class="muted">Every number so far compares the index against an exhaustive scan of the same embeddings. That is what recall means, and it is worth being clear about what it therefore cannot see. Lean the queries away from the document that answers them &mdash; a user&rsquo;s question is not a paraphrase of a document &mdash; and watch the two columns move by different orders of magnitude. The last column is the whole contribution the index makes to the damage.</p>
+      <div class="scrollx"><table id="tTilt"></table></div>
+      <div class="flag bad" id="fTilt"></div>
+    </div>
+
+    <div class="card">
+      <h2>The nulls, kept</h2>
+      <p class="muted">Four controls, three of them with a closed form the measurement has to land on. They are here because every number above is a difference, and a difference needs something to be a difference from.</p>
+      <div class="scrollx"><table id="tNull"></table></div>
+      <div class="flag" id="fNull1"></div>
+      <div class="flag warn" id="fNull2"></div>
+    </div>
+
+    <div class="card">
+      <h2>Checked as identities, one query at a time</h2>
+      <p class="muted">The claims below are not measured to a tolerance. They are computed twice by different routes and required to agree exactly, on every query.</p>
+      <div class="scrollx"><table id="tIdent"></table></div>
+      <div class="flag good" id="fIdent"></div>
+    </div>
+
+    <div class="card">
+      <h2>The control</h2>
+      <div class="flag good" id="fCtrl"></div>
+      <div class="flag warn" id="fCtrl2"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="p-understand" hidden>
+    <div class="card">
+      <h2>What is actually being measured</h2>
+      <p>Everything on this page comes out of four declared objects and nothing else.</p>
+      <ul>
+        <li><strong>A document</strong> is a point on the unit sphere. It belongs to one of a handful of topics and sits near that topic&rsquo;s direction, with a spread that differs from topic to topic &mdash; one subject written about in fifty near-identical documents, another sprawling. There is no text anywhere in the engine, because none is needed: an index sees coordinates.</li>
+        <li><strong>A query</strong> is built <em>from</em> a document, and that document is the answer. It is the only thing on the page that knows what the right answer is, and no part of the index is allowed to see it.</li>
+        <li><strong>An index</strong> is a partition. k-means splits the corpus into cells, each with a centroid and a radius; a search sorts the cells by distance to their centroid and opens some of them. That is the whole of what an inverted-file vector index does, and every real one adds compression on top of exactly this.</li>
+        <li><strong>A cost</strong> is one number: how many distance computations were performed, centroids included. Brute force costs the size of the corpus. Every comparison on this page is made at an equal cost or an equal recall, never at an equal setting, because a setting is not a quantity.</li>
+      </ul>
+      <div class="flag" id="fDeclare"></div>
+    </div>
+
+    <div class="card">
+      <h2>Why a count is the wrong unit</h2>
+      <p>k-means does not make cells of equal size. It makes cells of roughly equal <em>spread</em>, so a tight topic gets many small cells and a diffuse one gets a few large ones. <code>nprobe = 4</code> therefore means &ldquo;scan four cells&rdquo; and not &ldquo;scan four cells&rsquo; worth of work&rdquo;: for a query landing beside a tight topic it can be a few dozen documents, and beside a diffuse one several hundred.</p>
+      <p>The direction of the resulting error is the uncomfortable part, and it is not an accident. A tight topic is exactly where a query&rsquo;s ten nearest neighbours are spread across <em>many</em> cells, because the region has been finely cut. So the query that most needs cells opened is the query for which four cells is least work, and the query that needs one cell gets four large ones. The correlation between what a query costs and how well it is served is <strong>positive</strong>, which is the wrong sign for a budget.</p>
+      <p class="muted">Nothing about this depends on k-means specifically. Any partition that adapts to density produces cells of unequal population, and any budget denominated in cells inherits the same mismatch. A graph index has the same problem in a different currency: <code>ef</code> is a count of candidates, not of edges walked.</p>
+    </div>
+
+    <div class="card">
+      <h2>Why the bound is exact, and why it needs its own order</h2>
+      <p>For any member <em>x</em> of cell <em>c</em>, the triangle inequality gives <code>dist(q,x) &ge; dist(q,centroid<sub>c</sub>) &minus; radius<sub>c</sub></code>, where the radius is the distance from the centroid to its own farthest member. That right-hand side is computable before the cell is opened. If it already exceeds the k-th best distance in hand, the cell cannot improve the result, and neither can any cell whose bound is larger.</p>
+      <p>That last clause is the whole subtlety. The rule licenses stopping only if the cells are walked in order of the <em>bound</em>. Under the usual order &mdash; by centroid distance &mdash; a large loose cell can sit behind a small tight one, so the first cell that fails the test is not the last one that would, and stopping there quietly drops neighbours. The first version of this page did precisely that and was exact on 99.38% of queries, which is the tell: a rule that is provably exact does not have a hit rate.</p>
+      <div class="flag" id="fWhyOrder"></div>
+    </div>
+
+    <div class="card">
+      <h2>Checked as identities, not as numbers</h2>
+      <div class="flag" id="fIdent2"></div>
+    </div>
+
+    <div class="card">
+      <h2>What went against the build</h2>
+      <div class="flag warn" id="fN1"></div>
+      <div class="flag warn" id="fN2"></div>
+      <div class="flag warn" id="fN3"></div>
+      <div class="flag warn" id="fN4"></div>
+      <div class="flag warn" id="fN5"></div>
+    </div>
+
+    <div class="card">
+      <h2>What this does not model</h2>
+      <ul>
+        <li><strong>Compression.</strong> Real indexes quantise the vectors as well as partition them, which adds a second, different kind of error: distances become approximate everywhere rather than absent in places. It moves every number here and it moves none of the arguments, because a compressed index still budgets in cells.</li>
+        <li><strong>Graph indexes.</strong> A navigable small-world graph fails differently &mdash; it gets stuck rather than skipping a region &mdash; but it is budgeted the same way, by a count that is not a unit of work, and the same fix applies to it.</li>
+        <li><strong>Updates.</strong> The corpus here never changes. A live index drifts away from its own centroids as documents arrive, which makes the cells worse over time in a way no query-time knob can see.</li>
+        <li><strong>Cache and memory locality.</strong> Distance computations are counted as if they all cost the same. On real hardware a contiguous cell is much cheaper per document than a scattered one, which changes the exchange rate between the policies without changing their order.</li>
+        <li><strong>The embedding itself.</strong> The last table is the only place the embedding&rsquo;s own quality appears, and it appears as a declared knob. Everything else on this page holds it fixed on purpose, so that no result can be smuggled in from it.</li>
+        <li><strong>Filtered search.</strong> A metadata filter applied after retrieval interacts violently with everything here, because it removes documents from a list that was already short. It deserves its own page.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Everything the page asserts about itself</h2>
+      <p class="muted">Bounds and identities only. Nothing here compares a computed number against a constant that was typed in.</p>
+      <ul id="ulChecks"><li>running&hellip;</li></ul>
+      <p class="muted">Everything between <code>ENGINE:BEGIN</code> and <code>ENGINE:END</code> in this file is pure &mdash; no DOM, no network, no clock, no <code>Math.random</code>. The generator is the same 31-bit LCG the rest of this series uses, drawn from the <strong>high</strong> bits: its low bit alternates on every step, so <code>% n</code> on an even bound would be perfectly uniform and perfectly predictable at the same time. The render pump is a plain <code>setTimeout</code> chain, so a page left in a background tab still finishes.</p>
+    </div>
+  </section>
+
+  <section class="panel" id="p-build" hidden>
+    <div class="card">
+      <h2>Run it with your own numbers</h2>
+      <p class="muted">Everything re-runs in your browser. <code>documents</code> is the corpus size; <code>cells</code> is how many pieces k-means cuts it into; <code>tightest</code> and <code>loosest</code> are the spreads of the tightest and the loosest topic, in thousandths &mdash; set them equal and the corpus has no unevenness left, which is the fastest way to watch the whole effect disappear.</p>
+      <div class="grid">
+        <div><label class="muted" for="inN">documents</label><input type="number" id="inN" value="1200" min="200" max="2400" step="100"></div>
+        <div><label class="muted" for="inList">cells</label><input type="number" id="inList" value="36" min="4" max="96" step="4"></div>
+        <div><label class="muted" for="inK">results per query (k)</label><input type="number" id="inK" value="10" min="2" max="25" step="1"></div>
+        <div><label class="muted" for="inLo">tightest topic &times;1000</label><input type="number" id="inLo" value="35" min="10" max="250" step="5"></div>
+        <div><label class="muted" for="inHi">loosest topic &times;1000</label><input type="number" id="inHi" value="225" min="10" max="400" step="5"></div>
+        <div><label class="muted" for="inTilt">query tilt &times;100</label><input type="number" id="inTilt" value="20" min="0" max="120" step="5"></div>
+      </div>
+      <p style="margin-top:12px"><button class="go" id="btnRun">run it</button> <span class="muted" id="runNote"></span></p>
+      <div class="scrollx"><table id="tRun"></table></div>
+    </div>
+  </section>
+</main>
+
+<div id="selftest">running&hellip;</div>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// Pure. No DOM, no network, no clock, no Math.random.
+
+var MULT = 1103515245, INC = 12345, MASK = 0x7FFFFFFF, SCALE = 2147483648;
+
+function Lcg(seed){ this.state = seed >>> 0; this.spare = null; }
+Lcg.prototype.nextInt = function(){
+  this.state = Number((BigInt(MULT) * BigInt(this.state) + BigInt(INC)) & BigInt(MASK));
+  return this.state;
+};
+// Uniform in [0,1) and [0,n) from the HIGH bits. This LCG has an odd multiplier
+// AND an odd increment, so its low bit flips every single step: "% n" on an even
+// bound would be perfectly uniform and perfectly predictable at the same time.
+Lcg.prototype.unit = function(){ return this.nextInt() / SCALE; };
+Lcg.prototype.below = function(n){ return Math.floor((this.nextInt() * n) / SCALE); };
+// Marsaglia polar - rejection, not trigonometry. The second value of each pair is
+// cached, so the stream position stays a deterministic function of how many
+// gaussians have been taken.
+Lcg.prototype.gauss = function(){
+  if (this.spare !== null){ var s2 = this.spare; this.spare = null; return s2; }
+  var u, v, s;
+  do { u = 2 * this.unit() - 1; v = 2 * this.unit() - 1; s = u * u + v * v; } while (s <= 0 || s >= 1);
+  var f = Math.sqrt(-2 * Math.log(s) / s);
+  this.spare = v * f;
+  return u * f;
+};
+function shuffled(r, n){
+  var o = new Int32Array(n), i, j, t;
+  for (i = 0; i < n; i++) o[i] = i;
+  for (i = n - 1; i > 0; i--){ j = r.below(i + 1); t = o[i]; o[i] = o[j]; o[j] = t; }
+  return o;
+}
+
+/* ---------- vectors ---------- */
+// Every vector here is L2-normalised, which is what an embedding endpoint hands
+// back. On the unit sphere |a-b|^2 = 2 - 2(a.b), so ordering by squared euclidean
+// distance and ordering by cosine similarity are THE SAME ORDER - the page checks
+// that as an identity rather than asserting it in prose.
+function normRange(v, off, d){
+  var s = 0, j;
+  for (j = 0; j < d; j++) s += v[off + j] * v[off + j];
+  s = Math.sqrt(s);
+  if (s === 0){ v[off] = 1; return; }
+  for (j = 0; j < d; j++) v[off + j] /= s;
+}
+function sqdistAt(a, ao, b, bo, d){
+  var s = 0, j, t;
+  for (j = 0; j < d; j++){ t = a[ao + j] - b[bo + j]; s += t * t; }
+  return s;
+}
+function dotAt(a, ao, b, bo, d){
+  var s = 0, j;
+  for (j = 0; j < d; j++) s += a[ao + j] * b[bo + j];
+  return s;
+}
+
+/* ---------- the corpus ---------- */
+// K topic directions; every document is a topic plus noise, then normalised.
+// The topics are NOT equally tight: a real corpus has one subject written about
+// in fifty near-identical documents and another sprawling across the space, and
+// that unevenness is where the cell sizes come from.
+function makeCorpus(seed, N, d, K, sLo, sHi){
+  var r = new Lcg(seed), cent = new Float64Array(K * d), docs = new Float64Array(N * d);
+  var topic = new Int32Array(N), spread = new Float64Array(K), i, j, t;
+  for (i = 0; i < K * d; i++) cent[i] = r.gauss();
+  for (t = 0; t < K; t++) normRange(cent, t * d, d);
+  for (t = 0; t < K; t++) spread[t] = sLo + (sHi - sLo) * (K === 1 ? 0 : t / (K - 1));
+  for (i = 0; i < N; i++){
+    t = r.below(K); topic[i] = t;
+    for (j = 0; j < d; j++) docs[i * d + j] = cent[t * d + j] + spread[t] * r.gauss();
+    normRange(docs, i * d, d);
+  }
+  return { N: N, d: d, K: K, docs: docs, cent: cent, topic: topic, spread: spread };
+}
+
+/* ---------- the queries ---------- */
+// A query is built FROM a document, and that document is the answer. It is the
+// only thing on this page that knows what the right answer is, and no part of
+// the index is allowed to see it. `tilt` leans the query toward a topic the
+// answer does not belong to.
+function makeQueries(seed, W, Q, tilt, noise){
+  var r = new Lcg(seed), d = W.d, qs = new Float64Array(Q * d);
+  var ans = new Int32Array(Q), i, j, a, t2;
+  for (i = 0; i < Q; i++){
+    a = r.below(W.N); ans[i] = a;
+    t2 = r.below(W.K);
+    if (t2 === W.topic[a]) t2 = (t2 + 1) % W.K;
+    for (j = 0; j < d; j++) qs[i * d + j] = W.docs[a * d + j] + tilt * W.cent[t2 * d + j] + noise * r.gauss();
+    normRange(qs, i * d, d);
+  }
+  return { Q: Q, d: d, qs: qs, ans: ans, tilt: tilt, noise: noise };
+}
+// The declared null: the answer is a document drawn independently of the query,
+// so the embedding carries no information about it whatsoever.
+function scrambleAnswers(seed, QS, N){
+  var r = new Lcg(seed), out = new Int32Array(QS.Q), i;
+  for (i = 0; i < QS.Q; i++) out[i] = r.below(N);
+  return { Q: QS.Q, d: QS.d, qs: QS.qs, ans: out, tilt: QS.tilt, noise: QS.noise, scrambled: true };
+}
+
+/* ---------- a top-k that never ties ---------- */
+// Insertion into a sorted list of length k. Ties break on the lower document id,
+// so a result is a function of the corpus and nothing else - not of the order the
+// index happened to hand the documents over in.
+function TopK(k){ this.k = k; this.id = []; this.dd = []; }
+TopK.prototype.worst = function(){ return this.id.length < this.k ? Infinity : this.dd[this.dd.length - 1]; };
+TopK.prototype.offer = function(id, dd){
+  var n = this.id.length, i;
+  if (n === this.k && (dd > this.dd[n - 1] || (dd === this.dd[n - 1] && id > this.id[n - 1]))) return false;
+  i = n;
+  while (i > 0 && (dd < this.dd[i - 1] || (dd === this.dd[i - 1] && id < this.id[i - 1]))) i--;
+  this.id.splice(i, 0, id); this.dd.splice(i, 0, dd);
+  if (this.id.length > this.k){ this.id.pop(); this.dd.pop(); }
+  return true;
+};
+TopK.prototype.ids = function(){ return this.id.slice(); };
+TopK.prototype.has = function(id){ return this.id.indexOf(id) >= 0; };
+
+/* ---------- brute force: the only ground truth on the page ---------- */
+function exactTopK(W, qs, qi, k){
+  var t = new TopK(k), i, d = W.d;
+  for (i = 0; i < W.N; i++) t.offer(i, sqdistAt(qs, qi * d, W.docs, i * d, d));
+  return t;
+}
+
+/* ---------- the index ---------- */
+// k-means++ seeding then Lloyd, both deterministic: the D^2 draw comes off the
+// LCG and an empty cell is re-seeded with the single farthest point, lowest id
+// winning a tie. Rebuilding from the same seed rebuilds the same index bit for
+// bit, which is what lets every comparison on this page hold the index fixed.
+function kmeansSeed(r, W, nlist){
+  var d = W.d, N = W.N, cent = new Float64Array(nlist * d), best = new Float64Array(N);
+  var i, j, c, first = r.below(N), tot, x, pick, dd;
+  for (j = 0; j < d; j++) cent[j] = W.docs[first * d + j];
+  for (i = 0; i < N; i++) best[i] = sqdistAt(W.docs, i * d, cent, 0, d);
+  for (c = 1; c < nlist; c++){
+    tot = 0;
+    for (i = 0; i < N; i++) tot += best[i];
+    x = r.unit() * tot; pick = N - 1;
+    for (i = 0; i < N; i++){ x -= best[i]; if (x <= 0){ pick = i; break; } }
+    for (j = 0; j < d; j++) cent[c * d + j] = W.docs[pick * d + j];
+    for (i = 0; i < N; i++){ dd = sqdistAt(W.docs, i * d, cent, c * d, d); if (dd < best[i]) best[i] = dd; }
+  }
+  return cent;
+}
+function assignAll(W, cent, nlist){
+  var d = W.d, N = W.N, a = new Int32Array(N), i, c, bd, bc, dd;
+  for (i = 0; i < N; i++){
+    bd = Infinity; bc = 0;
+    for (c = 0; c < nlist; c++){ dd = sqdistAt(W.docs, i * d, cent, c * d, d); if (dd < bd){ bd = dd; bc = c; } }
+    a[i] = bc;
+  }
+  return a;
+}
+function finishIndex(W, cent, assign, nlist, kind){
+  var d = W.d, N = W.N, cells = [], sizes = new Int32Array(nlist), i, c, dd, fd;
+  for (c = 0; c < nlist; c++) cells.push([]);
+  for (i = 0; i < N; i++){ cells[assign[i]].push(i); sizes[assign[i]]++; }
+  // The radius is what makes an exact early stop possible: the farthest member of
+  // each cell from its own centroid.
+  var rad = new Float64Array(nlist);
+  for (c = 0; c < nlist; c++){
+    fd = 0;
+    for (i = 0; i < cells[c].length; i++){ dd = sqdistAt(W.docs, cells[c][i] * d, cent, c * d, d); if (dd > fd) fd = dd; }
+    rad[c] = Math.sqrt(fd);
+    cells[c] = Int32Array.from(cells[c]);
+  }
+  return { nlist: nlist, d: d, cent: cent, assign: assign, cells: cells, sizes: sizes, rad: rad, kind: kind };
+}
+function buildIvf(seed, W, nlist, iters){
+  var r = new Lcg(seed), d = W.d, N = W.N, cent = kmeansSeed(r, W, nlist);
+  var assign = null, it, i, j, c, cnt, sum, far, fd, dd;
+  for (it = 0; it < iters; it++){
+    assign = assignAll(W, cent, nlist);
+    cnt = new Int32Array(nlist); sum = new Float64Array(nlist * d);
+    for (i = 0; i < N; i++){
+      c = assign[i]; cnt[c]++;
+      for (j = 0; j < d; j++) sum[c * d + j] += W.docs[i * d + j];
+    }
+    for (c = 0; c < nlist; c++){
+      if (cnt[c] === 0){
+        far = -1; fd = -1;
+        for (i = 0; i < N; i++){ dd = sqdistAt(W.docs, i * d, cent, assign[i] * d, d); if (dd > fd){ fd = dd; far = i; } }
+        for (j = 0; j < d; j++) cent[c * d + j] = W.docs[far * d + j];
+        continue;
+      }
+      for (j = 0; j < d; j++) cent[c * d + j] = sum[c * d + j] / cnt[c];
+      normRange(cent, c * d, d);
+    }
+  }
+  return finishIndex(W, cent, assignAll(W, cent, nlist), nlist, "kmeans");
+}
+
+/* ---------- search ---------- */
+// Order the cells by distance to their centroid. That order IS the index.
+function probeOrder(ix, qs, qi, d){
+  var n = ix.nlist, arr = [], c;
+  for (c = 0; c < n; c++) arr.push({ c: c, dd: sqdistAt(qs, qi * d, ix.cent, c * d, d) });
+  arr.sort(function(a, b){ return a.dd === b.dd ? a.c - b.c : a.dd - b.dd; });
+  var o = new Int32Array(n), dv = new Float64Array(n);
+  for (c = 0; c < n; c++){ o[c] = arr[c].c; dv[c] = arr[c].dd; }
+  return { order: o, cdist: dv };
+}
+// The other order: by the LOWER BOUND on what a cell could hold. A big loose cell
+// can sit behind a tight far one under the first order, which is exactly why an
+// early stop that walks by centroid distance is not safe.
+function probeOrderLB(ix, qs, qi, d){
+  var n = ix.nlist, arr = [], c, dc, lb;
+  for (c = 0; c < n; c++){
+    dc = Math.sqrt(sqdistAt(qs, qi * d, ix.cent, c * d, d));
+    lb = dc - ix.rad[c];
+    if (lb < 0) lb = 0;
+    arr.push({ c: c, lb: lb });
+  }
+  arr.sort(function(a, b){ return a.lb === b.lb ? a.c - b.c : a.lb - b.lb; });
+  var o = new Int32Array(n), l = new Float64Array(n);
+  for (c = 0; c < n; c++){ o[c] = arr[c].c; l[c] = arr[c].lb; }
+  return { order: o, lb: l };
+}
+// One walk down the probe order records the answer at EVERY nprobe, so a whole
+// sweep costs one scan of the corpus rather than nlist of them.
+function sweepQuery(W, ix, qs, qi, k, exIds, answer){
+  var d = W.d, po = probeOrder(ix, qs, qi, d), n = ix.nlist, t = new TopK(k);
+  var recall = new Float64Array(n + 1), cost = new Float64Array(n + 1);
+  var kept = new Uint8Array(n + 1), cellHit = new Float64Array(n + 1);
+  var opened = {}, p, c, i, id, j, hit, ch;
+  cost[0] = n; // the centroid distances are paid before any cell is opened
+  for (p = 1; p <= n; p++){
+    c = po.order[p - 1];
+    opened[c] = 1;
+    for (i = 0; i < ix.cells[c].length; i++){
+      id = ix.cells[c][i];
+      t.offer(id, sqdistAt(qs, qi * d, W.docs, id * d, d));
+    }
+    cost[p] = cost[p - 1] + ix.cells[c].length;
+    hit = 0; ch = 0;
+    for (j = 0; j < exIds.length; j++){
+      if (t.has(exIds[j])) hit++;
+      if (opened[ix.assign[exIds[j]]] === 1) ch++;
+    }
+    recall[p] = hit / exIds.length;
+    // The same recall by a completely different route: a neighbour survives iff
+    // its CELL was opened, because nothing that could push it out of the top k
+    // is outside the top k. The page requires the two to agree exactly.
+    cellHit[p] = ch / exIds.length;
+    kept[p] = t.has(answer) ? 1 : 0;
+  }
+  return { recall: recall, cost: cost, kept: kept, cellHit: cellHit, order: po.order, ids: t.ids() };
+}
+// Budget the search in DOCUMENTS instead of in cells: walk the same order and
+// stop after exactly M documents, mid-cell if that is where M falls. The cost is
+// then the same integer for every query, which is the whole point - nprobe is a
+// count of cells, and a cell is not a unit of work.
+function searchBudget(W, ix, qs, qi, k, M){
+  var d = W.d, po = probeOrder(ix, qs, qi, d), n = ix.nlist, t = new TopK(k);
+  var p, c, i, seen = 0;
+  for (p = 0; p < n && seen < M; p++){
+    c = po.order[p];
+    for (i = 0; i < ix.cells[c].length && seen < M; i++){
+      t.offer(ix.cells[c][i], sqdistAt(qs, qi * d, W.docs, ix.cells[c][i] * d, d));
+      seen++;
+    }
+  }
+  return { ids: t.ids(), cost: n + seen, scanned: seen };
+}
+// Stop on a BOUND instead of on a count. For every member x of cell c the
+// triangle inequality gives dist(q,x) >= dist(q,centroid_c) - radius_c, so once
+// that bound clears the k-th best distance already in hand, no unopened cell can
+// hold a better neighbour and the search is FINISHED rather than truncated.
+// useRadius = false is the version people actually write: the same test with the
+// radius left out, walked in centroid order. It is not a bound at all.
+function searchBound(W, ix, qs, qi, k, useRadius){
+  var d = W.d, n = ix.nlist, t = new TopK(k), p, c, i, cost = n, probed = 0, kth, lb;
+  var po = useRadius ? probeOrderLB(ix, qs, qi, d) : probeOrder(ix, qs, qi, d);
+  for (p = 0; p < n; p++){
+    c = po.order[p];
+    kth = t.worst();
+    lb = useRadius ? po.lb[p] : Math.sqrt(po.cdist[p]);
+    if (kth < Infinity && lb * lb > kth) break;
+    for (i = 0; i < ix.cells[c].length; i++){
+      t.offer(ix.cells[c][i], sqdistAt(qs, qi * d, W.docs, ix.cells[c][i] * d, d));
+    }
+    cost += ix.cells[c].length; probed++;
+  }
+  return { ids: t.ids(), cost: cost, probed: probed };
+}
+// The bound rule under a latency cap. The cap is the only thing on this page that
+// can make it wrong.
+function searchBoundCapped(W, ix, qs, qi, k, cap){
+  var d = W.d, n = ix.nlist, t = new TopK(k), po = probeOrderLB(ix, qs, qi, d);
+  var p, c, i, seen = 0, kth, done = false, cut = false;
+  for (p = 0; p < n; p++){
+    c = po.order[p];
+    kth = t.worst();
+    // A cell the cap cut in half is a cell that was not searched, so the bound
+    // clearing afterwards proves nothing - the finish flag has to know that.
+    if (!cut && kth < Infinity && po.lb[p] * po.lb[p] > kth){ done = true; break; }
+    if (seen >= cap) break;
+    for (i = 0; i < ix.cells[c].length && seen < cap; i++){
+      t.offer(ix.cells[c][i], sqdistAt(qs, qi * d, W.docs, ix.cells[c][i] * d, d));
+      seen++;
+    }
+    if (i < ix.cells[c].length) cut = true;
+  }
+  return { ids: t.ids(), cost: n + seen, scanned: seen, finished: done };
+}
+// Truncate the bound order at a fixed number of cells - the recommendation used
+// as if it were the ordinary knob.
+function searchLBCells(W, ix, qs, qi, k, nprobe){
+  var d = W.d, po = probeOrderLB(ix, qs, qi, d), t = new TopK(k), p, c, i, cost = ix.nlist;
+  for (p = 0; p < nprobe && p < ix.nlist; p++){
+    c = po.order[p];
+    for (i = 0; i < ix.cells[c].length; i++) t.offer(ix.cells[c][i], sqdistAt(qs, qi * d, W.docs, ix.cells[c][i] * d, d));
+    cost += ix.cells[c].length;
+  }
+  return { ids: t.ids(), cost: cost };
+}
+// The floor with an exact closed form: keep the index, throw away the ORDER.
+// Opening nprobe cells drawn uniformly at random makes every cell equally likely,
+// so by linearity each exact neighbour survives with probability exactly
+// nprobe/nlist, whatever the cell sizes are.
+function sweepRandomOrder(W, ix, qs, qi, k, exIds, seed){
+  var r = new Lcg(seed), n = ix.nlist, d = W.d, ord = shuffled(r, n);
+  var t = new TopK(k), recall = new Float64Array(n + 1), p, c, i, j, hit;
+  for (p = 1; p <= n; p++){
+    c = ord[p - 1];
+    for (i = 0; i < ix.cells[c].length; i++) t.offer(ix.cells[c][i], sqdistAt(qs, qi * d, W.docs, ix.cells[c][i] * d, d));
+    hit = 0;
+    for (j = 0; j < exIds.length; j++) if (t.has(exIds[j])) hit++;
+    recall[p] = hit / exIds.length;
+  }
+  return recall;
+}
+
+/* ---------- one pass over a query set ---------- */
+function sameIds(a, b){
+  if (a.length !== b.length) return false;
+  for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+function overlap(a, b){
+  var s = 0, i;
+  for (i = 0; i < a.length; i++) if (b.indexOf(a[i]) >= 0) s++;
+  return s;
+}
+function study(W, ix, QS, k){
+  var n = ix.nlist, Q = QS.Q, N = W.N, i, p, j;
+  var recall = new Float64Array(n + 1), cost = new Float64Array(n + 1), kept = new Float64Array(n + 1);
+  var recAll = [], costAll = [], exAll = [], exKept = 0, want = new Int32Array(N);
+  var idBreak = 0, monoBreak = 0;
+  for (i = 0; i < Q; i++){
+    var e = exactTopK(W, QS.qs, i, k), eid = e.ids();
+    exAll.push(eid);
+    if (e.has(QS.ans[i])) exKept++;
+    for (j = 0; j < eid.length; j++) want[eid[j]]++;
+    var sw = sweepQuery(W, ix, QS.qs, i, k, eid, QS.ans[i]);
+    recAll.push(sw.recall); costAll.push(sw.cost);
+    for (p = 1; p <= n; p++){
+      if (sw.recall[p] !== sw.cellHit[p]) idBreak++;
+      if (sw.recall[p] < sw.recall[p - 1]) monoBreak++;
+    }
+    for (p = 0; p <= n; p++){ recall[p] += sw.recall[p]; cost[p] += sw.cost[p]; kept[p] += sw.kept[p]; }
+  }
+  for (p = 0; p <= n; p++){ recall[p] /= Q; cost[p] /= Q; kept[p] /= Q; }
+  return { recall: recall, cost: cost, kept: kept, recAll: recAll, costAll: costAll, exAll: exAll,
+           exKept: exKept / Q, want: want, idBreak: idBreak, monoBreak: monoBreak,
+           Q: Q, k: k, nlist: n, N: N };
+}
+// Which documents does the index never hand back at a shipped nprobe, and is the
+// loss spread over the corpus or piled onto a few documents?
+function reach(W, ix, QS, k, S, nprobe){
+  var i, j, p, got = new Int32Array(W.N), miss = new Int32Array(W.N);
+  for (i = 0; i < QS.Q; i++){
+    var po = probeOrder(ix, QS.qs, i, W.d), t = new TopK(k), c;
+    for (p = 0; p < nprobe; p++){
+      c = po.order[p];
+      for (j = 0; j < ix.cells[c].length; j++) t.offer(ix.cells[c][j], sqdistAt(QS.qs, i * W.d, W.docs, ix.cells[c][j] * W.d, W.d));
+    }
+    for (j = 0; j < S.exAll[i].length; j++){ if (t.has(S.exAll[i][j])) got[S.exAll[i][j]]++; else miss[S.exAll[i][j]]++; }
+  }
+  var wanted = 0, invisible = 0, totMiss = 0, totWant = 0, arr = [];
+  for (i = 0; i < W.N; i++){
+    totWant += S.want[i]; totMiss += miss[i];
+    if (S.want[i] > 0){ wanted++; arr.push(miss[i]); if (got[i] === 0) invisible++; }
+  }
+  arr.sort(function(a, b){ return b - a; });
+  var topN = Math.max(1, Math.round(0.01 * wanted)), topSum = 0;
+  for (i = 0; i < topN && i < arr.length; i++) topSum += arr[i];
+  var small = Math.round(0.6 * W.N / ix.nlist), big = Math.round(1.5 * W.N / ix.nlist);
+  var sW = 0, sM = 0, bW = 0, bM = 0;
+  for (i = 0; i < W.N; i++){
+    if (S.want[i] === 0) continue;
+    if (ix.sizes[ix.assign[i]] <= small){ sW += S.want[i]; sM += miss[i]; }
+    else if (ix.sizes[ix.assign[i]] >= big){ bW += S.want[i]; bM += miss[i]; }
+  }
+  return { got: got, miss: miss, wanted: wanted, invisible: invisible, totMiss: totMiss, totWant: totWant,
+           topN: topN, topShare: totMiss ? topSum / totMiss : 0, small: small, big: big,
+           sW: sW, sM: sM, bW: bW, bM: bM };
+}
+
+/* ---------- small helpers ---------- */
+function quantile(arr, q){
+  var a = Array.prototype.slice.call(arr).sort(function(x, y){ return x - y; });
+  if (a.length === 0) return 0;
+  return a[Math.min(a.length - 1, Math.max(0, Math.ceil(q * a.length) - 1))];
+}
+function mean(arr){ var s = 0, i; for (i = 0; i < arr.length; i++) s += arr[i]; return arr.length ? s / arr.length : 0; }
+function minOf(arr){ var m = Infinity, i; for (i = 0; i < arr.length; i++) if (arr[i] < m) m = arr[i]; return m; }
+function maxOf(arr){ var m = -Infinity, i; for (i = 0; i < arr.length; i++) if (arr[i] > m) m = arr[i]; return m; }
+function corr(a, b){
+  var ma = mean(a), mb = mean(b), sab = 0, sa = 0, sb = 0, i;
+  for (i = 0; i < a.length; i++){ sab += (a[i] - ma) * (b[i] - mb); sa += (a[i] - ma) * (a[i] - ma); sb += (b[i] - mb) * (b[i] - mb); }
+  return (sa === 0 || sb === 0) ? 0 : sab / Math.sqrt(sa * sb);
+}
+function col(S, p, which){
+  var out = [], i;
+  for (i = 0; i < S.Q; i++) out.push(which === "r" ? S.recAll[i][p] : S.costAll[i][p]);
+  return out;
+}
+// The smallest nprobe whose MEAN recall clears a target. An integer, which is
+// half the story here: there is nothing between one cell and the next.
+function probeFor(recall, target){
+  for (var p = 1; p < recall.length; p++) if (recall[p] >= target) return p;
+  return -1;
+}
+function budgetRecall(W, ix, QS, S, k, M){
+  var i, s = 0;
+  for (i = 0; i < QS.Q; i++) s += overlap(searchBudget(W, ix, QS.qs, i, k, M).ids, S.exAll[i]) / k;
+  return s / QS.Q;
+}
+// The smallest document budget whose mean recall clears a target: bisection over
+// an axis with as many rungs as there are documents, not as many as there are
+// cells.
+function budgetFor(W, ix, QS, S, k, target){
+  var lo = 1, hi = W.N, mid;
+  while (lo < hi){
+    mid = (lo + hi) >> 1;
+    if (budgetRecall(W, ix, QS, S, k, mid) >= target) hi = mid; else lo = mid + 1;
+  }
+  return lo;
+}
+// ===== ENGINE:END =====
+
+/* ---------- presentation ---------- */
+var CHECKS = [], FAILED = 0;
+function ok(cond, label){ CHECKS.push({ pass: !!cond, label: label }); if (!cond) FAILED++; }
+function pct(x){ return (100 * x).toFixed(2) + "%"; }
+function pct1(x){ return (100 * x).toFixed(1) + "%"; }
+function pct3(x){ return (100 * x).toFixed(3) + "%"; }
+function f1(x){ return x.toFixed(1); }
+function f2(x){ return x.toFixed(2); }
+function f3(x){ return x.toFixed(3); }
+function f4(x){ return x.toFixed(4); }
+function per1k(x){ return (1000 * x).toFixed(2); }
+function iv(x){ return String(Math.round(x)); }
+function grp(x){ return String(Math.round(x)).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+function tbl(el, head, rows){
+  var h = "<thead><tr>" + head.map(function(c){ return "<th>" + c + "</th>"; }).join("") + "</tr></thead><tbody>";
+  h += rows.map(function(r){
+    var cls = r.cls ? " class=\"" + r.cls + "\"" : "";
+    return "<tr" + cls + ">" + r.cells.map(function(c){ return "<td>" + c + "</td>"; }).join("") + "</tr>";
+  }).join("");
+  document.getElementById(el).innerHTML = h + "</tbody>";
+}
+function set(id, html){ document.getElementById(id).innerHTML = html; }
+
+/* ---------- the declared configuration ---------- */
+var N0 = 1600, D0 = 16, K0 = 12, SLO0 = 0.035, SHI0 = 0.225, NLIST0 = 48, ITERS0 = 14;
+var KK0 = 10, Q0 = 320, NOISE0 = 0.08, TILT0 = 0.20, TARGET0 = 0.95;
+var S = {};
+
+/* --- stage 1: build the world and turn the knob --- */
+function stage1(){
+  var W = makeCorpus(770001, N0, D0, K0, SLO0, SHI0);
+  var ix = buildIvf(770002, W, NLIST0, ITERS0);
+  var QS = makeQueries(770100, W, Q0, TILT0, NOISE0);
+  var st = study(W, ix, QS, KK0);
+  S.W = W; S.ix = ix; S.QS = QS; S.st = st;
+
+  // the index is a partition: every document in exactly one cell, and that cell
+  // is its nearest centroid
+  var i, c, p, tot = 0, bad = 0;
+  for (c = 0; c < ix.nlist; c++) tot += ix.sizes[c];
+  ok(tot === W.N, "the cells partition the corpus - every document in exactly one");
+  for (i = 0; i < W.N; i++){
+    var bd = Infinity, bc = -1, dd;
+    for (c = 0; c < ix.nlist; c++){ dd = sqdistAt(W.docs, i * W.d, ix.cent, c * W.d, W.d); if (dd < bd){ bd = dd; bc = c; } }
+    if (bc !== ix.assign[i]) bad++;
+  }
+  ok(bad === 0, "every document is assigned to its own nearest centroid");
+  // radius is a real bound on its own members
+  var rbad = 0;
+  for (c = 0; c < ix.nlist; c++)
+    for (i = 0; i < ix.cells[c].length; i++)
+      if (Math.sqrt(sqdistAt(W.docs, ix.cells[c][i] * W.d, ix.cent, c * W.d, W.d)) > ix.rad[c] + 1e-12) rbad++;
+  ok(rbad === 0, "no member of a cell lies outside its own cell's radius");
+  // on the unit sphere, cosine order and euclidean order are the same order
+  var ordBad = 0, a, b;
+  for (var qi = 0; qi < 4; qi++)
+    for (a = 0; a < 90; a++)
+      for (b = a + 1; b < 90; b++){
+        var da = sqdistAt(QS.qs, qi * W.d, W.docs, a * W.d, W.d), db = sqdistAt(QS.qs, qi * W.d, W.docs, b * W.d, W.d);
+        var ca = dotAt(QS.qs, qi * W.d, W.docs, a * W.d, W.d), cb = dotAt(QS.qs, qi * W.d, W.docs, b * W.d, W.d);
+        if (Math.sign(da - db) !== Math.sign(cb - ca)) ordBad++;
+      }
+  ok(ordBad === 0, "ranking by squared euclidean distance and by cosine are the same ranking on normalised vectors");
+  ok(st.monoBreak === 0, "recall never falls when another cell is opened, on any query at any setting");
+  ok(st.idBreak === 0, "recall by set intersection equals recall by cell membership, on every query at every setting");
+  ok(st.recall[ix.nlist] === 1, "opening every cell reproduces brute force exactly");
+  var cbad = 0;
+  for (i = 0; i < st.Q; i++) if (st.costAll[i][ix.nlist] !== W.N + ix.nlist) cbad++;
+  ok(cbad === 0, "opening every cell costs exactly the corpus plus the centroids, on every query");
+
+  // one assertion per setting, and one per cell: bounds and identities, no constants
+  var mBad = 0;
+  for (p = 1; p <= ix.nlist; p++){
+    ok(st.recall[p] >= st.recall[p - 1] - 1e-15, "mean recall does not fall when the " + p + "th cell is opened");
+    ok(st.cost[p] > st.cost[p - 1] - 1e-15, "and the bill does not fall either, at " + p + " cells");
+    ok(st.recall[p] >= p / ix.nlist, "opening the " + p + " NEAREST cells beats opening " + p + " at random");
+  }
+  for (c = 0; c < ix.nlist; c++){
+    ok(Math.abs(Math.sqrt(dotAt(ix.cent, c * W.d, ix.cent, c * W.d, W.d)) - 1) < 1e-9, "centroid " + c + " lies on the unit sphere");
+    ok(ix.rad[c] >= 0 && ix.sizes[c] >= 0, "cell " + c + " has a non-negative radius and population");
+  }
+
+  var NP = probeFor(st.recall, TARGET0);
+  S.NP = NP;
+  ok(NP > 1, "the recall target needs more than one cell");
+  ok(st.recall[NP] >= TARGET0 && st.recall[NP - 1] < TARGET0, "the shipped setting is the FIRST one that clears the target");
+
+  var rows = [], plist = [1, 2, 3, 4, 5, 6, 8, 12, 24, ix.nlist];
+  for (i = 0; i < plist.length; i++){
+    var p = plist[i], cc = col(st, p, "c"), rr = col(st, p, "r");
+    rows.push({ cls: p === NP ? "mid" : (p === ix.nlist ? "ctrl" : ""),
+      cells: [iv(p), f4(st.recall[p]), f4(st.kept[p]), f1(mean(cc)), pct1((mean(cc) - ix.nlist) / W.N), f4(p / ix.nlist), f3(st.recall[p] / (p / ix.nlist)) + "&times;"] });
+  }
+  tbl("tSweep", ["cells opened", "recall", "answer found", "distance computations", "share of corpus scanned", "same budget, no order", "worth of the order"], rows);
+
+  var sizes = [], mn, mx;
+  for (c = 0; c < ix.nlist; c++) sizes.push(ix.sizes[c]);
+  mn = minOf(sizes); mx = maxOf(sizes);
+  S.sizeMin = mn; S.sizeMax = mx;
+  ok(mx > 3 * mn, "the cells are genuinely uneven, which is what makes a count of them the wrong unit");
+  set("mScope", "A corpus of " + N0 + " documents on the unit sphere in " + D0 + " dimensions, drawn from " + K0 +
+    " topics whose tightness runs from " + f3(SLO0) + " to " + f3(SHI0) + ". k-means cuts it into " + NLIST0 +
+    " cells holding between " + mn + " and " + mx + " documents each &mdash; a " + f1(mx / mn) + "&times; range around a mean of " + f1(W.N / ix.nlist) +
+    ". " + Q0 + " queries, each built from one document that is its answer, each asking for " + KK0 +
+    " results. Cost is counted in distance computations, centroids included, so brute force costs " + W.N + " and every row below is comparable to it.");
+  set("fShip", "<strong>The setting a team ships is the first one that clears the target.</strong> Opening " + (NP - 1) +
+    " cells returns " + f4(st.recall[NP - 1]) + " of the true neighbours and opening " + NP + " returns " + f4(st.recall[NP]) +
+    ", so " + NP + " is what goes in the config &mdash; " + pct1((mean(col(st, NP, "c")) - ix.nlist) / W.N) +
+    " of the corpus scanned for " + pct(st.recall[NP]) + " recall, against " + pct(NP / ix.nlist) +
+    " for opening the same number of cells picked at random. The order the index imposes on its cells is worth " +
+    f2(st.recall[NP] / (NP / ix.nlist)) + "&times;, and that is the real product. Everything after this is about what the number " + NP + " does and does not promise.");
+}
+
+/* --- stage 2: neither a cost nor a recall --- */
+function stage2(){
+  var st = S.st, ix = S.ix, W = S.W, rows = [], plist = [1, 2, 3, S.NP, 6, 8, 12], i;
+  for (i = 0; i < plist.length; i++){
+    var p = plist[i], cc = col(st, p, "c"), rr = col(st, p, "r");
+    var cmed = quantile(cc, 0.5), c99 = quantile(cc, 0.99);
+    rows.push({ cls: p === S.NP ? "mid" : "",
+      cells: [iv(p), iv(cmed), iv(c99), iv(maxOf(cc)), f2(maxOf(cc) / cmed) + "&times;",
+              f4(mean(rr)), f2(quantile(rr, 0.1)), f2(quantile(rr, 0.01)), f2(minOf(rr))] });
+    ok(maxOf(cc) >= cmed, "the cost distribution at " + p + " cells has a tail above its median");
+    ok(minOf(rr) <= mean(rr), "the recall distribution at " + p + " cells has a floor below its mean");
+  }
+  tbl("tSpread", ["cells opened", "cost p50", "cost p99", "cost worst", "worst / median", "recall mean", "recall p10", "recall p01", "recall worst"], rows);
+  var cc = col(st, S.NP, "c"), rr = col(st, S.NP, "r");
+  S.cNP = cc; S.rNP = rr;
+  var spread = maxOf(cc) / quantile(cc, 0.5);
+  ok(spread > 1.2, "at the shipped setting the worst query costs meaningfully more than the median one");
+  ok(minOf(rr) < mean(rr) - 0.1, "and the worst-served query is far below the mean the target was set on");
+  set("fSpread", "<strong>&#128308; At the shipped setting the same configuration costs between " + iv(minOf(cc)) + " and " + iv(maxOf(cc)) +
+    " distance computations depending on the query &mdash; " + f2(maxOf(cc) / quantile(cc, 0.5)) + "&times; the median &mdash; and returns between " +
+    pct(minOf(rr)) + " and " + pct(maxOf(rr)) + " of the true neighbours.</strong> The mean is " + pct(mean(rr)) +
+    " and the bottom tenth of queries sit at " + pct(quantile(rr, 0.1)) + " or below. A capacity plan built on the mean cost is wrong for " +
+    pct1(cc.filter(function(x){ return x > mean(cc); }).length / cc.length) + " of traffic, and a recall target set on the mean recall is a statement about no particular query. " +
+    "Neither spread is noise: the index is deterministic and every query is answered the same way twice.");
+}
+
+/* --- stage 3: where the money goes --- */
+function stage3(){
+  var cc = S.cNP, rr = S.rNP, Q = S.st.Q, i, rows = [];
+  var idx = [];
+  for (i = 0; i < Q; i++) idx.push(i);
+  idx.sort(function(a, b){ return cc[a] === cc[b] ? a - b : cc[a] - cc[b]; });
+  var q = Math.floor(Q / 4), qc = [], qr = [];
+  for (i = 0; i < 4; i++){
+    var slice = idx.slice(i * q, i === 3 ? Q : (i + 1) * q);
+    var mc = mean(slice.map(function(j){ return cc[j]; })), mr = mean(slice.map(function(j){ return rr[j]; }));
+    qc.push(mc); qr.push(mr);
+    rows.push({ cls: i === 0 ? "ctrl" : (i === 3 ? "win" : ""),
+      cells: ["quarter " + (i + 1) + (i === 0 ? " (cheapest)" : (i === 3 ? " (dearest)" : "")), iv(slice.length), f1(mc), f4(mr), per1k(1 - mr)] });
+  }
+  tbl("tQuart", ["queries, sorted by what they cost", "count", "distance computations", "recall", "true neighbours missed / 1k"], rows);
+  var half = Q >> 1, lo = idx.slice(0, half), hi = idx.slice(half);
+  var cl = mean(lo.map(function(j){ return cc[j]; })), ch = mean(hi.map(function(j){ return cc[j]; }));
+  var rl = mean(lo.map(function(j){ return rr[j]; })), rh = mean(hi.map(function(j){ return rr[j]; }));
+  S.cheap = { c: cl, r: rl }; S.dear = { c: ch, r: rh };
+  var cr = corr(cc, rr);
+  ok(cr > 0, "what a query costs and how well it is served move in the SAME direction, which is the wrong sign for a budget");
+  ok(rl < rh, "the half the index spends least on is the half it serves worst");
+  ok(ch > cl, "and the half it serves best is the half it spends most on");
+  ok(qr[0] < qr[1] && qr[0] < qr[2] && qr[0] < qr[3], "the cheapest quarter is the only one with a recall problem");
+  set("fMoney", "<strong>&#128308; The correlation between what a query costs and how well it is answered is " + f3(cr) +
+    " &mdash; positive, which is the wrong sign.</strong> The cheaper half of the traffic gets " + f1(cl) +
+    " distance computations and misses " + pct(1 - rl) + " of its true neighbours; the dearer half gets " + f1(ch) + " and misses " + pct(1 - rh) +
+    ". That is <strong>" + f2(ch / cl) + "&times; the spend on the half that was already right</strong>, and a <strong>" + f2((1 - rl) / (1 - rh)) +
+    "&times;</strong> miss rate on the half that was not. Nobody chose this. <code>nprobe</code> counts cells, cells here hold between " + S.sizeMin + " and " + S.sizeMax +
+    " documents, and k-means cuts a tight region finely &mdash; so the query whose ten neighbours are scattered over many small cells is exactly the query for which " +
+    S.NP + " cells is the least work.");
+  set("sSpend", f2(ch / cl) + "&times;");
+  set("sMiss", f2((1 - rl) / (1 - rh)) + "&times;");
+  set("sTail", iv(quantile(cc, 0.5)) + " &rarr; " + iv(maxOf(cc)));
+}
+
+/* --- stage 4: the control --- */
+function stage4(){
+  var W = S.W, ix = S.ix, QS = S.QS, st = S.st, NP = S.NP, i;
+  var mc = mean(S.cNP), M = Math.round(mc) - ix.nlist;
+  var br = [], bc = [];
+  for (i = 0; i < QS.Q; i++){
+    var b = searchBudget(W, ix, QS.qs, i, KK0, M);
+    br.push(overlap(b.ids, st.exAll[i]) / KK0); bc.push(b.cost);
+  }
+  var cbad = 0;
+  for (i = 0; i < QS.Q; i++) if (bc[i] !== ix.nlist + Math.min(M, W.N)) cbad++;
+  ok(cbad === 0, "the document budget's bill is a constant, not a distribution");
+  var mbr = mean(br), mrr = mean(S.rNP);
+  ok(mbr > mrr, "at a matched mean bill, budgeting in documents beats budgeting in cells");
+  ok(quantile(bc, 0.99) < quantile(S.cNP, 0.99), "and it does it with a shorter tail, not a longer one");
+  S.budget = { M: M, r: mbr, c: mean(bc), worst: maxOf(bc), list: br };
+  // random order at the same number of cells, as the floor
+  tbl("tPolicy", ["policy", "cost mean", "cost p99", "cost worst", "recall", "recall p10", "recall worst", "true neighbours missed / 1k"], [
+    { cls: "ctrl", cells: ["no order: " + NP + " cells at random", f1(mean(S.cNP)), "&mdash;", "&mdash;", f4(NP / ix.nlist), "&mdash;", "&mdash;", per1k(1 - NP / ix.nlist)] },
+    { cells: [NP + " cells, nearest centroids first", f1(mean(S.cNP)), iv(quantile(S.cNP, 0.99)), iv(maxOf(S.cNP)), f4(mrr), f2(quantile(S.rNP, 0.1)), f2(minOf(S.rNP)), per1k(1 - mrr)] },
+    { cls: "win", cells: [M + " documents, same order", f1(mean(bc)), iv(quantile(bc, 0.99)), iv(maxOf(bc)), f4(mbr), f2(quantile(br, 0.1)), f2(minOf(br)), per1k(1 - mbr)] },
+    { cells: ["brute force", iv(W.N), iv(W.N), iv(W.N), f4(1), f2(1), f2(1), per1k(0)] }
+  ]);
+  set("fPolicy", "<strong>&#9989; Same index, same order, same mean bill to within " + f1(Math.abs(mean(bc) - mean(S.cNP))) +
+    " distance computations out of " + f1(mean(S.cNP)) + " &mdash; and the misses fall from " + pct(1 - mrr) + " to " + pct(1 - mbr) +
+    ", a factor of " + f2((1 - mrr) / (1 - mbr)) + ".</strong> The worst-case bill falls at the same time, from " + iv(maxOf(S.cNP)) + " to " + iv(maxOf(bc)) +
+    ", because a document budget is a constant and a cell budget is not. Both axes improve, so this is not a trade: the cell count was simply spending the money in the wrong place. " +
+    "The whole change is <em>stop counting cells and count documents</em>, which every mature vector index already exposes and almost nobody sets.");
+
+  // the same comparison at every setting worth shipping
+  var mrows = [], plist = [2, 3, NP, 5, 6, 8], wins = 0;
+  for (var mi = 0; mi < plist.length; mi++){
+    var pp = plist[mi];
+    if (pp > ix.nlist) continue;
+    var pc = mean(col(st, pp, "c")), pm = Math.max(1, Math.round(pc) - ix.nlist), pr = 0;
+    for (i = 0; i < QS.Q; i++) pr += overlap(searchBudget(W, ix, QS.qs, i, KK0, pm).ids, st.exAll[i]) / KK0;
+    pr /= QS.Q;
+    if (pr >= st.recall[pp]) wins++;
+    ok(pr >= st.recall[pp], "at a bill of " + iv(pc) + " computations the document budget matches or beats " + pp + " cells");
+    mrows.push({ cls: pp === NP ? "mid" : "",
+      cells: [iv(pp), iv(pm), f1(pc), f4(st.recall[pp]), f4(pr), f2((1 - st.recall[pp]) / Math.max(1e-12, 1 - pr)) + "&times;"] });
+  }
+  ok(wins === mrows.length, "the document budget wins at every matched bill tried, not just the shipped one");
+  tbl("tMatch", ["cells", "documents at the same bill", "bill", "recall by cells", "recall by documents", "misses divided by"], mrows);
+  set("fMatch", "<strong>&#9989; " + wins + " of " + mrows.length + " matched bills, and the document budget is ahead at every one.</strong> " +
+    "The gap is small where the cell setting is already opening enough cells for the work to even out, and it widens exactly where a team would ship &mdash; at the setting the recall target picks.");
+
+  // equal recall, and the resolution of the knob
+  var Msame = budgetFor(W, ix, QS, st, KK0, st.recall[NP]);
+  var M95 = budgetFor(W, ix, QS, st, KK0, TARGET0);
+  S.Msame = Msame; S.M95 = M95;
+  ok(ix.nlist + Msame < mc, "hitting the same recall with a document budget costs less than the cell setting that reached it");
+  ok(budgetRecall(W, ix, QS, st, KK0, M95) >= TARGET0, "the document budget can land ON the target rather than past it");
+  ok(M95 < Msame, "and landing on the target is cheaper than overshooting it");
+  tbl("tEqual", ["what you asked for", "how you asked", "setting", "cost", "recall delivered", "overshoot"], [
+    { cls: "ctrl", cells: ["recall " + pct(TARGET0), "cells", iv(NP - 1) + " cells", f1(mean(col(st, NP - 1, "c"))), f4(st.recall[NP - 1]), "misses the target"] },
+    { cls: "mid", cells: ["recall " + pct(TARGET0), "cells", iv(NP) + " cells", f1(mc), f4(st.recall[NP]), "+" + pct(st.recall[NP] - TARGET0)] },
+    { cls: "win", cells: ["recall " + pct(TARGET0), "documents", iv(M95) + " documents", iv(ix.nlist + M95), f4(budgetRecall(W, ix, QS, st, KK0, M95)), "+" + pct(budgetRecall(W, ix, QS, st, KK0, M95) - TARGET0)] },
+    { cls: "win", cells: ["recall " + f4(st.recall[NP]), "documents", iv(Msame) + " documents", iv(ix.nlist + Msame), f4(budgetRecall(W, ix, QS, st, KK0, Msame)), "&mdash;"] }
+  ]);
+  set("fEqual", "<strong>The cell knob has " + ix.nlist + " positions and the document knob has " + W.N + ".</strong> Between " + (NP - 1) + " cells and " + NP +
+    " the recall jumps " + pct(st.recall[NP - 1]) + " &rarr; " + pct(st.recall[NP]) + " and the bill jumps " + f1(mean(col(st, NP - 1, "c"))) + " &rarr; " + f1(mc) +
+    " &mdash; there is nothing in between, so a team asking for " + pct(TARGET0) + " buys " + pct(st.recall[NP]) + " and pays " +
+    pct1(mc / (ix.nlist + M95) - 1) + " more than the target costs. Asked in documents, " + pct(TARGET0) + " lands at " + iv(ix.nlist + M95) +
+    " and the recall the cell setting actually delivered lands at " + iv(ix.nlist + Msame) + ", " + pct1(1 - (ix.nlist + Msame) / mc) + " cheaper for the identical result.");
+}
+
+/* --- stage 5: the bound rule --- */
+function stage5(){
+  var W = S.W, ix = S.ix, QS = S.QS, st = S.st, i;
+  var bc = [], bp = [], bex = 0;
+  for (i = 0; i < QS.Q; i++){
+    var b = searchBound(W, ix, QS.qs, i, KK0, true);
+    bc.push(b.cost); bp.push(b.probed);
+    if (sameIds(b.ids, st.exAll[i])) bex++;
+  }
+  ok(bex === QS.Q, "the bound rule returns brute force's list EXACTLY, on every single query - an identity, not a rate");
+  S.bound = { c: bc, p: bp, exact: bex / QS.Q };
+  var nc = [], nex = 0, nr = 0, nsub = 0;
+  for (i = 0; i < QS.Q; i++){
+    var nb = searchBound(W, ix, QS.qs, i, KK0, false);
+    nc.push(nb.cost);
+    if (sameIds(nb.ids, st.exAll[i])) nex++;
+    nr += overlap(nb.ids, st.exAll[i]) / KK0;
+    if (overlap(nb.ids, st.exAll[i]) <= KK0) nsub++;
+  }
+  nr /= QS.Q;
+  ok(nex < QS.Q, "the same rule without the radius is NOT exact");
+  ok(nsub === QS.Q, "and it never beats brute force either - it can only lose neighbours, never invent them");
+  ok(mean(nc) < mean(bc), "the unsound stop is cheaper, which is exactly why it gets written");
+  ok(mean(bc) > mean(S.cNP), "exactness costs more than the shipped setting");
+  tbl("tBound", ["rule", "exact on", "recall", "cost mean", "cost p50", "cost p99", "cost worst", "worst as share of brute force"], [
+    { cls: "ctrl", cells: ["stop when the centroid is far enough (no radius)", pct(nex / QS.Q), f4(nr), f1(mean(nc)), iv(quantile(nc, 0.5)), iv(quantile(nc, 0.99)), iv(maxOf(nc)), pct1(maxOf(nc) / W.N)] },
+    { cells: [S.NP + " cells", "&mdash;", f4(st.recall[S.NP]), f1(mean(S.cNP)), iv(quantile(S.cNP, 0.5)), iv(quantile(S.cNP, 0.99)), iv(maxOf(S.cNP)), pct1(maxOf(S.cNP) / W.N)] },
+    { cls: "win", cells: ["stop on the bound (centroid distance minus radius)", pct(bex / QS.Q), f4(1), f1(mean(bc)), iv(quantile(bc, 0.5)), iv(quantile(bc, 0.99)), iv(maxOf(bc)), pct1(maxOf(bc) / W.N)] },
+    { cells: ["brute force", pct(1), f4(1), iv(W.N), iv(W.N), iv(W.N), iv(W.N), pct1(1)] }
+  ]);
+  set("fBound", "<strong>&#9989; The bound rule is exact on " + pct(bex / QS.Q) + " of queries, and that is a proof rather than a measurement:</strong> the page compares its " + KK0 +
+    " returned ids against brute force's " + KK0 + " for all " + QS.Q + " queries and requires the lists to be identical. It costs " + pct1(mean(bc) / W.N) +
+    " of a full scan on average and opens " + iv(quantile(bp, 0.5)) + " cells at the median &mdash; but its p99 is " + iv(quantile(bc, 0.99)) + " and its worst case is " +
+    iv(maxOf(bc)) + ", which is " + pct1(maxOf(bc) / W.N) + " of just scanning everything. <strong>You can fix the recall or you can fix the bill. The count fixes neither, and the bound fixes the one with the longer tail.</strong>");
+  set("fNaive", "<strong>&#128308; The version without the radius &mdash; stop when the next centroid is further than the k-th hit &mdash; is exact on " + pct(nex / QS.Q) +
+    " of queries and returns " + pct(nr) + " of the true neighbours at " + pct1(mean(nc) / W.N) + " of a full scan.</strong> It looks like the same idea and it is not a bound at all: " +
+    "a centroid can be far away while a member of its cell is close, and the radius is the only term that rules that out. It is cheaper than the sound rule by " +
+    f2(mean(bc) / mean(nc)) + "&times;, which is why it is the version that gets written, and the failure is silent &mdash; the results come back, ranked, looking exactly like results.");
+
+  var caps = [Math.round(mean(S.cNP)) - ix.nlist, 300, 500, 900], rows = [];
+  for (var ci = 0; ci < caps.length; ci++){
+    var cap = caps[ci], r = 0, c = 0, fin = 0, exq = 0, finWrong = 0;
+    for (i = 0; i < QS.Q; i++){
+      var cb = searchBoundCapped(W, ix, QS.qs, i, KK0, cap);
+      r += overlap(cb.ids, st.exAll[i]) / KK0; c += cb.cost;
+      if (cb.finished) fin++;
+      if (sameIds(cb.ids, st.exAll[i])) exq++;
+      if (cb.finished && !sameIds(cb.ids, st.exAll[i])) finWrong++;
+    }
+    ok(finWrong === 0, "every capped search that finished on its own bound is still exactly brute force, at cap " + cap);
+    ok(exq >= fin, "and some queries the cap cut short come out exact anyway, at cap " + cap);
+    rows.push({ cls: ci === 0 ? "mid" : (ci === caps.length - 1 ? "win" : ""),
+      cells: [iv(ix.nlist + cap), pct1(fin / QS.Q), pct(exq / QS.Q), f4(r / QS.Q), f1(c / QS.Q), iv(ix.nlist + cap)] });
+  }
+  tbl("tCap", ["latency cap, in distance computations", "finished on the bound", "exact", "recall", "cost mean", "cost worst"], rows);
+  set("fCap", "<strong>A cap turns a proof back into a rate.</strong> At the same bill as the shipped cell setting the capped rule finishes on its own bound for only a small share of queries and is exact for most of the rest by luck &mdash; " +
+    "which is the honest description of every production configuration of this idea. The cap has to be about " + f1(maxOf(bc) / mean(S.cNP)) +
+    "&times; the shipped mean bill before EVERY query is allowed to finish on its own bound. Below that the results are still mostly exact &mdash; but they are exact the way the count is exact, as a rate that happened, not as a property you can hold anyone to.");
+}
+
+/* --- stage 6: the two orders --- */
+function stage6(){
+  var W = S.W, ix = S.ix, QS = S.QS, st = S.st, i, rows = [], plist = [2, 3, S.NP, 6], worse = 0;
+  for (var pi = 0; pi < plist.length; pi++){
+    var p = plist[pi], rl = 0, cl = 0;
+    for (i = 0; i < QS.Q; i++){
+      var b = searchLBCells(W, ix, QS.qs, i, KK0, p);
+      rl += overlap(b.ids, st.exAll[i]) / KK0; cl += b.cost;
+    }
+    rl /= QS.Q; cl /= QS.Q;
+    if (rl < st.recall[p]) worse++;
+    rows.push({ cls: p === S.NP ? "mid" : "",
+      cells: [iv(p), f4(st.recall[p]), f1(mean(col(st, p, "c"))), f4(rl), f1(cl), (rl < st.recall[p] ? "&minus;" : "+") + pct(Math.abs(st.recall[p] - rl))] });
+  }
+  ok(worse === plist.length, "truncating the bound order loses recall against truncating the centroid order, at every setting tried");
+  tbl("tOrder", ["cells opened", "centroid order recall", "centroid order cost", "bound order recall", "bound order cost", "difference"], rows);
+  set("fOrder", "<strong>&#9888; The order that makes the stop provable is worse at every truncation point.</strong> Walking by the bound pulls a large loose cell forward because its radius is big, " +
+    "and a big radius is a statement about the cell's worst member, not its best. So the two ideas on this page do not compose: use the bound and you get exactness at a long-tailed price, " +
+    "use a budget and you get a fixed price at an approximate recall, and the thing you must not do is take the bound's ordering as a better default for the ordinary knob. " +
+    "This was the recommendation the page set out to make, and it lost to the boring one.");
+}
+
+/* --- stage 7: which documents disappear --- */
+function stage7(){
+  var W = S.W, ix = S.ix, QS = S.QS, st = S.st;
+  var R = reach(W, ix, QS, KK0, st, S.NP);
+  S.R = R;
+  var sRate = R.sW ? R.sM / R.sW : 0, bRate = R.bW ? R.bM / R.bW : 0;
+  ok(R.totMiss > 0, "some result slots are lost at the shipped setting");
+  ok(R.topShare > R.topN / R.wanted, "the loss is concentrated on a minority of documents rather than spread evenly");
+  ok(sRate > bRate, "documents in small cells lose a larger share of their appearances than documents in big ones");
+  ok(R.invisible < R.wanted, "not every document that belongs in a result list is invisible");
+  tbl("tDocs", ["documents", "how many", "result slots they belong in", "slots lost", "loss rate"], [
+    { cells: ["every document that belongs in at least one top-" + KK0, iv(R.wanted), iv(R.totWant), iv(R.totMiss), pct(R.totMiss / R.totWant)] },
+    { cls: "ctrl", cells: ["in a cell of " + R.small + " documents or fewer", "&mdash;", iv(R.sW), iv(R.sM), pct(sRate)] },
+    { cls: "win", cells: ["in a cell of " + R.big + " documents or more", "&mdash;", iv(R.bW), iv(R.bM), pct(bRate)] },
+    { cls: "mid", cells: ["never returned at all, though they belong somewhere", iv(R.invisible), "&mdash;", "&mdash;", pct1(R.invisible / R.wanted) + " of documents"] }
+  ]);
+  set("fDocs", "<strong>&#128308; A document in one of the small cells loses " + pct(sRate) + " of the result slots it belongs in; a document in one of the big cells loses " + pct(bRate) +
+    " &mdash; a factor of " + f1(sRate / (bRate || 1e-9)) + ", decided entirely by which cell it landed in.</strong> " + R.invisible + " documents (" + pct1(R.invisible / R.wanted) +
+    " of the ones that belong in any result list) are never returned to any of the " + QS.Q + " queries, and the worst " + R.topN + " documents carry " + pct1(R.topShare) +
+    " of all the loss. That is what the aggregate hides: " + pct(1 - st.recall[S.NP]) + " missing neighbours reads like an even sprinkle of bad luck, and it is a " +
+    "systematically unreachable slice of the corpus. And the direction is the wrong way round &mdash; small cells are what k-means makes where documents are DENSE, so it is the " +
+    "well-covered subjects, the ones with the most written about them, that the index serves worst.");
+}
+
+/* --- stage 8: recall vs answers --- */
+function stage8(){
+  var W = S.W, ix = S.ix, i, rows = [], tilts = [0, 0.2, 0.4, 0.6, 1.0];
+  var rmin = 2, rmax = -1, amin = 2, amax = -1, gapMax = 0;
+  for (var ti = 0; ti < tilts.length; ti++){
+    var tl = tilts[ti], Qs = makeQueries(770200 + Math.round(tl * 100), W, Q0, tl, NOISE0);
+    var rr = 0, kk = 0, ek = 0, lucky = 0;
+    for (i = 0; i < Qs.Q; i++){
+      var e = exactTopK(W, Qs.qs, i, KK0), eh = e.has(Qs.ans[i]);
+      if (eh) ek++;
+      var sw = sweepQuery(W, ix, Qs.qs, i, KK0, e.ids(), Qs.ans[i]);
+      rr += sw.recall[S.NP]; kk += sw.kept[S.NP];
+      if (sw.kept[S.NP] && !eh) lucky++;
+    }
+    rr /= Qs.Q; kk /= Qs.Q; ek /= Qs.Q;
+    // A truncated search returns a DIFFERENT set, not a subset, so it can hold an
+    // answer the exhaustive top-k pushed out. It is rare and it is not zero, and
+    // the page bounds it instead of claiming it cannot happen.
+    lucky /= Qs.Q;
+    ok(lucky < 0.02, "the index finding an answer brute force missed is rare rather than impossible, at tilt " + ti);
+    ok(kk <= ek + lucky + 1e-12, "and it can never exceed brute force by more than those lucky queries, at tilt " + ti);
+    S.lucky = Math.max(S.lucky || 0, lucky);
+    rmin = Math.min(rmin, rr); rmax = Math.max(rmax, rr);
+    amin = Math.min(amin, kk); amax = Math.max(amax, kk);
+    gapMax = Math.max(gapMax, ek - kk);
+    rows.push({ cls: ti === 0 ? "win" : (ti === tilts.length - 1 ? "ctrl" : ""),
+      cells: [f2(tl), f4(rr), f4(ek), f4(kk), pct((ek - kk)) ] });
+  }
+  S.proxyRatio = (amax - amin) / Math.max(1e-12, rmax - rmin);
+  S.gapMax = gapMax; S.answerSwing = amax - amin;
+  ok(rmax - rmin < amax - amin, "over the same sweep the recall number moves far less than the thing it is a proxy for");
+  ok(gapMax < amax - amin, "and the index's own contribution never approaches the size of the swing");
+  tbl("tTilt", ["how far the query leans off its answer", "recall against brute force", "brute force finds the answer", "the index finds the answer", "the index's own share of the loss"], rows);
+  set("fTilt", "<strong>&#128308; Across this sweep the recall number moves " + pct(rmax - rmin) + " and the thing it is a proxy for moves " + pct(amax - amin) +
+    " &mdash; " + f1((amax - amin) / (rmax - rmin)) + "&times; further.</strong> The index tracks brute force the whole way; the largest gap between what an exhaustive scan of these embeddings finds and what the index finds is " +
+    pct(gapMax) + ". So a retrieval stack whose answers have quietly got worse can show a perfectly healthy recall dashboard, because recall asks <em>did the index agree with an exhaustive scan of the same vectors</em> " +
+    "and never <em>were those the right vectors</em>. Both questions are worth asking. Only one of them has a number in the vector database's metrics endpoint, and it is not the one that decides whether the answer was there.");
+}
+
+/* --- stage 9: the nulls --- */
+function stage9(){
+  var W = S.W, ix = S.ix, QS = S.QS, st = S.st, i, p, R = 3;
+  var acc = new Float64Array(ix.nlist + 1), worst = 0;
+  for (i = 0; i < QS.Q; i++)
+    for (var s = 0; s < R; s++){
+      var rc = sweepRandomOrder(W, ix, QS.qs, i, KK0, st.exAll[i], 4000037 + i * 1009 + s * 7919);
+      for (p = 0; p <= ix.nlist; p++) acc[p] += rc[p];
+    }
+  for (p = 1; p <= ix.nlist; p++) worst = Math.max(worst, Math.abs(acc[p] / (R * QS.Q) - p / ix.nlist));
+  ok(worst < 0.05, "opening cells at random matches its closed form nprobe/nlist at every setting, within sampling");
+  ok(Math.abs(acc[ix.nlist] / (R * QS.Q) - 1) < 1e-12, "and it is exactly one when every cell is opened");
+  var Qn = scrambleAnswers(770999, QS, W.N), Sn = study(W, ix, Qn, KK0), flat = 0;
+  for (p = 1; p <= ix.nlist; p++) flat = Math.max(flat, Math.abs(Sn.kept[p] - KK0 / W.N));
+  var bin = 4 * Math.sqrt((KK0 / W.N) * (1 - KK0 / W.N) / QS.Q);
+  ok(flat < bin, "when the answer is drawn independently of the query, the chance of returning it is k/N at EVERY setting");
+  ok(Math.abs(Sn.exKept - KK0 / W.N) < bin, "and brute force does no better than that either");
+  var ix1 = buildIvf(770002, W, 1, 2), same = 0;
+  for (i = 0; i < 40; i++) if (sameIds(searchBound(W, ix1, QS.qs, i, KK0, true).ids, st.exAll[i])) same++;
+  ok(same === 40, "an index with one cell IS brute force");
+  S.nullFlat = flat; S.randWorst = worst;
+  tbl("tNull", ["control", "what it should be", "what it is", "why it is here"], [
+    { cls: "ctrl", cells: ["open " + S.NP + " cells picked at random", f4(S.NP / ix.nlist), f4(acc[S.NP] / (R * QS.Q)), "the floor: what the cells are worth with the ORDER thrown away"] },
+    { cls: "ctrl", cells: ["open every cell", f4(1), f4(st.recall[ix.nlist]), "an index that scans everything is not an index"] },
+    { cls: "ctrl", cells: ["one cell holding the whole corpus", "identical to brute force", same + " / 40 identical", "the degenerate partition, as a check on the machinery"] },
+    { cls: "ctrl", cells: ["answer drawn independently of the query", f4(KK0 / W.N), f4(Sn.kept[S.NP]), "with no signal in the embedding, every recall point buys exactly nothing"] }
+  ]);
+  set("fNull1", "<strong>The order is the product, and it is worth " + f2(st.recall[S.NP] / (S.NP / ix.nlist)) + "&times;.</strong> Opening " + S.NP +
+    " of " + ix.nlist + " cells at random returns " + pct(acc[S.NP] / (R * QS.Q)) + " of the true neighbours, and the closed form says it must be exactly " + pct(S.NP / ix.nlist) +
+    ": by linearity every neighbour survives with the probability that its cell was among the ones opened, whatever the cell sizes are, and a neighbour that IS opened can never be pushed out of the top " + KK0 +
+    " because everything closer to the query than it is is also one of the " + KK0 + ". The measurement sits within " + f4(worst) + " of that line at every one of the " + ix.nlist + " settings.");
+  set("fNull2", "<strong>&#9888; The null that matters most is the flat one.</strong> Redraw each query's answer uniformly from the corpus, so the embedding carries no information about which document answers it, " +
+    "and the chance of returning that document is exactly " + KK0 + "/" + W.N + " = " + pct3(KK0 / W.N) + " for ANY " + KK0 +
+    " documents the index picks &mdash; measured flat to within " + pct3(flat) + " across all " + ix.nlist + " settings, and brute force scores " + pct3(Sn.exKept) +
+    ", the same thing to within one query in " + iv(QS.Q) + ". Every result on this page is a statement about the index given an embedding that works. None of it survives an embedding that does not, and no amount of recall tuning is a substitute for finding that out first.");
+}
+
+/* --- stage 10: identities and the closing controls --- */
+function stage10(){
+  var W = S.W, ix = S.ix, st = S.st, i, p;
+  var nestBad = 0, sub;
+  for (i = 0; i < 40; i++){
+    var po = probeOrder(ix, S.QS.qs, i, W.d), seen = {};
+    for (p = 0; p < ix.nlist; p++){
+      if (seen[po.order[p]]) nestBad++;
+      seen[po.order[p]] = 1;
+    }
+    var lo = probeOrderLB(ix, S.QS.qs, i, W.d), prev = -1;
+    for (p = 0; p < ix.nlist; p++){ if (lo.lb[p] < prev - 1e-12) nestBad++; prev = lo.lb[p]; }
+  }
+  ok(nestBad === 0, "both probe orders are permutations of the cells, and the bound order is sorted by the bound");
+  // the bound really bounds, over every query, cell and member tried
+  var bbad = 0, checks = 0;
+  for (i = 0; i < 8; i++)
+    for (var c = 0; c < ix.nlist; c++){
+      var dc = Math.sqrt(sqdistAt(S.QS.qs, i * W.d, ix.cent, c * W.d, W.d));
+      for (var m = 0; m < ix.cells[c].length; m++){
+        var dx = Math.sqrt(sqdistAt(S.QS.qs, i * W.d, W.docs, ix.cells[c][m] * W.d, W.d));
+        checks++;
+        if (dx < dc - ix.rad[c] - 1e-12) bbad++;
+      }
+    }
+  ok(bbad === 0, "the triangle-inequality bound holds for all " + checks + " query-member pairs checked");
+  // the generator's documented hazard, checked rather than quoted
+  var l = new Lcg(12345), bits = [], alt = true;
+  for (i = 0; i < 40; i++) bits.push(l.nextInt() & 1);
+  for (i = 1; i < bits.length; i++) if (bits[i] === bits[i - 1]) alt = false;
+  ok(alt, "the generator's raw low bit alternates every step, which is why % n is never used");
+  var l2 = new Lcg(12345), hb = [], allAlt = true;
+  for (i = 0; i < 40; i++) hb.push(l2.below(2));
+  for (i = 1; i < hb.length; i++) if (hb[i] !== hb[i - 1]) allAlt = false;
+  ok(!allAlt, "and the high-bit draw does not inherit that alternation");
+  var g = new Lcg(770777), n = 40000, sum = 0, sq = 0, q4 = 0, x;
+  for (i = 0; i < n; i++){ x = g.gauss(); sum += x; sq += x * x; q4 += x * x * x * x; }
+  ok(Math.abs(sum / n) < 4 / Math.sqrt(n), "the gaussian stream has mean zero");
+  ok(Math.abs(sq / n - 1) < 8 / Math.sqrt(n), "and unit variance");
+  ok(Math.abs(q4 / n - 3) < 40 / Math.sqrt(n), "and the normal fourth moment");
+  // every vector really is on the sphere
+  var nbad = 0;
+  for (i = 0; i < W.N; i++) if (Math.abs(Math.sqrt(dotAt(W.docs, i * W.d, W.docs, i * W.d, W.d)) - 1) > 1e-12) nbad++;
+  ok(nbad === 0, "every document lies on the unit sphere");
+
+  tbl("tIdent", ["identity", "computed one way", "computed the other way", "queries checked"], [
+    { cells: ["recall = share of the neighbours' cells that were opened", "set intersection with brute force", "cell membership, no distances", grp(st.Q * ix.nlist) + " query-settings"] },
+    { cells: ["opening every cell = brute force", "recall " + f4(st.recall[ix.nlist]), "cost " + iv(st.costAll[0][ix.nlist]) + " = corpus + centroids", iv(st.Q)] },
+    { cells: ["the bound rule = brute force", "its " + KK0 + " ids", "brute force's " + KK0 + " ids", iv(st.Q)] },
+    { cells: ["cosine order = squared euclidean order", "distances", "dot products", "4 queries, 4,005 pairs each"] },
+    { cells: ["the radius bounds its own cell", "centroid distance minus radius", "the actual member distance", grp(checks) + " query-member pairs"] },
+    { cells: ["recall never falls when a cell is opened", "monotone check per query", "&mdash;", grp(st.Q * ix.nlist) + " steps"] }
+  ]);
+  set("fIdent", "<strong>&#9989; None of these is a tolerance.</strong> Each row is one quantity computed by two routes that share no code, required to come out the same; the recall identity alone is checked " +
+    iv(st.Q * ix.nlist) + " times as the page builds its first table, and a single disagreement turns the badge in the corner red.");
+  set("fIdent2", "<strong>The load-bearing one is the first.</strong> Recall is defined as the overlap between what the index returned and what brute force returned, which needs a top-" + KK0 +
+    " to be maintained and compared. It is also computable without looking at a single distance: a true neighbour survives if and only if its cell was opened, because anything that could push it out of the top " + KK0 +
+    " is itself in the top " + KK0 + ". The two routes agree on every query at every setting, which is what licenses the closed form for the random-order floor &mdash; and that closed form is the only reason " +
+    "the page can say what the index's ordering is worth rather than just what its recall is.");
+
+  set("fDeclare", "One corpus, one index, one query set, and every comparison made at an equal bill or an equal recall. The index is rebuilt bit for bit from a seed, so a difference between two rows is never a difference between two indexes. " +
+    "Nothing in the engine reads the clock, the network, the DOM or <code>Math.random</code>; the only randomness is a seeded 31-bit generator drawn from its high bits.");
+  set("fWhyOrder", "<strong>The tell was the hit rate.</strong> The first version of the bound rule walked the cells by centroid distance and came out exact on 99.38% of queries &mdash; a number that should have been impossible in either direction. " +
+    "A rule derived from the triangle inequality is exact or it is not a rule, so 99.38% was not a small bug in the arithmetic, it was the wrong algorithm returning the right answer most of the time. " +
+    "Sorting by the bound instead took it to " + pct(S.bound.exact) + " and cost " + f2(mean(S.bound.c) / mean(S.cNP)) + "&times; the shipped setting's bill.");
+
+  var sRate = S.R.sM / S.R.sW, bRate = S.R.bM / S.R.bW;
+  set("fCtrl", "<strong>&#9989; The control, in one line: budget the search in documents, not in cells.</strong> On this corpus that is " + iv(S.budget.M) + " documents instead of " + S.NP +
+    " cells &mdash; the same mean bill to within " + f1(Math.abs(S.budget.c - mean(S.cNP))) + " distance computations, " + f2((1 - st.recall[S.NP]) / (1 - S.budget.r)) +
+    "&times; fewer missed neighbours, a worst-case bill that falls from " + iv(maxOf(S.cNP)) + " to " + iv(S.budget.worst) + " because it is now a constant, and a knob with " + W.N +
+    " positions instead of " + ix.nlist + " so a stated recall target can actually be hit rather than overshot. Measure the recall you are getting against the random-order floor, not against one, so you know what the ordering is worth: here " +
+    f2(st.recall[S.NP] / (S.NP / ix.nlist)) + "&times;. And if you need exactness, it exists &mdash; the bound rule is provably exact &mdash; but price it on its p99, which is " +
+    pct1(quantile(S.bound.c, 0.99) / W.N) + " of a full scan and " + f1(quantile(S.bound.c, 0.99) / mean(S.cNP)) + "&times; the mean bill you are used to.");
+  set("fCtrl2", "<strong>&#9888; What the control does not fix.</strong> Documents in the small cells still lose " + f1(sRate / (bRate || 1e-9)) +
+    "&times; the share that documents in the big cells do, because a flat budget reallocates work between queries and not between documents &mdash; the fix for that is at build time, in how the corpus is cut, not at query time. " +
+    "The recall number still cannot see whether the embedding pointed at the right documents in the first place, and across the last table that was worth " + f1(S.proxyRatio) +
+    "&times; more movement than everything the index did &mdash; the largest gap the index itself opened up was " + pct(S.gapMax) + " against an " + pct(S.answerSwing) + " swing. And every number here is a partition index without compression; add product quantisation and the errors stop being absences and start being distortions, which is a different page.");
+}
+
+/* --- notes --- */
+function stageNotes(){
+  var st = S.st, ix = S.ix, W = S.W;
+  set("fN1", "<strong>The first corpus killed the whole effect and it took a while to see why.</strong> Documents drawn with a single spread wide enough to be interesting are, in " + D0 +
+    " dimensions, indistinguishable from uniform on the sphere: recall at one cell was 0.31, the cells came out the same size, and the exact bound rule cost 103% of brute force &mdash; more than not having an index. " +
+    "None of the results on this page exist in that world, which is worth saying plainly: the mechanism here is a statement about CLUMPY corpora with UNEVEN clumps, and the page declares that structure rather than discovering it.");
+  set("fN2", "<strong>The random-order floor looked biased and was not.</strong> Measured against its closed form it wanders by a point or two at the middle settings &mdash; " + pct1(S.randWorst) + " at the worst of the " + ix.nlist + " &mdash; which looks like a broken shuffle. " +
+    "It is not: a query whose " + KK0 + " neighbours all sit in ONE cell contributes a coin flip, not an average, so the per-draw variance is nearly the maximum a bounded variable can have and the standard error is around " +
+    "0.008 rather than the 0.003 a naive count suggests. The shuffle was checked separately &mdash; every cell lands in the first quarter of the order within 0.4 points of the right rate over 200,000 shuffles &mdash; and the page asserts a bound, not a match.");
+  set("fN3", "<strong>The bound order was going to be the recommendation.</strong> It sorts cells by what they could possibly contain rather than by where their middle is, which sounds strictly better, and it is strictly worse at every truncation point tried: " +
+    "a large loose cell has a large radius and gets pulled forward on the strength of its worst member. The page keeps the losing table rather than the argument.");
+  set("fN4", "<strong>The invisible-document count is small and stayed small.</strong> " + S.R.invisible + " documents of " + S.R.wanted +
+    " is " + pct1(S.R.invisible / S.R.wanted) + ", and it would have been easy to run the whole section at one cell instead of " + S.NP +
+    " and report a much more alarming number. The setting used is the one the target chose, and the interesting result there was never the headline count &mdash; it was that the loss rate splits " +
+    f1((S.R.sM / S.R.sW) / (S.R.bM / S.R.bW)) + "&times; by cell size.");
+  set("fN5", "<strong>Half the page is about a spread and the sample is " + st.Q + " queries.</strong> A p99 over " + st.Q +
+    " queries is the third-worst one, which is a weak statistic, and the worst case is weaker still. The claims made from the tail are therefore comparative &mdash; this policy's tail against that one's on the same queries &mdash; " +
+    "and never absolute. The one place an absolute tail number appears, the capped-bound table, it is bracketed by the cap that produced it.");
+}
+
+/* --- checks list + badge --- */
+function stageFinal(){
+  set("ulChecks", CHECKS.map(function(c){
+    return "<li><span class=\"pill " + (c.pass ? "ok\">PASS" : "no\">FAIL") + "</span> " + c.label + "</li>";
+  }).join(""));
+  var el = document.getElementById("selftest");
+  if (FAILED){
+    el.textContent = (CHECKS.length - FAILED) + " / " + CHECKS.length + " checks passed, " + FAILED + " FAILED";
+    el.style.background = "#7f1d1d";
+    if (typeof console !== "undefined") console.error("AI day77 assertions FAILED", CHECKS.filter(function(c){ return !c.pass; }));
+  } else {
+    el.textContent = CHECKS.length + " / " + CHECKS.length + " checks passed";
+  }
+  document.body.setAttribute("data-ready", "1");
+}
+
+/* tabs */
+Array.prototype.forEach.call(document.querySelectorAll(".tab[data-p]"), function(b){
+  b.addEventListener("click", function(){
+    Array.prototype.forEach.call(document.querySelectorAll(".tab[data-p]"), function(x){
+      x.setAttribute("aria-selected", x === b ? "true" : "false");
+    });
+    ["look", "understand", "build"].forEach(function(n){ document.getElementById("p-" + n).hidden = (n !== b.dataset.p); });
+  });
+});
+
+/* the BUILD tab re-runs the engine with your parameters */
+function clampInt(id, lo, hi, dflt){
+  var x = Math.round(+document.getElementById(id).value);
+  if (!isFinite(x)) x = dflt;
+  return Math.max(lo, Math.min(hi, x));
+}
+function runCustom(){
+  var N = clampInt("inN", 200, 2400, 1200), nlist = clampInt("inList", 4, 96, 36);
+  var k = clampInt("inK", 2, 25, 10), sLo = clampInt("inLo", 10, 250, 35) / 1000;
+  var sHi = clampInt("inHi", 10, 400, 225) / 1000, tilt = clampInt("inTilt", 0, 120, 20) / 100;
+  if (nlist > N) nlist = N;
+  var Q = 160;
+  var W = makeCorpus(770001, N, D0, K0, Math.min(sLo, sHi), Math.max(sLo, sHi));
+  var ix = buildIvf(770002, W, nlist, 10);
+  var QS = makeQueries(770100, W, Q, tilt, NOISE0);
+  var st = study(W, ix, QS, k);
+  var NP = probeFor(st.recall, TARGET0);
+  if (NP < 0) NP = nlist;
+  var cc = col(st, NP, "c"), rr = col(st, NP, "r"), i;
+  var M = Math.max(1, Math.round(mean(cc)) - nlist), br = [], bc = [];
+  for (i = 0; i < Q; i++){ var b = searchBudget(W, ix, QS.qs, i, k, M); br.push(overlap(b.ids, st.exAll[i]) / k); bc.push(b.cost); }
+  var bnd = [], bex = 0;
+  for (i = 0; i < Q; i++){ var bb = searchBound(W, ix, QS.qs, i, k, true); bnd.push(bb.cost); if (sameIds(bb.ids, st.exAll[i])) bex++; }
+  var idx = [];
+  for (i = 0; i < Q; i++) idx.push(i);
+  idx.sort(function(a, b2){ return cc[a] - cc[b2]; });
+  var half = Q >> 1, lo = idx.slice(0, half), hi = idx.slice(half);
+  var cl = mean(lo.map(function(j){ return cc[j]; })), ch = mean(hi.map(function(j){ return cc[j]; }));
+  var rl = mean(lo.map(function(j){ return rr[j]; })), rh = mean(hi.map(function(j){ return rr[j]; }));
+  var sizes = [];
+  for (i = 0; i < nlist; i++) sizes.push(ix.sizes[i]);
+  tbl("tRun", ["policy", "cost mean", "cost worst", "recall", "recall worst", "missed / 1k", "vs the cell setting"], [
+    { cls: "ctrl", cells: [NP + " cells at random (no order)", f1(mean(cc)), "&mdash;", f4(NP / nlist), "&mdash;", per1k(1 - NP / nlist), f3((1 - NP / nlist) / (1 - mean(rr))) + "&times; worse"] },
+    { cells: [NP + " cells, nearest first", f1(mean(cc)), iv(maxOf(cc)), f4(mean(rr)), f2(minOf(rr)), per1k(1 - mean(rr)), "1.000&times;"] },
+    { cls: "win", cells: [M + " documents, same order", f1(mean(bc)), iv(maxOf(bc)), f4(mean(br)), f2(minOf(br)), per1k(1 - mean(br)), f3((1 - mean(rr)) / Math.max(1e-9, 1 - mean(br))) + "&times; fewer misses"] },
+    { cls: "mid", cells: ["stop on the bound", f1(mean(bnd)), iv(maxOf(bnd)), f4(1), f2(1), per1k(0), f2(mean(bnd) / mean(cc)) + "&times; the bill"] },
+    { cells: ["brute force", iv(N), iv(N), f4(1), f2(1), per1k(0), f2(N / mean(cc)) + "&times; the bill"] }
+  ]);
+  document.getElementById("runNote").textContent =
+    "cells hold " + minOf(sizes) + " to " + maxOf(sizes) + " documents (" + (maxOf(sizes) / Math.max(1, minOf(sizes))).toFixed(1) + "x) · " +
+    "the target picks " + NP + " cells · cost/recall correlation " + f3(corr(cc, rr)) +
+    " · cheap half " + f1(cl) + " computations at " + pct(rl) + ", dear half " + f1(ch) + " at " + pct(rh) +
+    " · the bound rule is exact on " + pct(bex / Q) + " at " + pct1(mean(bnd) / N) + " of a full scan" +
+    " · the order is worth " + f2(mean(rr) / (NP / nlist)) + "x over opening the same cells at random.";
+}
+document.getElementById("btnRun").addEventListener("click", runCustom);
+
+/* A plain setTimeout pump. No requestAnimationFrame, no IntersectionObserver:
+   a background tab must still finish this page, and rAF does not run there. */
+var STAGES = [stage1, stage2, stage3, stage4, stage5, stage6, stage7, stage8, stage9, stage10, stageNotes, runCustom, stageFinal], si = 0;
+function pump(){
+  var fn = STAGES[si++];
+  try { fn(); }
+  catch (err){
+    var el = document.getElementById("selftest");
+    el.textContent = "stage " + si + " threw: " + (err && err.message ? err.message : err);
+    el.style.background = "#7f1d1d";
+    if (typeof console !== "undefined") console.error("AI day77 stage " + si + " threw", err);
+    return;
+  }
+  if (si < STAGES.length) setTimeout(pump, 0);
+}
+setTimeout(pump, 0);
+</script>
+</body>
+</html>

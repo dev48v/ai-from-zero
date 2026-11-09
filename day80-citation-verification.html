@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero &middot; Day 80 &mdash; Citation verification</title>
+<style>
+  :root { --ink:#0f172a; --sub:#475569; --line:#e2e8f0; --bg:#f8fafc; --accent:#0369a1; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Inter",system-ui,sans-serif; margin:0; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:1152px; margin:0 auto; padding:16px; }
+  @media (min-width:768px){ .wrap { padding:24px; } }
+  header { background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
+  .kicker { font-size:12px; font-weight:800; letter-spacing:.16em; color:var(--accent); margin:0 0 8px; }
+  h1 { font-size:19px; line-height:1.5; font-weight:900; margin:0 0 12px; }
+  @media (min-width:768px){ h1 { font-size:22px; } }
+  h2 { font-size:24px; font-weight:900; margin:0 0 8px; }
+  h3 { font-size:19px; font-weight:800; margin:20px 0 6px; }
+  p { line-height:1.6; margin:0 0 12px; }
+  .tabs { display:flex; gap:8px; flex-wrap:wrap; }
+  .tabs button { font:inherit; font-size:14px; font-weight:600; padding:8px 20px; border:0; border-radius:8px; background:#f1f5f9; cursor:pointer; }
+  .tabs button.tab-active { background:#0f172a; color:#fff; }
+  .hidden { display:none; }
+  .card { background:#fff; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,.12); padding:20px; min-width:0; }
+  .stack > * + * { margin-top:20px; }
+  .grid2 { display:grid; gap:20px; grid-template-columns:minmax(0,1fr); }
+  .grid3 { display:grid; gap:16px; grid-template-columns:minmax(0,1fr); }
+  .grid4 { display:grid; gap:16px; grid-template-columns:minmax(0,1fr); }
+  @media (min-width:900px){ .grid2 { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } }
+  @media (min-width:768px){ .grid3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+                            .grid4 { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+  .lbl { font-size:12px; font-weight:800; letter-spacing:.1em; color:#64748b; margin:0 0 8px; }
+  .big { font-size:24px; font-weight:900; font-variant-numeric:tabular-nums; margin:0; }
+  .note { font-size:12.5px; color:#475569; margin:8px 0 0; line-height:1.55; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:11.5px; overflow-x:auto; line-height:1.35; margin:0; white-space:pre; }
+  code { background:#f1f5f9; padding:1px 4px; border-radius:4px; font-size:.92em; }
+  .tblwrap { overflow-x:auto; }
+  table.num { border-collapse:collapse; width:100%; min-width:520px; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid var(--line); }
+  table.num tr.here td { background:#eef2ff; font-weight:700; }
+  table.num tr.dim td { color:#94a3b8; }
+  table.num td.txt { text-align:left; font-size:11.5px; }
+  table.quad { border-collapse:collapse; width:100%; min-width:560px; }
+  table.quad th, table.quad td { border:1px solid var(--line); padding:12px; vertical-align:top; }
+  table.quad th { font-size:11.5px; letter-spacing:.04em; color:#64748b; font-weight:800; background:#f8fafc; text-align:left; }
+  table.quad td.off { background:#fef3c7; }
+  table.quad td.diag { background:#fff; }
+  table.quad .qn { font-size:24px; font-weight:900; font-variant-numeric:tabular-nums; display:block; }
+  table.quad .qc { font-size:11.5px; color:#475569; line-height:1.5; display:block; margin-top:4px; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:99px; font-size:11px; font-weight:800; }
+  .good { background:#dcfce7; color:#166534; }
+  .stop { background:#fef3c7; color:#92400e; }
+  .bad { background:#fee2e2; color:#991b1b; }
+  .ok { color:#166534; font-weight:800; }
+  .warn { color:#991b1b; font-weight:800; }
+  select, input[type=range], input[type=text] { border:1px solid #cbd5e1; border-radius:8px; padding:7px 10px; font:inherit; font-size:13px; width:100%; margin-top:4px; background:#fff; }
+  input[type=range] { padding:0; }
+  label.f { font-size:13px; display:block; }
+  .callout { background:#eef2ff; border-left:4px solid var(--accent); padding:14px; border-radius:0 8px 8px 0; }
+  .callout p { font-size:13.5px; margin:0; }
+  a { color:var(--accent); }
+  .prose { max-width:760px; margin:0 auto; }
+  .sc { font-size:12.5px; line-height:1.6; }
+  .sc div { display:flex; gap:8px; align-items:baseline; }
+  .sc .m { color:#94a3b8; font-variant-numeric:tabular-nums; }
+  .ctxrow { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; line-height:1.8; color:#475569; }
+  .ctxrow b { background:#e0e7ff; padding:1px 5px; border-radius:4px; color:#1e293b; }
+  #selftest { position:fixed; right:14px; bottom:14px; background:#0f172a; color:#e2e8f0;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; padding:8px 12px;
+    border-radius:8px; z-index:40; max-width:340px; box-shadow:0 6px 24px rgba(0,0,0,.25); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">AIFROMZERO &middot; DAY 80</p>
+    <h1>
+      &#128209; Citation verification &mdash; a RAG answer says <code>[c091]</code> and everybody relaxes.
+      There are two checks you can run on that bracket and <strong>they catch different things</strong>.
+      <strong>Citation resolution</strong> is pure code &mdash; is <code>c091</code> actually one of the
+      chunks we assembled for this question? Zero model calls, O(citations), exact.
+      <strong>Faithfulness</strong> is model-scored &mdash; does the assembled context actually support the
+      claim? Across <strong>420</strong> seeded answers in <strong>7</strong> defect classes:
+      &#128308; <strong>neither check subsumes the other, and the proof is that both off-diagonal cells of
+      the 2&times;2 are non-empty</strong> &mdash; <strong>180</strong> answers resolution catches and
+      faithfulness waves through, <strong>60</strong> the reverse. Said as blind spots:
+      <strong>resolution cannot see an unsupported claim wearing a valid id</strong> (0 of 60 caught) and
+      <strong>a context-scoped faithfulness grader cannot see an id that never existed</strong>, because
+      the id is not in its input at all (0 of 180 caught). &#128308; The case people get wrong is
+      <strong>the real id that was not in <em>this</em> context</strong> &mdash; it looks real, it resolves
+      perfectly against your chunk store, and only resolution against the <em>assembled</em> context
+      catches it: <strong>60 of 60</strong> one way, <strong>0 of 60</strong> the other. Together the two
+      checks catch <strong>300 of 360</strong> defects where resolution alone gets 240 and faithfulness
+      alone gets 120, and running the free one first removes <strong>240</strong> of 420 model calls.
+    </h1>
+
+    <div class="tabs">
+      <button id="tabLook" class="tab-active" onclick="showTab('look')">&#128065; LOOK</button>
+      <button id="tabUnd" onclick="showTab('und')">&#129504; UNDERSTAND</button>
+      <button id="tabBuild" onclick="showTab('build')">&#128296; BUILD</button>
+    </div>
+  </div>
+</header>
+
+<main id="look" class="wrap stack">
+  <div class="callout">
+    <p>
+      <strong>A citation is two separate promises.</strong> The first is that the identifier points at
+      something we actually put in front of the model. The second is that the thing it points at says what
+      the sentence says. They fail independently, they are caught by different machinery at wildly
+      different cost, and a pipeline running only one of them has a named, sizeable blind spot rather than
+      a small one.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>One answer, both checks</h2>
+    <div class="grid2" style="margin:12px 0">
+      <label class="f">Answer
+        <select id="aSel"></select>
+      </label>
+      <label class="f">Jump to a defect class
+        <select id="cSel"></select>
+      </label>
+    </div>
+    <p class="note" style="margin-top:0" id="aClaim"></p>
+    <p class="ctxrow" id="aCtx"></p>
+    <div class="tblwrap"><table class="num" id="tAnswer"></table></div>
+    <p class="note" id="aVerdict"></p>
+    <p class="note">
+      The coverage column is the stand-in grader&rsquo;s score for that chunk against this claim. A
+      greyed-out last row means the citation pointed somewhere outside the assembled context &mdash; either
+      at a real chunk that was not retrieved for this question, or at nothing at all.
+    </p>
+  </div>
+
+  <div class="grid4">
+    <div class="card"><p class="lbl">ANSWERS SCORED</p><p class="big" id="kN">&mdash;</p>
+      <p class="note" id="kNnote"></p></div>
+    <div class="card"><p class="lbl">RESOLUTION CATCHES, FAITHFULNESS MISSES</p><p class="big warn" id="kOffA">&mdash;</p>
+      <p class="note" id="kOffANote"></p></div>
+    <div class="card"><p class="lbl">FAITHFULNESS CATCHES, RESOLUTION MISSES</p><p class="big warn" id="kOffB">&mdash;</p>
+      <p class="note" id="kOffBNote"></p></div>
+    <div class="card"><p class="lbl">MODEL CALLS THE FREE CHECK REMOVES</p><p class="big ok" id="kSave">&mdash;</p>
+      <p class="note" id="kSaveNote"></p></div>
+  </div>
+</main>
+
+<main id="und" class="wrap stack hidden">
+  <div class="card">
+    <h3 style="margin-top:0">1. The 2&times;2 &mdash; and why both off-diagonal cells matter</h3>
+    <div class="tblwrap"><table class="quad" id="tQuad"></table></div>
+    <p class="note">
+      &#128308; This table is the whole page. If either off-diagonal cell were empty, one check would
+      subsume the other and you could drop it. <strong>Both are populated</strong>, by construction and by
+      measurement: <span id="q10"></span> answers where the identifier is wrong and the prose is fine, and
+      <span id="q01"></span> where the identifier is fine and the prose is invented. A pipeline that runs
+      one check is not running a cheaper version of the other &mdash; it is running a different check whose
+      blind spot is exactly what the other one is for.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">2. Per class: exactly which check fires</h3>
+    <div class="tblwrap"><table class="num" id="tClass"></table></div>
+    <p class="note">
+      The 100%/0% pattern is not a rounding artefact, it is what these two checks <em>are</em>. Resolution
+      is a set-membership test, so on a class defined by a bad identifier it is right every time, and on a
+      class defined by bad prose it is silent every time. The grader is the mirror image. &#128308; Read
+      the <code>stale_id</code> row twice: the cited chunk is <strong>real</strong>, it is sitting in your
+      vector store, it would resolve perfectly against that store &mdash; and it was not in the context
+      assembled for <em>this</em> question. Checking membership in the store instead of in the assembled
+      context turns a <span id="s1"></span> catch rate into <span id="s2"></span>.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">3. The two blind spots, stated</h3>
+    <div class="tblwrap"><table class="num" id="tBlind"></table></div>
+    <p class="note">
+      <strong>Resolution&rsquo;s blind spot:</strong> it never reads the claim. A sentence the context does
+      not support, carrying an id that genuinely is in the context, is a clean pass &mdash;
+      <span id="b1"></span> of <span id="b1n"></span> caught. <strong>Faithfulness&rsquo; blind spot:</strong>
+      the grader modelled here is the ordinary context-scoped kind &mdash; claim in, assembled chunks in,
+      supported or not out. It is <em>id-blind</em>. An invented identifier, a stale one, or no identifier
+      at all does not change its input by one token, so it answers &ldquo;supported&rdquo; and it is right:
+      the <em>content</em> is supported. <span id="b2"></span> of <span id="b2n"></span> caught. Neither
+      number moves by tuning a threshold; both are structural, and the self-check proves the id-blindness
+      directly by swapping a citation and showing the verdict does not budge.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">4. Cost &mdash; the cheap check is not a cheap approximation</h3>
+    <div class="tblwrap"><table class="num" id="tCost"></table></div>
+    <p class="note">
+      Resolution is a hash-set lookup per citation: <span id="cmp"></span> comparisons over the whole
+      corpus and <strong>zero</strong> model calls. Grading every answer costs <span id="callsAll"></span>
+      calls. Run the free check first, grade only what survives, and the bill is
+      <span id="callsSC"></span> &mdash; <strong id="saved"></strong> calls removed with the union catch
+      rate unchanged. &#128308; But notice what short-circuiting costs in information rather than money:
+      everything it skips sits in the cell where <em>the answer text was fine</em>. For those the repair is
+      re-citing, not re-answering, and an ordering that dumps them into one undifferentiated
+      &ldquo;failed&rdquo; bucket will send correct answers back to the model to be rewritten.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">5. The residual: a valid id on the wrong chunk</h3>
+    <div class="tblwrap"><table class="num" id="tResid"></table></div>
+    <p class="note">
+      <span id="residN"></span> answers cite a chunk that <em>is</em> in the assembled context and does
+      <em>not</em> support the claim, while some other assembled chunk does. Resolution passes &mdash; the
+      id is in the context. Context-scoped faithfulness passes &mdash; the context supports the claim.
+      Both are answering their own question correctly; neither question is &ldquo;does <em>this</em> chunk
+      support <em>this</em> sentence&rdquo;. The grader that does ask that catches
+      <span id="residCaught"></span>, and it costs one call <em>per citation</em> rather than per answer
+      &mdash; <span id="residCalls"></span> here against <span id="callsAll2"></span>, and far worse on
+      answers that cite five sources each. It also cannot run at all on a citation that did not resolve:
+      you cannot hand a grader a chunk you could not find. It is a third layer on top of resolution, never
+      a replacement for it.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">What this covers, and what it does not</h3>
+    <p class="note" style="margin-top:0">
+      &#128308; <strong>The entailment check here is a stand-in, not a model.</strong> It is a stated token
+      rule: strip the function words from the claim, and count the claim supported by a chunk when at least
+      <span id="theta"></span> of the remaining tokens occur in that chunk. Nothing on this page is a claim
+      about how accurate a real faithfulness grader is &mdash; real ones are wrong a great deal, and that
+      error is part of why the free check is worth keeping. The page is about what each check can
+      <em>see</em>, and a deterministic stand-in isolates visibility from grader noise. Because the twelve
+      topic vocabularies are disjoint by construction, the stand-in separates supported from unsupported
+      with no overlap at all (<span id="margin"></span>); a real grader has no such gap, so read the
+      faithfulness column as a ceiling and the resolution column as exact, because that one is code. The
+      corpus is synthetic: <span id="scope"></span>. One claim per answer, one citation per claim, no
+      multi-hop answers, no partial credit, no overlapping chunks, no reranker, no abstention, no
+      quote-span verification. And nothing here asks whether the <em>source</em> is any good &mdash; a
+      perfectly resolved, perfectly entailed citation to a wrong document is still wrong, and no check on
+      this page looks at that.
+    </p>
+  </div>
+</main>
+
+<main id="build" class="wrap stack hidden">
+  <div class="card prose">
+    <h2>How it works</h2>
+    <pre>// check 1 - resolution. No model. This is the entire thing.
+const inContext = new Set(answer.assembled);          // ids WE assembled
+const resolves  = answer.cites.every(id =&gt; inContext.has(id));
+const pass      = answer.cites.length &gt; 0 &amp;&amp; resolves;
+
+// the bug: checking the STORE instead of the assembled context
+const wrong = answer.cites.every(id =&gt; store.has(id)); // c091 is real...
+                                                       // ...just not here
+
+// check 2 - faithfulness. A model call, and it never sees an id.
+const supported = answer.assembled
+  .map(id =&gt; entails(answer.claim, store.get(id)))
+  .some(Boolean);
+
+// the 2x2 that proves neither one subsumes the other
+quad[pass ? 0 : 1][supported ? 0 : 1].push(answer.id);</pre>
+    <h3>Self-check</h3>
+    <p class="note">
+      Runs on load. The argument is a comparison, so the controls carry it: resolution is checked in
+      <em>both</em> directions over every citation in the corpus (no false accepts <em>and</em> no false
+      rejects), the clean class is checked to raise no alarm from either check, the grader is checked to be
+      genuinely id-blind, and the off-diagonal cells are <em>measured</em> to be non-empty rather than
+      asserted to be.
+    </p>
+    <div class="sc" id="selfcheck"></div>
+    <p style="margin-top:20px"><a href="../../aifromzero.php">&larr; AIFromZero</a></p>
+  </div>
+</main>
+
+<div id="selftest">running&hellip;</div>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// ---------------------------------------------------------------------------
+// Citation verification: the cheap check that catches a fabricated source.
+//
+// A RAG answer comes back with "[c091]" stapled to a sentence. There are two
+// checks you can run on that bracket, and the point of this file is that they
+// catch DIFFERENT things and neither one subsumes the other.
+//
+//   1. CITATION RESOLUTION - pure code, no model, near-zero cost. Is the cited
+//      id actually one of the chunks we assembled into the context for THIS
+//      question? A set membership test. Exact. It cannot read the claim, so it
+//      can say nothing about whether the claim is supported.
+//
+//   2. FAITHFULNESS / ENTAILMENT - model-scored. Does the assembled context
+//      actually support the claim? It reads prose, not identifiers, so a
+//      fabricated id is literally not in its input.
+//
+// The corpus is SYNTHETIC and declared: 12 topics with disjoint vocabularies,
+// 20 chunks each, and 420 answers seeded evenly across 7 defect classes, built
+// deterministically from Park-Miller. Because every answer's defect class is
+// known by construction, each check is scored for CORRECTNESS and not merely
+// compared against the other one.
+//
+// The entailment check is a STAND-IN for a model grader, not a model: a stated
+// token-overlap rule, written out in full below. That is deliberate - it
+// isolates what each check can SEE from how accurate a grader happens to be.
+//
+// DOM-free, clock-free, Math.random-free.
+// ---------------------------------------------------------------------------
+
+function Rng(seed) {
+  let s = seed % 2147483647;
+  if (s <= 0) s += 2147483646;
+  this.nextInt = () => (s = (s * 16807) % 2147483647);
+  this.below = (n) => Math.floor((this.nextInt() * n) / 2147483648);
+}
+
+// ------------------------------------------------------------- the vocabulary
+// Twelve topics, eight characteristic terms each, no term shared between two
+// topics. Disjointness is what makes the stand-in grader exact on this corpus,
+// and the self-check verifies it rather than trusting this comment.
+const TOPICS = [
+  ["tenancy", "landlord", "deposit", "eviction", "sublet", "arrears", "lease", "notice"],
+  ["parallax", "redshift", "nebula", "photometry", "occultation", "spectra", "aperture", "zenith"],
+  ["sourdough", "hydration", "levain", "crumb", "autolyse", "scoring", "banneton", "proofing"],
+  ["injunction", "plaintiff", "tort", "deposition", "remand", "damages", "pleading", "discovery"],
+  ["magma", "basalt", "caldera", "tephra", "subduction", "fumarole", "lahar", "pumice"],
+  ["fretboard", "capo", "timbre", "cadence", "arpeggio", "tremolo", "intonation", "modulation"],
+  ["catalyst", "titration", "reagent", "molarity", "reflux", "eluent", "chirality", "stoichiometry"],
+  ["aquifer", "borehole", "recharge", "salinity", "drawdown", "effluent", "weir", "percolation"],
+  ["tariff", "quota", "dumping", "embargo", "rebate", "levy", "provenance", "bonded"],
+  ["vestibular", "cochlea", "tinnitus", "audiogram", "ossicle", "eustachian", "decibel", "masking"],
+  ["scaffold", "formwork", "rebar", "screed", "lintel", "joist", "soffit", "shear"],
+  ["thermostat", "hysteresis", "setpoint", "actuator", "damper", "plenum", "recirculation", "balancing"],
+];
+// Function words. They appear in every chunk and every claim and carry no
+// signal, so the grader strips them before scoring anything.
+const GLUE = ["the", "a", "of", "in", "to", "and", "is", "are", "for", "with", "by", "on", "from", "as"];
+const GLUESET = new Set(GLUE);
+
+const CHUNKS_PER_TOPIC = 20;
+const CTX_SIZE = 5;          // chunks assembled into the context per question
+const ON_TOPIC = 3;          // of which this many are on the question's topic
+const CLAIM_TERMS = 3;       // content tokens in a claim
+const THETA = 0.75;          // the stand-in grader's support threshold
+const PER_CLASS = 60;        // answers seeded per defect class
+const SEED = 20260915;
+
+const pad3 = (n) => (n < 10 ? "00" + n : n < 100 ? "0" + n : "" + n);
+const chunkId = (i) => "c" + pad3(i);
+
+function pickDistinct(arr, n, r) {
+  const out = [];
+  while (out.length < n) {
+    const x = arr[r.below(arr.length)];
+    if (out.indexOf(x) === -1) out.push(x);
+  }
+  return out;
+}
+function shuffle(a, r) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = r.below(i + 1); const t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+// ------------------------------------------------------------ the chunk store
+// Every id that exists anywhere. An id being IN here is exactly what makes a
+// stale citation look legitimate to a check that asks the wrong question.
+function buildStore(seed) {
+  const r = new Rng(seed);
+  const chunks = [];
+  TOPICS.forEach((terms, ti) => {
+    for (let k = 0; k < CHUNKS_PER_TOPIC; k++) {
+      const content = pickDistinct(terms, 6, r);
+      const toks = content.slice();
+      for (let i = 0; i < 4; i++) toks.push(GLUE[r.below(GLUE.length)]);
+      shuffle(toks, r);
+      chunks.push({ id: chunkId(chunks.length), topic: ti, content, text: toks.join(" ") });
+    }
+  });
+  const byId = new Map(chunks.map((c) => [c.id, c]));
+  const byTopic = TOPICS.map((_, ti) => chunks.filter((c) => c.topic === ti));
+  return { chunks, byId, byTopic, has: (id) => byId.has(id) };
+}
+
+function claimFrom(chunk, r) {
+  const picked = pickDistinct(chunk.content, CLAIM_TERMS, r);
+  const toks = picked.slice();
+  for (let i = 0; i < 2; i++) toks.push(GLUE[r.below(GLUE.length)]);
+  shuffle(toks, r);
+  return toks.join(" ");
+}
+
+// ------------------------------------------------------------ defect classes
+// Six of these are the classes the subject demands. `hallucinated` is the
+// seventh, and it is here because it is the one that populates the both-fail
+// cell of the 2x2 - leaving it out would make the two checks look artificially
+// disjoint, which would be a property of the corpus and not of the checks.
+const CLASSES = [
+  { key: "grounded",     defect: false, blurb: "valid id, in context, claim supported" },
+  { key: "unsupported",  defect: true,  blurb: "valid id in context, claim the context does not support" },
+  { key: "absent_id",    defect: true,  blurb: "id appears nowhere in the store - fabricated" },
+  { key: "stale_id",     defect: true,  blurb: "real store id, NOT in this assembled context" },
+  { key: "wrong_chunk",  defect: true,  blurb: "cites an assembled chunk that does not support the claim" },
+  { key: "uncited",      defect: true,  blurb: "a claim with no citation at all" },
+  { key: "hallucinated", defect: true,  blurb: "fabricated id AND a claim nothing supports" },
+];
+
+// ---------------------------------------------------------------- the answers
+function buildAnswers(store, seed) {
+  const r = new Rng(seed);
+  const answers = [];
+  let ghost = 0;
+  for (let round = 0; round < PER_CLASS; round++) {
+    for (const cls of CLASSES) {
+      const topic = r.below(TOPICS.length);
+      const onTopic = pickDistinct(store.byTopic[topic], ON_TOPIC, r);
+      const others = [];
+      while (others.length < CTX_SIZE - ON_TOPIC) {
+        const t = r.below(TOPICS.length);
+        if (t !== topic && others.indexOf(t) === -1) others.push(t);
+      }
+      const distract = others.map((t) => store.byTopic[t][r.below(CHUNKS_PER_TOPIC)]);
+      const ctx = shuffle(onTopic.concat(distract), r);
+      const assembled = ctx.map((c) => c.id);
+      const primary = onTopic[0];
+
+      // A topic with no chunk in this context. Its terms cannot be supported by
+      // anything assembled, and its chunks cannot resolve against this context.
+      const present = new Set(ctx.map((c) => c.topic));
+      let ft = r.below(TOPICS.length);
+      while (present.has(ft)) ft = (ft + 1) % TOPICS.length;
+      const foreign = store.byTopic[ft][r.below(CHUNKS_PER_TOPIC)];
+
+      // Ids beyond the store's range: c300 upward, while the store ends at c239.
+      // They are the right SHAPE, which is the entire problem with them.
+      const ghostId = chunkId(300 + ghost);
+
+      let claim, cites;
+      if (cls.key === "grounded")         { claim = claimFrom(primary, r); cites = [primary.id]; }
+      else if (cls.key === "unsupported") { claim = claimFrom(foreign, r); cites = [primary.id]; }
+      else if (cls.key === "absent_id")   { claim = claimFrom(primary, r); cites = [ghostId]; ghost += 1; }
+      else if (cls.key === "stale_id")    { claim = claimFrom(primary, r); cites = [foreign.id]; }
+      else if (cls.key === "wrong_chunk") { claim = claimFrom(primary, r); cites = [distract[0].id]; }
+      else if (cls.key === "uncited")     { claim = claimFrom(primary, r); cites = []; }
+      else                                { claim = claimFrom(foreign, r); cites = [ghostId]; ghost += 1; }
+
+      answers.push({
+        id: answers.length, cls: cls.key, topic, assembled, claim, cites,
+        primary: primary.id, foreign: foreign.id,
+      });
+    }
+  }
+  return answers;
+}
+
+// ===================================================================== CHECK 1
+// Citation resolution. Pure code. No model call. O(citations).
+// The ONLY question it asks: is this id one of the ids we assembled?
+function resolveCitation(id, inContext) { return inContext.has(id); }
+
+function resolutionCheck(answer) {
+  const inContext = new Set(answer.assembled);
+  const per = answer.cites.map((id) => ({ id, resolves: resolveCitation(id, inContext) }));
+  const hasCitation = per.length > 0;
+  const allResolve = per.every((p) => p.resolves);
+  return {
+    per, hasCitation, allResolve,
+    pass: hasCitation && allResolve,
+    modelCalls: 0,
+    comparisons: per.length,
+  };
+}
+
+// The near-miss version of the same check, and the reason `stale_id` exists:
+// membership in the STORE is a different predicate, and it is the wrong one.
+function resolutionAgainstStore(answer, store) {
+  const per = answer.cites.map((id) => ({ id, resolves: store.has(id) }));
+  return { per, pass: per.length > 0 && per.every((p) => p.resolves), modelCalls: 0 };
+}
+
+// ===================================================================== CHECK 2
+// Faithfulness / entailment. In production this is a model call.
+//
+// HERE IT IS A STAND-IN, NOT A MODEL: strip the function words from the claim,
+// and count the claim supported by a chunk when at least THETA of the remaining
+// tokens occur in that chunk. Stated in full so nothing is hidden, and
+// deterministic so the 2x2 below measures VISIBILITY rather than grader noise.
+function contentTokens(text) {
+  return text.split(" ").filter((w) => w.length > 0 && !GLUESET.has(w));
+}
+function coverage(claim, chunk) {
+  const cs = contentTokens(claim);
+  if (cs.length === 0) return 0;
+  const have = new Set(chunk.text.split(" "));
+  let hit = 0;
+  for (const t of cs) if (have.has(t)) hit += 1;
+  return hit / cs.length;
+}
+
+// The ordinary, context-scoped grader: claim in, assembled chunks in, verdict
+// out. Note what is NOT in its signature - the citation.
+function faithfulnessCheck(answer, store) {
+  let best = 0, bestId = null;
+  for (const id of answer.assembled) {
+    const c = coverage(answer.claim, store.byId.get(id));
+    if (c > best) { best = c; bestId = id; }
+  }
+  return { best, bestId, pass: best >= THETA, modelCalls: 1 };
+}
+
+// ===================================================================== CHECK 3
+// The stricter grader: does the chunk this citation NAMES support the claim?
+// One call per citation, and it can only run on a citation that has already
+// resolved - you cannot hand a grader a chunk you could not find - so it sits
+// on top of check 1 and never replaces it.
+function citationLevelCheck(answer, store) {
+  const inContext = new Set(answer.assembled);
+  const gradable = answer.cites.filter((id) => inContext.has(id));
+  const per = gradable.map((id) => ({ id, cov: coverage(answer.claim, store.byId.get(id)) }));
+  return {
+    per,
+    gradable: gradable.length,
+    pass: per.every((p) => p.cov >= THETA),   // vacuously true when nothing is gradable
+    modelCalls: gradable.length,
+  };
+}
+
+// ------------------------------------------------------------------ the report
+function report() {
+  const store = buildStore(SEED);
+  const answers = buildAnswers(store, SEED + 1);
+
+  const scored = answers.map((a) => ({
+    a,
+    res: resolutionCheck(a),
+    fai: faithfulnessCheck(a, store),
+    cit: citationLevelCheck(a, store),
+    str: resolutionAgainstStore(a, store),
+  }));
+
+  // the 2x2. quad[resolutionPass ? 0 : 1][faithfulnessPass ? 0 : 1]
+  const quad = [[[], []], [[], []]];
+  for (const s of scored) quad[s.res.pass ? 0 : 1][s.fai.pass ? 0 : 1].push(s.a.id);
+
+  const byClass = CLASSES.map((c) => {
+    const items = scored.filter((s) => s.a.cls === c.key);
+    return {
+      key: c.key, defect: c.defect, blurb: c.blurb,
+      n: items.length,
+      resFail: items.filter((s) => !s.res.pass).length,
+      faiFail: items.filter((s) => !s.fai.pass).length,
+      bothFail: items.filter((s) => !s.res.pass || !s.fai.pass).length,
+      citFail: items.filter((s) => !s.cit.pass).length,
+      strFail: items.filter((s) => !s.str.pass).length,
+    };
+  });
+
+  const isDefect = (key) => CLASSES.find((c) => c.key === key).defect;
+  const defects = scored.filter((s) => isDefect(s.a.cls));
+  const clean = scored.filter((s) => !isDefect(s.a.cls));
+  const caught = {
+    resolution: defects.filter((s) => !s.res.pass).length,
+    faithfulness: defects.filter((s) => !s.fai.pass).length,
+    union: defects.filter((s) => !s.res.pass || !s.fai.pass).length,
+    withCitationLevel: defects.filter((s) => !s.res.pass || !s.fai.pass || !s.cit.pass).length,
+    total: defects.length,
+  };
+  const falseAlarms = {
+    resolution: clean.filter((s) => !s.res.pass).length,
+    faithfulness: clean.filter((s) => !s.fai.pass).length,
+    citationLevel: clean.filter((s) => !s.cit.pass).length,
+  };
+
+  // Cost. Resolution is O(citations) with no model call; the grader is one call
+  // per answer; short-circuiting on resolution removes the rest.
+  const totalCitations = answers.reduce((s, a) => s + a.cites.length, 0);
+  const resolutionPassCount = scored.filter((s) => s.res.pass).length;
+  const cost = {
+    comparisons: totalCitations,
+    resolutionModelCalls: scored.reduce((s, x) => s + x.res.modelCalls, 0),
+    gradeEverything: answers.length,
+    gradeAfterResolution: resolutionPassCount,
+    saved: answers.length - resolutionPassCount,
+    citationLevelCalls: scored.reduce((s, x) => s + x.cit.modelCalls, 0),
+    totalCitations,
+  };
+
+  // The separation the stand-in grader achieves on this corpus, measured rather
+  // than asserted - it is a property of the disjoint vocabularies, not a claim
+  // about real graders.
+  const supported = scored.filter((s) => s.fai.pass).map((s) => s.fai.best);
+  const notSupported = scored.filter((s) => !s.fai.pass).map((s) => s.fai.best);
+  const margin = {
+    minSupported: supported.length ? Math.min.apply(null, supported) : 0,
+    maxUnsupported: notSupported.length ? Math.max.apply(null, notSupported) : 0,
+    theta: THETA,
+    n: scored.length,
+  };
+
+  return { store, answers, scored, quad, byClass, caught, falseAlarms, cost, margin,
+           classes: CLASSES, theta: THETA, ctxSize: CTX_SIZE };
+}
+
+const ENGINE = {
+  Rng, TOPICS, GLUE, CLASSES, CHUNKS_PER_TOPIC, CTX_SIZE, ON_TOPIC, CLAIM_TERMS,
+  THETA, PER_CLASS, SEED, chunkId, buildStore, buildAnswers, claimFrom,
+  resolveCitation, resolutionCheck, resolutionAgainstStore,
+  contentTokens, coverage, faithfulnessCheck, citationLevelCheck, report,
+};
+if (typeof module !== "undefined" && module.exports) module.exports = ENGINE;
+
+// ===== ENGINE:END =====
+</script>
+
+<script>
+function showTab(name) {
+  for (const t of ["look", "und", "build"]) document.getElementById(t).classList.toggle("hidden", t !== name);
+  document.getElementById("tabLook").classList.toggle("tab-active", name === "look");
+  document.getElementById("tabUnd").classList.toggle("tab-active", name === "und");
+  document.getElementById("tabBuild").classList.toggle("tab-active", name === "build");
+}
+const el = (id) => document.getElementById(id);
+function table(id, head, rows) {
+  el(id).innerHTML =
+    "<tr>" + head.map((h) => "<th>" + h + "</th>").join("") + "</tr>" +
+    rows.map((r) => "<tr" + (r.cls ? ' class="' + r.cls + '"' : "") + ">" +
+      r.cells.map((c, i) => "<td" + (i === 0 ? ' class="txt"' : "") + ">" + c + "</td>").join("") + "</tr>").join("");
+}
+function selfCheckPanel(fn) {
+  const out = []; let n = 0, bad = 0;
+  const t = (label, cond, detail) => {
+    n += 1; if (!cond) bad += 1;
+    out.push('<div><span class="' + (cond ? "ok" : "warn") + '">' + (cond ? "PASS" : "FAIL") +
+      '</span><span>' + label + '</span><span class="m">' + (detail || "") + "</span></div>");
+  };
+  fn(t);
+  el("selfcheck").innerHTML =
+    '<p class="note" style="margin:0 0 8px"><b class="' + (bad ? "warn" : "ok") + '">' +
+    (n - bad) + " of " + n + " checks pass</b>" + (bad ? " &mdash; " + bad + " FAILED" : "") + ".</p>" + out.join("");
+  const badge = el("selftest");
+  badge.textContent = bad ? (n - bad) + " / " + n + " checks passed, " + bad + " FAILED"
+                          : n + " / " + n + " checks passed";
+  if (bad) badge.style.background = "#7f1d1d";
+  document.body.setAttribute("data-ready", "1");
+  document.body.setAttribute("data-checks", String(n));
+  document.body.setAttribute("data-fails", String(bad));
+}
+
+const R = ENGINE.report();
+const A = R.answers;
+const S = R.store;
+const Q = R.quad;
+const pc0 = (v) => Math.round(v * 100) + "%";
+const f2 = (v) => v.toFixed(2);
+const verdict = (p) => p ? '<span class="pill good">pass</span>' : '<span class="pill bad">FAIL</span>';
+const bc = (k) => R.byClass.find((c) => c.key === k);
+
+el("kN").textContent = A.length;
+el("kNnote").innerHTML = R.classes.length + " classes &times; " + ENGINE.PER_CLASS +
+  ", over a store of " + S.chunks.length + " chunks";
+el("kOffA").textContent = Q[1][0].length;
+el("kOffANote").innerHTML = "the id is wrong, the prose is fine &mdash; resolution&rsquo;s cell";
+el("kOffB").textContent = Q[0][1].length;
+el("kOffBNote").innerHTML = "the id is fine, the prose is invented &mdash; the grader&rsquo;s cell";
+el("kSave").textContent = R.cost.saved;
+el("kSaveNote").innerHTML = R.cost.gradeEverything + " calls &rarr; <b>" + R.cost.gradeAfterResolution +
+  "</b>, same union catch rate";
+
+// -------------------------------------------------------------- the explorer
+el("aSel").innerHTML = A.map((a) =>
+  '<option value="' + a.id + '">#' + a.id + " &mdash; " + a.cls + "</option>").join("");
+el("cSel").innerHTML = '<option value="">&mdash;</option>' + R.classes.map((c) =>
+  '<option value="' + c.key + '">' + c.key + " &mdash; " + c.blurb + "</option>").join("");
+
+function renderAnswer() {
+  const a = A[parseInt(el("aSel").value, 10)];
+  const sc = R.scored[a.id];
+  const inCtx = new Set(a.assembled);
+  el("aClaim").innerHTML =
+    "<b>Class <code>" + a.cls + "</code></b> &mdash; " + R.classes.find((c) => c.key === a.cls).blurb +
+    '.<br>The claim: <code>' + a.claim + "</code>, cited as " +
+    (a.cites.length ? "<code>[" + a.cites.join("][") + "]</code>" : "<b>nothing at all</b>") + ".";
+  el("aCtx").innerHTML = "assembled context &nbsp;" + a.assembled.map((id) =>
+    (a.cites.indexOf(id) !== -1 ? "<b>" + id + "</b>" : id)).join(" &middot; ");
+  const rows = a.assembled.map((id) => {
+    const c = S.byId.get(id);
+    return {
+      cls: a.cites.indexOf(id) !== -1 ? "here" : "",
+      cells: ["<code>" + c.text + "</code>", "<code>" + ENGINE.TOPICS[c.topic][0] + "</code>",
+        f2(ENGINE.coverage(a.claim, c)),
+        a.cites.indexOf(id) !== -1 ? '<span class="pill good">cited</span>' : ""],
+    };
+  });
+  for (const id of a.cites) {
+    if (inCtx.has(id)) continue;
+    const known = S.has(id);
+    rows.push({
+      cls: "dim",
+      cells: [known ? "<code>" + S.byId.get(id).text + "</code> &mdash; a real chunk, but not in this context"
+                    : "no chunk with this id exists anywhere",
+        known ? "<code>" + ENGINE.TOPICS[S.byId.get(id).topic][0] + "</code>" : "&mdash;",
+        known ? f2(ENGINE.coverage(a.claim, S.byId.get(id))) : "&mdash;",
+        '<span class="pill bad">cited: ' + id + "</span>"],
+    });
+  }
+  table("tAnswer", ["chunk", "its topic", "coverage of the claim", "cited?"], rows);
+  el("aVerdict").innerHTML =
+    "<b>resolution</b> " + verdict(sc.res.pass) +
+    " &nbsp;&middot;&nbsp; <b>faithfulness</b> " + verdict(sc.fai.pass) +
+    " (best coverage " + f2(sc.fai.best) + " against a threshold of " + f2(R.theta) + ")" +
+    " &nbsp;&middot;&nbsp; <b>per-citation grading</b> " + verdict(sc.cit.pass) +
+    " &nbsp;&middot;&nbsp; checking the <em>store</em> instead of the context would say " +
+    verdict(sc.str.pass) + ". Model calls: resolution <b>0</b>, faithfulness <b>1</b>, per-citation <b>" +
+    sc.cit.modelCalls + "</b>.";
+}
+el("cSel").addEventListener("change", () => {
+  const k = el("cSel").value;
+  if (!k) return;
+  el("aSel").value = String(A.find((a) => a.cls === k).id);
+  renderAnswer();
+});
+el("aSel").addEventListener("change", renderAnswer);
+el("aSel").value = String(A.find((a) => a.cls === "stale_id").id);
+renderAnswer();
+
+// -------------------------------------------------------------------- the 2x2
+const quadCell = (ids, kind, caption) =>
+  '<td class="' + kind + '"><span class="qn">' + ids.length + '</span><span class="qc">' + caption + "</span></td>";
+const classesIn = (ids) => {
+  const seen = [];
+  for (const i of ids) if (seen.indexOf(A[i].cls) === -1) seen.push(A[i].cls);
+  return seen.map((k) => "<code>" + k + "</code>").join(" ");
+};
+el("tQuad").innerHTML =
+  "<tr><th></th><th>faithfulness says <b>supported</b></th><th>faithfulness says <b>NOT supported</b></th></tr>" +
+  "<tr><th>resolution <b>passes</b></th>" +
+    quadCell(Q[0][0], "diag", "clean answers, plus every defect both checks are blind to &mdash; " + classesIn(Q[0][0])) +
+    quadCell(Q[0][1], "off", "<b>the grader&rsquo;s cell.</b> Resolution sees nothing wrong, because the id really is in the context &mdash; " + classesIn(Q[0][1])) +
+  "</tr>" +
+  "<tr><th>resolution <b>fails</b></th>" +
+    quadCell(Q[1][0], "off", "<b>resolution&rsquo;s cell.</b> The grader sees nothing wrong, because the prose is supported and it never reads the id &mdash; " + classesIn(Q[1][0])) +
+    quadCell(Q[1][1], "diag", "both fire &mdash; " + classesIn(Q[1][1])) +
+  "</tr>";
+el("q10").textContent = Q[1][0].length;
+el("q01").textContent = Q[0][1].length;
+
+// -------------------------------------------------------- per-class catch rates
+table("tClass", ["defect class", "n", "caught by resolution", "caught by faithfulness",
+                 "caught by either", "caught by per-citation grading"],
+  R.byClass.map((c) => ({
+    cls: (c.key === "stale_id" || c.key === "wrong_chunk") ? "here" : (c.defect ? "" : "dim"),
+    cells: [(c.defect ? "" : "<b>CONTROL</b> ") + "<code>" + c.key + "</code> " +
+              '<span class="note">' + c.blurb + "</span>",
+      c.n, pc0(c.resFail / c.n), pc0(c.faiFail / c.n),
+      "<b>" + pc0(c.bothFail / c.n) + "</b>", pc0(c.citFail / c.n)],
+  })).concat([{
+    cls: "",
+    cells: ["<b>all defects</b>", R.caught.total,
+      pc0(R.caught.resolution / R.caught.total),
+      pc0(R.caught.faithfulness / R.caught.total),
+      "<b>" + pc0(R.caught.union / R.caught.total) + "</b>",
+      pc0(R.caught.withCitationLevel / R.caught.total)],
+  }]));
+el("s1").textContent = pc0(bc("stale_id").resFail / bc("stale_id").n);
+el("s2").textContent = pc0(bc("stale_id").strFail / bc("stale_id").n);
+
+// ------------------------------------------------------------- the blind spots
+table("tBlind", ["the check", "what it reads", "model calls", "its blind spot", "caught there"],
+  [{ cls: "here", cells: ["citation resolution", "the id, and the set of assembled ids", "<b>0</b>",
+      "an unsupported claim wearing a valid id &mdash; <code>unsupported</code>",
+      '<b class="warn">' + bc("unsupported").resFail + " of " + bc("unsupported").n + "</b>"] },
+   { cls: "here", cells: ["faithfulness, context-scoped", "the claim and the chunk text &mdash; never the id",
+      "<b>1 per answer</b>",
+      "every citation defect &mdash; <code>absent_id</code> <code>stale_id</code> <code>uncited</code>",
+      '<b class="warn">' + (bc("absent_id").faiFail + bc("stale_id").faiFail + bc("uncited").faiFail) +
+      " of " + (bc("absent_id").n + bc("stale_id").n + bc("uncited").n) + "</b>"] },
+   { cells: ["both together", "&mdash;", "<b>1 per answer</b>",
+      "a valid id on the wrong chunk &mdash; <code>wrong_chunk</code>",
+      '<b class="warn">' + bc("wrong_chunk").bothFail + " of " + bc("wrong_chunk").n + "</b>"] },
+   { cells: ["per-citation grading", "the claim and the chunk the citation NAMES", "<b>1 per citation</b>",
+      "anything that did not resolve &mdash; it has no chunk to read",
+      '<b class="warn">' + (bc("absent_id").citFail + bc("stale_id").citFail) + " of " +
+      (bc("absent_id").n + bc("stale_id").n) + "</b>"] }]);
+el("b1").textContent = bc("unsupported").resFail;
+el("b1n").textContent = bc("unsupported").n;
+el("b2").textContent = bc("absent_id").faiFail + bc("stale_id").faiFail + bc("uncited").faiFail;
+el("b2n").textContent = bc("absent_id").n + bc("stale_id").n + bc("uncited").n;
+
+// --------------------------------------------------------------------- the cost
+table("tCost", ["strategy", "model calls", "code-only comparisons", "defects caught", "of"],
+  [{ cls: "dim", cells: ["faithfulness only", R.cost.gradeEverything, 0,
+      R.caught.faithfulness, R.caught.total] },
+   { cls: "", cells: ["resolution only", "<b>0</b>", R.cost.comparisons,
+      R.caught.resolution, R.caught.total] },
+   { cls: "here", cells: ["resolution first, then grade the survivors",
+      "<b>" + R.cost.gradeAfterResolution + "</b>", R.cost.comparisons,
+      "<b>" + R.caught.union + "</b>", R.caught.total] },
+   { cls: "", cells: ["&hellip; and per-citation grading on what resolved",
+      R.cost.gradeAfterResolution + " + " + R.cost.citationLevelCalls, R.cost.comparisons,
+      R.caught.withCitationLevel, R.caught.total] }]);
+el("cmp").textContent = R.cost.comparisons;
+el("callsAll").textContent = R.cost.gradeEverything;
+el("callsAll2").textContent = R.cost.gradeEverything;
+el("callsSC").textContent = R.cost.gradeAfterResolution;
+el("saved").textContent = R.cost.saved;
+
+// ----------------------------------------------------------------- the residual
+const wc = bc("wrong_chunk");
+table("tResid", ["", "resolution", "faithfulness (context)", "per-citation grading"],
+  [{ cls: "here", cells: ["<code>wrong_chunk</code> caught",
+      wc.resFail + " of " + wc.n, wc.faiFail + " of " + wc.n,
+      "<b>" + wc.citFail + " of " + wc.n + "</b>"] },
+   { cells: ["<b>CONTROL</b> false alarms on <code>grounded</code>",
+      R.falseAlarms.resolution, R.falseAlarms.faithfulness, R.falseAlarms.citationLevel] },
+   { cells: ["model calls over the corpus", "<b>0</b>", R.cost.gradeEverything,
+      R.cost.citationLevelCalls + " &mdash; one per resolvable citation"] }]);
+el("residN").textContent = wc.n;
+el("residCaught").textContent = wc.citFail + " of " + wc.n;
+el("residCalls").textContent = R.cost.citationLevelCalls;
+
+el("theta").textContent = f2(R.theta);
+el("margin").innerHTML = "the lowest coverage it calls supported is <b>" + f2(R.margin.minSupported) +
+  "</b> and the highest it calls unsupported is <b>" + f2(R.margin.maxUnsupported) + "</b>";
+el("scope").textContent = S.chunks.length + " chunks over " + ENGINE.TOPICS.length +
+  " disjoint topics, " + ENGINE.CTX_SIZE + " chunks assembled per question, " + A.length + " answers";
+
+// -------------------------------------------------------------- the self-check
+selfCheckPanel((t) => {
+  const E = ENGINE;
+
+  // --- the corpus is what it says it is
+  t("240 chunks over 12 topics, twenty each",
+    S.chunks.length === 240 && E.TOPICS.length === 12 &&
+    E.TOPICS.every((_, i) => S.byTopic[i].length === 20));
+  t("eight terms per topic and no term shared between topics",
+    E.TOPICS.every((x) => x.length === 8) &&
+    new Set(E.TOPICS.reduce((a, b) => a.concat(b), [])).size === 96);
+  t("no topic term is also a function word",
+    E.TOPICS.every((x) => x.every((w) => E.GLUE.indexOf(w) === -1)));
+  t("420 answers, seven classes, sixty each",
+    A.length === 420 && E.CLASSES.length === 7 &&
+    E.CLASSES.every((c) => A.filter((a) => a.cls === c.key).length === 60));
+  t("every context holds five distinct chunks",
+    A.every((a) => a.assembled.length === E.CTX_SIZE && new Set(a.assembled).size === E.CTX_SIZE));
+  t("and every assembled id is a real chunk",
+    A.every((a) => a.assembled.every((id) => S.has(id))));
+  t("the corpus is reproducible from its seed",
+    E.buildAnswers(E.buildStore(E.SEED), E.SEED + 1).map((a) => a.claim + "@" + a.cites.join()).join("|") ===
+    A.map((a) => a.claim + "@" + a.cites.join()).join("|"));
+
+  // --- CHECK 1 is exact, in BOTH directions, over every citation in the corpus
+  t("resolution NEVER passes a citation absent from the assembled context", (() => {
+    let bad = 0, n = 0;
+    for (const a of A) {
+      const set = new Set(a.assembled);
+      for (const id of a.cites) { n += 1; if (E.resolveCitation(id, set) && a.assembled.indexOf(id) === -1) bad += 1; }
+    }
+    return n === 360 && bad === 0;
+  })(), "no false accepts over 360 citations");
+  t("and NEVER rejects an id that is in the assembled context", (() => {
+    let bad = 0;
+    for (const a of A) {
+      const set = new Set(a.assembled);
+      for (const id of a.assembled) if (!E.resolveCitation(id, set)) bad += 1;
+    }
+    return bad === 0;
+  })(), "no false rejects over 2100 ids");
+  t("resolution is an identity with membership of the assembled context", (() => {
+    for (const a of A) {
+      const set = new Set(a.assembled);
+      for (const id of a.cites) if (E.resolveCitation(id, set) !== (a.assembled.indexOf(id) !== -1)) return false;
+    }
+    return true;
+  })());
+  t("and it costs no model call at all",
+    R.scored.every((s) => s.res.modelCalls === 0) && R.cost.resolutionModelCalls === 0);
+
+  // --- the subtle class: a real id that was not in THIS context
+  t("every stale_id cites an id that EXISTS in the store - it looks real",
+    A.filter((a) => a.cls === "stale_id").every((a) => a.cites.every((id) => S.has(id))));
+  t("and none of those ids is in the context that was assembled",
+    A.filter((a) => a.cls === "stale_id").every((a) => a.cites.every((id) => a.assembled.indexOf(id) === -1)));
+  t("resolution against the assembled context catches all sixty",
+    bc("stale_id").resFail === bc("stale_id").n, bc("stale_id").resFail + " of " + bc("stale_id").n);
+  t("while checking the STORE catches none of them - the bug people ship",
+    bc("stale_id").strFail === 0);
+  t("CONTROL: fabricated ids really are absent from the store",
+    A.filter((a) => a.cls === "absent_id" || a.cls === "hallucinated")
+     .every((a) => a.cites.every((id) => !S.has(id))));
+
+  // --- CHECK 2 is a stated stand-in, and it is id-blind
+  t("the grader reads no identifier - swapping the citation cannot move its verdict", (() => {
+    const a = A.find((x) => x.cls === "grounded");
+    const alt = { id: a.id, cls: a.cls, topic: a.topic, assembled: a.assembled, claim: a.claim, cites: ["c999"] };
+    const x = E.faithfulnessCheck(a, S), y = E.faithfulnessCheck(alt, S);
+    return x.pass === y.pass && x.best === y.best;
+  })());
+  t("supported and unsupported claims do not overlap on this corpus",
+    R.margin.minSupported > R.margin.maxUnsupported,
+    f2(R.margin.minSupported) + " vs " + f2(R.margin.maxUnsupported));
+  t("function words are stripped before scoring",
+    E.contentTokens("the deposit is in arrears").join("|") === "deposit|arrears");
+
+  // --- THE CENTRE: both off-diagonal cells are non-empty
+  t("2x2 cell (resolution FAILS, faithfulness passes) is NOT empty",
+    Q[1][0].length > 0, Q[1][0].length + " answers");
+  t("2x2 cell (resolution passes, faithfulness FAILS) is NOT empty",
+    Q[0][1].length > 0, Q[0][1].length + " answers");
+  t("so neither check subsumes the other - each has a populated blind spot",
+    Q[1][0].length > 0 && Q[0][1].length > 0);
+  t("the four cells partition the corpus exactly once each",
+    Q[0][0].length + Q[0][1].length + Q[1][0].length + Q[1][1].length === A.length &&
+    new Set(Q[0][0].concat(Q[0][1], Q[1][0], Q[1][1])).size === A.length);
+  t("and the both-fail cell is populated too, so the checks are not disjoint by construction",
+    Q[1][1].length > 0, Q[1][1].length + " answers");
+
+  // --- the blind spots, explicitly
+  t("BLIND SPOT: resolution catches none of the unsupported class",
+    bc("unsupported").resFail === 0);
+  t("BLIND SPOT: faithfulness catches none of absent_id, stale_id or uncited",
+    bc("absent_id").faiFail === 0 && bc("stale_id").faiFail === 0 && bc("uncited").faiFail === 0);
+  t("RESIDUAL: both together catch none of wrong_chunk", bc("wrong_chunk").bothFail === 0);
+  t("which per-citation grading does catch, at one call per citation",
+    bc("wrong_chunk").citFail === bc("wrong_chunk").n && R.cost.citationLevelCalls > 0);
+
+  // --- the union strictly dominates, measured
+  t("the union catches strictly more than resolution alone",
+    R.caught.union > R.caught.resolution, R.caught.union + " vs " + R.caught.resolution);
+  t("and strictly more than faithfulness alone",
+    R.caught.union > R.caught.faithfulness, R.caught.union + " vs " + R.caught.faithfulness);
+  t("which is only possible because both off-diagonal cells are non-empty",
+    R.caught.union === R.caught.resolution + Q[0][1].length &&
+    R.caught.union === R.caught.faithfulness + Q[1][0].length);
+
+  // --- CONTROLS: no false alarms on the clean class
+  t("CONTROL: the clean class raises no resolution alarm", R.falseAlarms.resolution === 0);
+  t("CONTROL: nor any faithfulness alarm", R.falseAlarms.faithfulness === 0);
+  t("CONTROL: nor any per-citation alarm", R.falseAlarms.citationLevel === 0);
+
+  // --- cost
+  t("short-circuiting removes exactly the answers resolution rejected",
+    R.cost.saved === A.length - R.cost.gradeAfterResolution &&
+    R.cost.saved === Q[1][0].length + Q[1][1].length, R.cost.saved + " calls");
+  t("and costs nothing in catch rate - the union is unchanged",
+    R.caught.union === R.caught.resolution + Q[0][1].length);
+  t("resolution's work is O(citations), one comparison each",
+    R.cost.comparisons === A.reduce((s, a) => s + a.cites.length, 0) && R.cost.comparisons === 360);
+
+  // --- determinism
+  t("a repeated report is identical",
+    ENGINE.report().caught.union === R.caught.union &&
+    ENGINE.report().quad[1][0].length === Q[1][0].length &&
+    ENGINE.report().cost.saved === R.cost.saved);
+});
+</script>
+</body>
+</html>

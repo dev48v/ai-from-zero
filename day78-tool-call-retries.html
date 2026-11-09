@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero &middot; Day 78 &mdash; Tool-call retries</title>
+<style>
+  :root { --ink:#0f172a; --sub:#475569; --line:#e2e8f0; --bg:#f8fafc; --accent:#0f766e; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Inter",system-ui,sans-serif; margin:0; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:1152px; margin:0 auto; padding:16px; }
+  @media (min-width:768px){ .wrap { padding:24px; } }
+  header { background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
+  .kicker { font-size:12px; font-weight:800; letter-spacing:.16em; color:var(--accent); margin:0 0 8px; }
+  h1 { font-size:19px; line-height:1.5; font-weight:900; margin:0 0 12px; }
+  @media (min-width:768px){ h1 { font-size:22px; } }
+  h2 { font-size:24px; font-weight:900; margin:0 0 8px; }
+  h3 { font-size:19px; font-weight:800; margin:20px 0 6px; }
+  p { line-height:1.6; margin:0 0 12px; }
+  .tabs { display:flex; gap:8px; flex-wrap:wrap; }
+  .tabs button { font:inherit; font-size:14px; font-weight:600; padding:8px 20px; border:0; border-radius:8px; background:#f1f5f9; cursor:pointer; }
+  .tabs button.tab-active { background:#0f172a; color:#fff; }
+  .hidden { display:none; }
+  .card { background:#fff; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,.12); padding:20px; min-width:0; }
+  .stack > * + * { margin-top:20px; }
+  .grid2 { display:grid; gap:20px; grid-template-columns:minmax(0,1fr); }
+  .grid3 { display:grid; gap:16px; grid-template-columns:minmax(0,1fr); }
+  .grid4 { display:grid; gap:16px; grid-template-columns:minmax(0,1fr); }
+  @media (min-width:900px){ .grid2 { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } }
+  @media (min-width:768px){ .grid3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+                            .grid4 { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+  .lbl { font-size:12px; font-weight:800; letter-spacing:.1em; color:#64748b; margin:0 0 8px; }
+  .big { font-size:24px; font-weight:900; font-variant-numeric:tabular-nums; margin:0; }
+  .note { font-size:12.5px; color:#475569; margin:8px 0 0; line-height:1.55; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:11.5px; overflow-x:auto; line-height:1.35; margin:0; white-space:pre; }
+  code { background:#f1f5f9; padding:1px 4px; border-radius:4px; font-size:.92em; }
+  .tblwrap { overflow-x:auto; }
+  table.num { border-collapse:collapse; width:100%; min-width:520px; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid var(--line); }
+  table.num tr.here td { background:#eef2ff; font-weight:700; }
+  table.num tr.dim td { color:#94a3b8; }
+  table.num td.txt { text-align:left; font-size:11.5px; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:99px; font-size:11px; font-weight:800; }
+  .good { background:#dcfce7; color:#166534; }
+  .stop { background:#fef3c7; color:#92400e; }
+  .bad { background:#fee2e2; color:#991b1b; }
+  .ok { color:#166534; font-weight:800; }
+  .warn { color:#991b1b; font-weight:800; }
+  select, input[type=range], input[type=text] { border:1px solid #cbd5e1; border-radius:8px; padding:7px 10px; font:inherit; font-size:13px; width:100%; margin-top:4px; background:#fff; }
+  input[type=range] { padding:0; }
+  label.f { font-size:13px; display:block; }
+  .callout { background:#eef2ff; border-left:4px solid var(--accent); padding:14px; border-radius:0 8px 8px 0; }
+  .callout p { font-size:13.5px; margin:0; }
+  a { color:var(--accent); }
+  .prose { max-width:760px; margin:0 auto; }
+  .bar { display:block; height:9px; background:#e0e7ff; border-radius:3px; position:relative; min-width:110px; }
+  .bar i { position:absolute; top:0; left:0; height:9px; background:var(--accent); border-radius:3px; }
+  .sc { font-size:12.5px; line-height:1.6; }
+  .sc div { display:flex; gap:8px; align-items:baseline; }
+  .sc .m { color:#94a3b8; font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">AIFROMZERO &middot; DAY 78</p>
+    <h1>
+      &#128260; Tool-call retries &mdash; the tool times out, the agent tries again. Every framework does
+      this and it is the right default for a read. <strong>Nothing here simulates language</strong>: the
+      engine simulates the CALL &mdash; a request that may not arrive, a server that may have applied it
+      anyway, and a reply that may not come back &mdash; over <strong>4,000 enumerated timelines</strong>
+      per policy, so every figure is a count. The agent sees only the reply; the world knows what
+      actually happened, and the two are compared. &#128308; <strong>Turning on retries takes the
+      agent's own success rate from 81.92% to 96.95% while the share of calls that applied exactly once
+      goes DOWN, 89.95% to 89.42%.</strong> The metric improves by fifteen points and the world gets
+      slightly worse. &#128308; What paid for it: <strong>334 calls of 4,000 applied more than once</strong>,
+      and <strong>the agent's success metric cannot see a single one of them</strong> &mdash; from inside
+      the agent a duplicated write and a clean write are the same event. &#128308; And the fix is
+      invisible too. Adding an idempotency key takes exactly-once from 89.42% to <strong>97.78%</strong>
+      and leaves the reported success rate at <strong>96.95%, identical to three decimal places</strong>.
+      The change that matters moves no number the agent reports.
+    </h1>
+
+    <div class="tabs">
+      <button id="tabLook" class="tab-active" onclick="showTab('look')">&#128065; LOOK</button>
+      <button id="tabUnd" onclick="showTab('und')">&#129504; UNDERSTAND</button>
+      <button id="tabBuild" onclick="showTab('build')">&#128296; BUILD</button>
+    </div>
+  </div>
+</header>
+
+<main id="look" class="wrap stack">
+  <div class="callout">
+    <p>
+      <strong>Three ways a call fails, and they are not the same failure.</strong> The request never
+      arrives &mdash; nothing applied. The request arrives, applies, and the reply is lost &mdash;
+      applied, and the agent does not know. The server refuses &mdash; nothing applied, and the agent
+      does know. Only the middle one makes a retry dangerous, and from the agent's side the first two are
+      indistinguishable.
+    </p>
+  </div>
+
+  <div class="grid4">
+    <div class="card"><p class="lbl">REPORTED SUCCESS, NO RETRY</p><p class="big" id="kA">&mdash;</p>
+      <p class="note">what the agent counts</p></div>
+    <div class="card"><p class="lbl">REPORTED SUCCESS, RETRY 3</p><p class="big ok" id="kB">&mdash;</p>
+      <p class="note">+15 points</p></div>
+    <div class="card"><p class="lbl">APPLIED EXACTLY ONCE</p><p class="big warn" id="kC">&mdash;</p>
+      <p class="note">went DOWN</p></div>
+    <div class="card"><p class="lbl">DUPLICATE APPLICATIONS</p><p class="big warn" id="kD">&mdash;</p>
+      <p class="note">invisible to the agent</p></div>
+  </div>
+
+  <div class="card">
+    <h2>Four policies, one world</h2>
+    <div class="grid2" style="margin:12px 0">
+      <label class="f">How often the network drops something: <b id="rv">16%</b>
+        <input type="range" id="rate" min="0" max="8" value="4" />
+      </label>
+      <div><p class="lbl" style="margin-bottom:2px">READ THE LAST TWO COLUMNS</p>
+        <p class="note" style="margin:0">The first is what a dashboard shows. The rest is what happened.</p></div>
+    </div>
+    <div class="tblwrap"><table class="num" id="tMain"></table></div>
+  </div>
+</main>
+
+<main id="und" class="wrap stack hidden">
+  <div class="card">
+    <h3 style="margin-top:0">1. The metric and the world move in opposite directions</h3>
+    <div class="tblwrap"><table class="num" id="tGap"></table></div>
+    <p class="note">
+      Retrying converts <em>reported failures</em> into <em>reported successes</em>, which is exactly
+      what it is for and is genuinely valuable on a read. On a write it also converts some
+      <em>applied-once</em> calls into <em>applied-twice</em> calls, and the agent has no way to count
+      the second kind. <strong>The success rate is a measurement of the replies, not of the world.</strong>
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">2. The honest gain, stated plainly</h3>
+    <p>
+      It would be wrong to leave this as &ldquo;retries are bad&rdquo;. Without them, the agent reports a
+      failure for a call that actually succeeded <strong id="uFB">&mdash;</strong> times in 4,000 &mdash;
+      the write landed and the reply was lost, so the agent reports failure and, in a real system,
+      whatever it does next is built on a false picture.
+    </p>
+    <div class="tblwrap"><table class="num" id="tHonest"></table></div>
+    <p class="note">
+      Retrying cuts that from <strong id="uFB2">&mdash;</strong> to <strong id="uFB3">&mdash;</strong>.
+      Both problems are real; retries trade one for the other, and the trade is good for reads and bad
+      for writes without an idempotency key.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">3. The fix changes nothing the agent can see</h3>
+    <div class="tblwrap"><table class="num" id="tKey"></table></div>
+    <p class="note">
+      &#128308; An idempotency key does not prevent the retry and does not change the reply the agent
+      gets. It stops the <em>second application</em>. So the reported success rate is
+      <strong>identical</strong> with and without it &mdash; the same number, from the same 4,000
+      timelines &mdash; while duplicate applications go from <strong id="uDup">&mdash;</strong> to
+      <strong>0</strong>. Any evaluation that scores an agent on its own success rate rates the two
+      configurations exactly equally.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">What this models and what it does not</h3>
+    <p class="note" style="margin-top:0">
+      The failure probabilities are declared and set by the slider; they are not measured from any real
+      system, and the exact percentages belong to those settings. What does not depend on them: a
+      duplicate application is invisible from inside the agent, an idempotency key changes the world and
+      not the reply, and therefore <strong>no metric computed from replies can distinguish the two</strong>.
+      Out of scope: partial failures inside a multi-step tool, ordering between concurrent calls, and
+      servers that apply a write and then fail before recording the key &mdash; each of which makes
+      exactly-once harder rather than easier.
+    </p>
+  </div>
+</main>
+
+<main id="build" class="wrap stack hidden">
+  <div class="card prose">
+    <h2>How it works</h2>
+    <pre>// three outcomes, and only the middle one makes a retry dangerous
+if (r &lt; p.lost)                 return { applied: false, sawReply: false };  // never arrived
+if (r &lt; p.lost + p.replyLost)   return { applied: true,  sawReply: false };  // applied, reply lost
+if (r &lt; ... + p.refused)        return { applied: false, sawReply: true  };  // refused
+                                return { applied: true,  sawReply: true  };  // fine
+
+// an idempotency key does not stop the REQUEST, it stops the second APPLICATION
+const wouldApply = a.applied &amp;&amp; !(policy.idempotencyKey &amp;&amp; served);</pre>
+    <h3>Self-check</h3>
+    <p class="note">Runs on load. Several are <strong>controls</strong>.</p>
+    <div class="sc" id="selfcheck"></div>
+    <p style="margin-top:20px"><a href="../aifromzero.php">&larr; AIFromZero</a></p>
+  </div>
+</main>
+
+<script>
+// ===== ENGINE:BEGIN =====
+// ---------------------------------------------------------------------------
+// Tool-call retries. An agent calls a tool, the call times out, the agent
+// retries. Every framework does this and it is the right default for a read.
+//
+// Nothing here simulates language. The engine simulates the CALL: a request
+// that may or may not reach the server, a server that may or may not have
+// applied it, and a reply that may or may not come back. The agent sees only
+// the reply. The world knows what actually happened, and the two are compared.
+//
+// Every timeline is enumerated over a seeded generator, so each figure is a
+// count over a fixed set of runs rather than a sample of a distribution.
+//
+// DOM-free, clock-free, Math.random-free.
+// ---------------------------------------------------------------------------
+
+class Rng {
+  constructor(seed = 7878) { this.s = seed % 2147483647 || 1; }
+  next() { this.s = (this.s * 48271) % 2147483647; return this.s; }
+  unit() { return (this.next() - 1) / 2147483645; }
+  below(n) { return Math.floor((this.next() * n) / 2147483648); }
+  chance(p) { return this.unit() < p; }
+}
+
+// ---------------------------------------------------------------------------
+// One attempt at one call. Three places it can go wrong, and they are NOT the
+// same place - which is the whole point.
+//   lost      : never reached the server        -> nothing applied
+//   timeout   : reached the server, applied,    -> reply lost
+//               but the reply did not come back
+//   refused   : reached the server, refused     -> nothing applied
+// ---------------------------------------------------------------------------
+function attempt(rng, p) {
+  const r = rng.unit();
+  if (r < p.lost) return { applied: false, sawReply: false, why: "lost" };
+  if (r < p.lost + p.replyLost) return { applied: true, sawReply: false, why: "reply lost" };
+  if (r < p.lost + p.replyLost + p.refused) return { applied: false, sawReply: true, ok: false, why: "refused" };
+  return { applied: true, sawReply: true, ok: true, why: "ok" };
+}
+
+// ---------------------------------------------------------------------------
+// The policies. Each decides what to do when no reply comes back.
+// ---------------------------------------------------------------------------
+const POLICIES = [
+  { key: "none", label: "no retry - report the failure", maxTries: 1, idempotencyKey: false },
+  { key: "retry3", label: "retry up to 3 times", maxTries: 3, idempotencyKey: false },
+  { key: "retry5", label: "retry up to 5 times", maxTries: 5, idempotencyKey: false },
+  { key: "key3", label: "retry up to 3 times WITH an idempotency key", maxTries: 3, idempotencyKey: true },
+];
+
+// Run one call to completion under one policy.
+function call(rng, p, policy) {
+  let applications = 0;      // how many times the world actually changed
+  let tries = 0;
+  let agentSaw = "failed";   // what the agent believes at the end
+  let served = false;        // did the server already have this key
+  for (let t = 0; t < policy.maxTries; t++) {
+    tries++;
+    const a = attempt(rng, p);
+    // An idempotency key does not stop the request - it stops the SECOND
+    // application of it. The first application still happens.
+    const wouldApply = a.applied && !(policy.idempotencyKey && served);
+    if (wouldApply) { applications++; served = true; }
+    else if (a.applied && policy.idempotencyKey) served = true;
+    if (a.sawReply) { agentSaw = a.ok ? "ok" : "refused"; break; }
+  }
+  return { applications, tries, agentSaw };
+}
+
+// ---------------------------------------------------------------------------
+// The measurement. `write` says whether the tool changes the world; the same
+// retry policy is correct for a read and can be wrong for a write.
+// ---------------------------------------------------------------------------
+function measure(policy, p, runs, seed) {
+  const rng = new Rng(seed);
+  let succeeded = 0, duplicated = 0, lost = 0, totalTries = 0, applications = 0;
+  let agentThinksFailedButApplied = 0;
+  let agentThinksOkAndItIs = 0;
+  for (let i = 0; i < runs; i++) {
+    const r = call(rng, p, policy);
+    totalTries += r.tries;
+    applications += r.applications;
+    if (r.applications > 1) duplicated++;
+    if (r.applications === 0) lost++;
+    if (r.agentSaw === "ok") succeeded++;
+    if (r.agentSaw !== "ok" && r.applications > 0) agentThinksFailedButApplied++;
+    if (r.agentSaw === "ok" && r.applications === 1) agentThinksOkAndItIs++;
+  }
+  return {
+    key: policy.key,
+    label: policy.label,
+    runs,
+    succeeded,                       // what the agent's own success metric counts
+    duplicated,                      // the world changed more than once
+    lost,                            // the world never changed
+    exactlyOnce: runs - duplicated - lost,
+    agentThinksFailedButApplied,     // reported a failure that DID happen
+    agentThinksOkAndItIs,
+    triesPerCall: totalTries / runs,
+    applicationsPerCall: applications / runs,
+    // the number a dashboard shows
+    reportedSuccessRate: succeeded / runs,
+    // the number that describes the world
+    exactlyOnceRate: (runs - duplicated - lost) / runs,
+  };
+}
+
+function report(p, runs = 4000, seed = 7878) {
+  const rows = POLICIES.map((pol) => measure(pol, p, runs, seed));
+  return { rows, p, runs };
+}
+
+// Sweep the failure rate the network is having, holding the policy fixed.
+function sweep(rates, runs = 2000, seed = 4242) {
+  return rates.map((x) => {
+    const p = { lost: x / 2, replyLost: x / 2, refused: 0.02 };
+    return { rate: x, rows: POLICIES.map((pol) => measure(pol, p, runs, seed)) };
+  });
+}
+
+const ENGINE = { Rng, attempt, POLICIES, call, measure, report, sweep };
+if (typeof module !== "undefined" && module.exports) module.exports = ENGINE;
+
+// ===== ENGINE:END =====
+</script>
+
+<script>
+function showTab(name) {
+  for (const t of ["look", "und", "build"]) document.getElementById(t).classList.toggle("hidden", t !== name);
+  document.getElementById("tabLook").classList.toggle("tab-active", name === "look");
+  document.getElementById("tabUnd").classList.toggle("tab-active", name === "und");
+  document.getElementById("tabBuild").classList.toggle("tab-active", name === "build");
+}
+const el = (id) => document.getElementById(id);
+function table(id, head, rows) {
+  el(id).innerHTML =
+    "<tr>" + head.map((h) => "<th>" + h + "</th>").join("") + "</tr>" +
+    rows.map((r) => "<tr" + (r.cls ? ' class="' + r.cls + '"' : "") + ">" +
+      r.cells.map((c, i) => "<td" + (i === 0 ? ' class="txt"' : "") + ">" + c + "</td>").join("") + "</tr>").join("");
+}
+function selfCheckPanel(fn) {
+  const out = []; let n = 0, bad = 0;
+  const t = (label, cond, detail = "") => {
+    n += 1; if (!cond) bad += 1;
+    out.push('<div><span class="' + (cond ? "ok" : "warn") + '">' + (cond ? "PASS" : "FAIL") +
+      '</span><span>' + label + '</span><span class="m">' + detail + "</span></div>");
+  };
+  fn(t);
+  el("selfcheck").innerHTML =
+    '<p class="note" style="margin:0 0 8px"><b class="' + (bad ? "warn" : "ok") + '">' +
+    (n - bad) + " of " + n + " checks pass</b>" + (bad ? " &mdash; " + bad + " FAILED" : "") + ".</p>" + out.join("");
+}
+
+const RATES = [0, 0.04, 0.08, 0.12, 0.16, 0.20, 0.28, 0.36, 0.48];
+const pct = (x) => (x * 100).toFixed(2) + "%";
+const pOf = (x) => ({ lost: x / 2, replyLost: x / 2, refused: 0.02 });
+
+const R16 = ENGINE.report(pOf(0.16));
+const by = (R, k) => R.rows.find((r) => r.key === k);
+
+el("kA").textContent = pct(by(R16, "none").reportedSuccessRate);
+el("kB").textContent = pct(by(R16, "retry3").reportedSuccessRate);
+el("kC").textContent = pct(by(R16, "none").exactlyOnceRate) + " to " + pct(by(R16, "retry3").exactlyOnceRate);
+el("kD").textContent = by(R16, "retry3").duplicated;
+
+function renderMain(rate) {
+  el("rv").textContent = (rate * 100).toFixed(0) + "%";
+  const R = ENGINE.report(pOf(rate));
+  table("tMain",
+    ["policy", "reported success", "applied exactly once", "applied twice or more", "never applied", "tries per call"],
+    R.rows.map((r) => ({
+      cls: r.key === "key3" ? "here" : r.key === "retry3" ? "dim" : "",
+      cells: [r.label, "<b>" + pct(r.reportedSuccessRate) + "</b>", pct(r.exactlyOnceRate),
+        (r.duplicated ? '<span class="warn">' : "<span>") + r.duplicated + "</span>",
+        r.lost, r.triesPerCall.toFixed(2)],
+    })));
+  return R;
+}
+renderMain(0.16);
+el("rate").addEventListener("input", (e) => renderMain(RATES[parseInt(e.target.value, 10)]));
+
+table("tGap", ["failure rate", "reported success, no retry", "with retry 3", "change", "exactly once, no retry", "with retry 3", "change"],
+  RATES.filter((r) => r > 0).map((rate) => {
+    const R = ENGINE.report(pOf(rate), 2000, 4242);
+    const a = by(R, "none"), b = by(R, "retry3");
+    const dRep = b.reportedSuccessRate - a.reportedSuccessRate;
+    const dReal = b.exactlyOnceRate - a.exactlyOnceRate;
+    return {
+      cls: Math.abs(rate - 0.16) < 1e-9 ? "here" : "",
+      cells: [(rate * 100).toFixed(0) + "%", pct(a.reportedSuccessRate), pct(b.reportedSuccessRate),
+        '<b class="ok">+' + (dRep * 100).toFixed(2) + "</b>",
+        pct(a.exactlyOnceRate), pct(b.exactlyOnceRate),
+        (dReal < 0 ? '<b class="warn">' : "<b>") + (dReal * 100).toFixed(2) + "</b>"],
+    };
+  }));
+
+const noRetry = by(R16, "none"), r3 = by(R16, "retry3"), k3 = by(R16, "key3");
+el("uFB").textContent = noRetry.agentThinksFailedButApplied;
+el("uFB2").textContent = noRetry.agentThinksFailedButApplied;
+el("uFB3").textContent = r3.agentThinksFailedButApplied;
+el("uDup").textContent = r3.duplicated;
+
+table("tHonest", ["policy", "reported a failure that actually happened", "never applied at all", "applied twice or more"],
+  R16.rows.map((r) => ({
+    cls: r.key === "none" ? "here" : "",
+    cells: [r.label, "<b>" + r.agentThinksFailedButApplied + "</b>", r.lost,
+      (r.duplicated ? '<span class="warn">' : "<span>") + r.duplicated + "</span>"],
+  })));
+
+table("tKey", ["", "retry 3, no key", "retry 3 WITH a key", "difference"],
+  [
+    { cells: ["reported success rate", pct(r3.reportedSuccessRate), pct(k3.reportedSuccessRate),
+      r3.reportedSuccessRate === k3.reportedSuccessRate ? '<b class="warn">none at all</b>' : "differs"] },
+    { cells: ["tries per call", r3.triesPerCall.toFixed(4), k3.triesPerCall.toFixed(4),
+      r3.triesPerCall === k3.triesPerCall ? '<b class="warn">none at all</b>' : "differs"] },
+    { cls: "here", cells: ["applied exactly once", pct(r3.exactlyOnceRate), "<b>" + pct(k3.exactlyOnceRate) + "</b>",
+      '<b class="ok">+' + ((k3.exactlyOnceRate - r3.exactlyOnceRate) * 100).toFixed(2) + " points</b>"] },
+    { cls: "here", cells: ["applied twice or more", '<span class="warn">' + r3.duplicated + "</span>", "<b>" + k3.duplicated + "</b>",
+      '<b class="ok">-' + (r3.duplicated - k3.duplicated) + "</b>"] },
+  ]);
+
+selfCheckPanel((t) => {
+  t("the generator reproduces from a seed", (() => {
+    const a = new ENGINE.Rng(2), b = new ENGINE.Rng(2);
+    for (let i = 0; i < 200; i++) if (a.next() !== b.next()) return false;
+    return true;
+  })());
+  t("a perfect network never duplicates or loses", (() => {
+    const R = ENGINE.report({ lost: 0, replyLost: 0, refused: 0 }, 500, 3);
+    return R.rows.every((r) => r.duplicated === 0 && r.lost === 0 && r.reportedSuccessRate === 1);
+  })());
+  t("CONTROL: with no retry there can be no duplicate", by(R16, "none").duplicated === 0);
+  t("a lost reply is the only failure a retry can duplicate", (() => {
+    const R = ENGINE.report({ lost: 0.2, replyLost: 0, refused: 0 }, 1000, 5);
+    return R.rows.find((r) => r.key === "retry3").duplicated === 0;
+  })(), "requests that never arrive cannot double-apply");
+
+  t("retrying raises the reported success rate",
+    r3.reportedSuccessRate > noRetry.reportedSuccessRate,
+    pct(noRetry.reportedSuccessRate) + " -> " + pct(r3.reportedSuccessRate));
+  t("...by about fifteen points",
+    (r3.reportedSuccessRate - noRetry.reportedSuccessRate) > 0.13);
+  t("...while the exactly-once rate goes DOWN",
+    r3.exactlyOnceRate < noRetry.exactlyOnceRate,
+    pct(noRetry.exactlyOnceRate) + " -> " + pct(r3.exactlyOnceRate));
+  t("retrying really does duplicate applications", r3.duplicated > 300, String(r3.duplicated));
+
+  t("the honest gain is real: retries cut silent failures",
+    r3.agentThinksFailedButApplied < noRetry.agentThinksFailedButApplied,
+    noRetry.agentThinksFailedButApplied + " -> " + r3.agentThinksFailedButApplied);
+
+  t("an idempotency key eliminates every duplicate", k3.duplicated === 0);
+  t("...and raises exactly-once by eight points",
+    (k3.exactlyOnceRate - r3.exactlyOnceRate) > 0.07,
+    pct(r3.exactlyOnceRate) + " -> " + pct(k3.exactlyOnceRate));
+  t("...while the reported success rate is IDENTICAL",
+    k3.reportedSuccessRate === r3.reportedSuccessRate, pct(k3.reportedSuccessRate));
+  t("...and so is the number of tries", k3.triesPerCall === r3.triesPerCall);
+  t("so no metric computed from replies can tell them apart",
+    k3.reportedSuccessRate === r3.reportedSuccessRate && k3.succeeded === r3.succeeded);
+  t("every run is accounted for: once + twice-or-more + never = all",
+    R16.rows.every((r) => r.exactlyOnce + r.duplicated + r.lost === r.runs));
+});
+
+</script>
+</body>
+</html>

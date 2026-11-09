@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIFromZero &middot; Day 81 &mdash; Cost routing</title>
+<style>
+  :root { --ink:#0f172a; --sub:#475569; --line:#e2e8f0; --bg:#f8fafc; --accent:#0369a1; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Inter",system-ui,sans-serif; margin:0; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:1152px; margin:0 auto; padding:16px; }
+  @media (min-width:768px){ .wrap { padding:24px; } }
+  header { background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
+  .kicker { font-size:12px; font-weight:800; letter-spacing:.16em; color:var(--accent); margin:0 0 8px; }
+  h1 { font-size:19px; line-height:1.5; font-weight:900; margin:0 0 12px; }
+  @media (min-width:768px){ h1 { font-size:22px; } }
+  h2 { font-size:24px; font-weight:900; margin:0 0 8px; }
+  h3 { font-size:19px; font-weight:800; margin:20px 0 6px; }
+  p { line-height:1.6; margin:0 0 12px; }
+  .tabs { display:flex; gap:8px; flex-wrap:wrap; }
+  .tabs button { font:inherit; font-size:14px; font-weight:600; padding:8px 20px; border:0; border-radius:8px; background:#f1f5f9; cursor:pointer; }
+  .tabs button.tab-active { background:#0f172a; color:#fff; }
+  .hidden { display:none; }
+  .card { background:#fff; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,.12); padding:20px; min-width:0; }
+  .stack > * + * { margin-top:20px; }
+  .grid2 { display:grid; gap:20px; grid-template-columns:minmax(0,1fr); }
+  @media (min-width:900px){ .grid2 { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } }
+  .lbl { font-size:12px; font-weight:800; letter-spacing:.1em; color:#64748b; margin:0 0 8px; }
+  .big { font-size:24px; font-weight:900; font-variant-numeric:tabular-nums; margin:0; }
+  .note { font-size:12.5px; color:#475569; margin:8px 0 0; line-height:1.55; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; font-size:11.5px; overflow-x:auto; line-height:1.35; margin:0; white-space:pre; }
+  code { background:#f1f5f9; padding:1px 4px; border-radius:4px; font-size:.92em; }
+  .tblwrap { overflow-x:auto; }
+  table.num { border-collapse:collapse; width:100%; min-width:600px; }
+  table.num td, table.num th { padding:4px 9px; font-variant-numeric:tabular-nums; }
+  table.num th { font-size:11px; letter-spacing:.05em; color:#64748b; text-align:right; font-weight:700; }
+  table.num th:first-child, table.num td:first-child { text-align:left; }
+  table.num td { text-align:right; font-size:12.5px; border-top:1px solid var(--line); }
+  table.num td.txt { text-align:left; }
+  tr.here td { background:#f0f9ff; font-weight:700; }
+  tr.dim td { color:#94a3b8; }
+  .pill { display:inline-block; padding:1px 7px; border-radius:999px; font-size:11px; font-weight:800; }
+  .pill.good { background:#dcfce7; color:#166534; }
+  .pill.bad { background:#fee2e2; color:#991b1b; }
+  .ok { color:#166534; font-weight:800; }
+  .warn { color:#991b1b; font-weight:800; }
+  #selftest div { display:grid; grid-template-columns:52px 1fr; gap:8px; font-size:12.5px; padding:3px 0; border-top:1px solid var(--line); align-items:start; }
+  #selftest div span.m { grid-column:2; font-size:11.5px; color:#64748b; }
+  .ctl { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 12px; }
+  .ctl input[type=range] { flex:1; min-width:170px; }
+  svg { display:block; max-width:100%; height:auto; }
+  footer { border-top:1px solid var(--line); margin-top:28px; padding:18px 0 40px; font-size:13px; color:#475569; }
+  footer a { color:var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">AIFROMZERO &middot; DAY 81</p>
+    <h1>
+      Cost routing &mdash; sending the easy requests to the cheap model, and the
+      one metric that stops you fooling yourself about whether it worked.
+    </h1>
+    <div class="tabs">
+      <button id="tabLook" class="tab-active" onclick="showTab('look')">Look</button>
+      <button id="tabUnd" onclick="showTab('und')">Understand</button>
+      <button id="tabBuild" onclick="showTab('build')">Build</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section id="look" class="stack">
+  <div class="card">
+    <h2>Two models, one queue, and a decision per request</h2>
+    <p>
+      A small model costs a fraction of a large one and gets most easy requests
+      right. A router that could tell easy from hard would cut the bill
+      dramatically. Every production LLM system reaches this point, and the
+      argument that follows is always about accuracy versus cost &mdash; which is
+      the wrong frame, because <b>you can buy any accuracy you like by spending
+      more</b>.
+    </p>
+    <p>
+      <b>Cost per correct answer</b> is the usual proposed fix, and on its own it
+      is worse than useless: it hands the prize to the cheapest model that is
+      vaguely adequate, every time. On the traffic below it picks the small model
+      outright &mdash; 74% accurate, and the cheapest answer anyone ever bought.
+    </p>
+    <p>
+      The question only becomes answerable once you fix a <b>quality floor</b>:
+      given the accuracy you have promised, which strategy reaches it for the least
+      money? That is a question routing can genuinely win, and it is the one the
+      tables below ask.
+    </p>
+    <div class="ctl">
+      <span class="lbl" style="margin:0">ROUTING THRESHOLD</span>
+      <input type="range" id="thR" min="0" max="100" value="50" />
+      <span id="thLbl" style="font-variant-numeric:tabular-nums;font-weight:700"></span>
+    </div>
+    <div class="grid2">
+      <div class="stack">
+        <div class="grid2">
+          <div><p class="lbl">ACCURACY</p><p class="big" id="kAcc">&mdash;</p><p class="note" id="kAccNote"></p></div>
+          <div><p class="lbl">TOTAL COST</p><p class="big" id="kCost">&mdash;</p><p class="note" id="kCostNote"></p></div>
+        </div>
+        <div class="grid2">
+          <div><p class="lbl">COST PER CORRECT</p><p class="big" id="kCPC">&mdash;</p><p class="note" id="kCPCNote"></p></div>
+          <div><p class="lbl">SENT TO THE BIG MODEL</p><p class="big" id="kBig">&mdash;</p><p class="note" id="kBigNote"></p></div>
+        </div>
+      </div>
+      <div>
+        <p class="lbl">THE FRONTIER</p>
+        <div id="frontier"></div>
+        <p class="note" id="frontierNote"></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Every strategy, on the same traffic</h2>
+    <div class="tblwrap"><table class="num" id="tStrat"></table></div>
+    <p class="note" id="stratNote"></p>
+  </div>
+
+  <div class="card">
+    <h2>Under a promise, not in the abstract</h2>
+    <p>
+      The same strategies, asked the only question that has an answer: <i>cheapest
+      way to hit this accuracy</i>. Strategies that cannot reach the floor are not
+      cheap, they are simply ineligible.
+    </p>
+    <div class="tblwrap"><table class="num" id="tFloor"></table></div>
+    <p class="note" id="floorNote"></p>
+  </div>
+
+  <div class="card">
+    <h2>The router is not free</h2>
+    <p>
+      Most comparisons quietly price the router at zero. It is a model call too,
+      or at least an embedding lookup, and on a cheap-enough workload it can cost
+      more than it saves. The table re-runs the best strategy with the router's own
+      cost charged honestly.
+    </p>
+    <div class="tblwrap"><table class="num" id="tOverhead"></table></div>
+    <p class="note" id="overheadNote"></p>
+  </div>
+</section>
+
+<section id="und" class="stack hidden">
+  <div class="card">
+    <h2>Routing on the small model's confidence</h2>
+    <p>
+      The obvious design: ask the small model, and escalate when it says it is
+      unsure. It is cheap, it needs no training, and it fails exactly where it
+      matters &mdash; on the requests where the small model is <b>confidently
+      wrong</b>. Those are precisely the ones a router must catch, and confidence
+      is blind to them by construction.
+    </p>
+    <div class="tblwrap"><table class="num" id="tConf"></table></div>
+    <p class="note" id="confNote"></p>
+  </div>
+
+  <div class="card">
+    <h2>Cascade versus upfront routing</h2>
+    <p>
+      A <b>cascade</b> always runs the small model first and escalates on a
+      verifier's say-so, so it pays twice for every hard request. <b>Upfront
+      routing</b> decides before spending anything, so it pays once &mdash; but it
+      has less to go on, because it has not seen an answer yet.
+    </p>
+    <div class="tblwrap"><table class="num" id="tCascade"></table></div>
+    <p class="note" id="cascadeNote"></p>
+  </div>
+
+  <div class="card">
+    <h2>Where the ceiling is</h2>
+    <p>
+      An oracle router knows in advance which requests the small model will get
+      right, and sends only the rest. No real router can beat it, and the gap
+      between your router and the oracle is the only honest measure of how much
+      routing skill you have left to gain.
+    </p>
+    <pre id="codeOracle"></pre>
+  </div>
+</section>
+
+<section id="build" class="stack hidden">
+  <div class="card">
+    <h2>The simulation</h2>
+    <pre id="codeEngine"></pre>
+  </div>
+  <div class="card">
+    <h2>Self-check</h2>
+    <p class="note" style="margin:0 0 10px">
+      Running in your browser now, against the same engine as the tables above.
+    </p>
+    <div id="selftest"></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p style="margin:0">
+      AIFromZero &middot; Day 81 &middot; Cost routing.
+      Tomorrow: semantic caching &mdash; and the hit that should have been a miss.
+    </p>
+  </div>
+</footer>
+</div>
+
+<script>
+// ===== ENGINE:BEGIN =====
+const ENGINE = (() => {
+
+  // ======================================================================
+  // A deterministic simulation. Requests carry a hidden DIFFICULTY in [0,1].
+  // Each model has a competence threshold: it answers correctly when the
+  // difficulty is below it. Nothing samples; re-run and the numbers repeat.
+  //
+  // The small model also reports a CONFIDENCE, and - this is the whole point
+  // of the page - that confidence is deliberately uninformative in a band
+  // where it is wrong, because that is what real small models do.
+  // ======================================================================
+
+  const MODELS = {
+    small: { name: "small", cost: 1, competence: 0.55 },
+    big:   { name: "big",   cost: 20, competence: 0.92 }
+  };
+
+  // ------------------------------------------------------------------ traffic
+  // Park-Miller. below(n) multiplies before dividing; a high-bit shortcut would
+  // be uniform and perfectly predictable, which a histogram cannot detect.
+  function rng(seed) {
+    let s = seed % 2147483647;
+    if (s <= 0) s += 2147483646;
+    const nextInt = () => (s = (s * 16807) % 2147483647);
+    return {
+      nextInt,
+      below: (n) => Math.floor((nextInt() * n) / 2147483648),
+      unit: () => nextInt() / 2147483647
+    };
+  }
+
+  // Most traffic is easy, a tail is hard. One stream for the whole corpus, so
+  // the requests are genuinely independent of each other.
+  function traffic(n = 2000, seed = 1) {
+    const r = rng(seed);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const u = r.unit();
+      // a skew towards easy: u^2 puts most mass low
+      const difficulty = u * u;
+      out.push({ id: i, difficulty });
+    }
+    return out;
+  }
+
+  const answersCorrectly = (model, req) => req.difficulty < model.competence;
+
+  // The small model's self-reported confidence. High when the request is very
+  // easy OR very hard - the second half is the failure mode that matters: on a
+  // hard request it does not know what it does not know.
+  function smallConfidence(req) {
+    const d = req.difficulty;
+    if (d < 0.35) return 0.95;            // genuinely easy, and right
+    if (d < 0.55) return 0.60;            // near its limit, and it can feel it
+    if (d < 0.75) return 0.90;            // WRONG, and sure of itself
+    return 0.55;                          // hard enough that it hesitates
+  }
+
+  // A verifier that can check an answer after the fact. Cheap, but imperfect:
+  // it misses a slice of wrong answers.
+  const VERIFIER_COST = 0.5;
+  function verifierSaysWrong(req) {
+    if (answersCorrectly(MODELS.small, req)) return false;   // never a false alarm here
+    return req.difficulty > 0.62;                            // misses the near band
+  }
+
+  // ---------------------------------------------------------------- strategies
+  // Every strategy returns, per request, which models were paid for and whether
+  // the final answer was right.
+
+  function runStrategy(reqs, strategy, opts = {}) {
+    let cost = 0, correct = 0, toBig = 0, routerCost = 0;
+    const routerPrice = opts.routerCost || 0;
+    for (const req of reqs) {
+      const r = strategy(req, opts);
+      cost += r.cost;
+      // the router runs on EVERY request, whichever way it decides
+      routerCost += routerPrice;
+      if (r.usedBig) toBig++;
+      if (r.correct) correct++;
+    }
+    const total = cost + routerCost;
+    return {
+      n: reqs.length, correct, accuracy: correct / reqs.length,
+      cost: total, modelCost: cost, routerCost,
+      costPerRequest: total / reqs.length,
+      costPerCorrect: correct ? total / correct : Infinity,
+      toBig, bigShare: toBig / reqs.length
+    };
+  }
+
+  const STRATEGIES = {
+    "always small": (req) => ({
+      cost: MODELS.small.cost, usedBig: false, correct: answersCorrectly(MODELS.small, req)
+    }),
+    "always big": (req) => ({
+      cost: MODELS.big.cost, usedBig: true, correct: answersCorrectly(MODELS.big, req)
+    }),
+    // route on the small model's reported confidence, WITHOUT running it first
+    // (the confidence here stands in for a cheap predictor of it)
+    "route on confidence": (req, o) => {
+      const conf = smallConfidence(req);
+      if (conf >= (o.threshold ?? 0.8)) {
+        return { cost: MODELS.small.cost, usedBig: false, correct: answersCorrectly(MODELS.small, req) };
+      }
+      return { cost: MODELS.big.cost, usedBig: true, correct: answersCorrectly(MODELS.big, req) };
+    },
+    // a cascade: small first, verify, escalate if the verifier objects
+    "cascade with a verifier": (req) => {
+      const smallRight = answersCorrectly(MODELS.small, req);
+      let cost = MODELS.small.cost + VERIFIER_COST;
+      if (!verifierSaysWrong(req)) {
+        return { cost, usedBig: false, correct: smallRight };
+      }
+      cost += MODELS.big.cost;
+      return { cost, usedBig: true, correct: answersCorrectly(MODELS.big, req) };
+    },
+    // route on the difficulty itself, which is what a GOOD router approximates
+    "route on difficulty": (req, o) => {
+      if (req.difficulty < (o.difficultyThreshold ?? 0.5)) {
+        return { cost: MODELS.small.cost, usedBig: false, correct: answersCorrectly(MODELS.small, req) };
+      }
+      return { cost: MODELS.big.cost, usedBig: true, correct: answersCorrectly(MODELS.big, req) };
+    },
+    // the ceiling: send to the small model exactly the requests it gets right
+    "oracle": (req) => {
+      if (answersCorrectly(MODELS.small, req)) {
+        return { cost: MODELS.small.cost, usedBig: false, correct: true };
+      }
+      return { cost: MODELS.big.cost, usedBig: true, correct: answersCorrectly(MODELS.big, req) };
+    }
+  };
+
+  // ------------------------------------------------------------- the frontier
+  // Sweep the difficulty threshold and record (cost per request, accuracy).
+  function frontier(reqs, steps = 41) {
+    const out = [];
+    for (let i = 0; i < steps; i++) {
+      const th = i / (steps - 1);
+      const r = runStrategy(reqs, STRATEGIES["route on difficulty"], { difficultyThreshold: th });
+      out.push({ threshold: th, accuracy: r.accuracy, costPerRequest: r.costPerRequest,
+                 costPerCorrect: r.costPerCorrect, bigShare: r.bigShare });
+    }
+    return out;
+  }
+
+  // A point is on the Pareto frontier if nothing is both cheaper AND at least
+  // as accurate.
+  function pareto(points) {
+    return points.filter((p) =>
+      !points.some((q) => q !== p && q.costPerRequest <= p.costPerRequest && q.accuracy > p.accuracy));
+  }
+
+  // ------------------------------------------------- the confidence breakdown
+  // The four bands, and whether confidence tracks correctness in each.
+  function confidenceBands(reqs) {
+    const bands = new Map();
+    for (const req of reqs) {
+      const c = smallConfidence(req);
+      if (!bands.has(c)) bands.set(c, { conf: c, n: 0, right: 0 });
+      const b = bands.get(c);
+      b.n++;
+      if (answersCorrectly(MODELS.small, req)) b.right++;
+    }
+    const rows = [...bands.values()].sort((a, b) => b.conf - a.conf);
+    for (const b of rows) { b.accuracy = b.right / b.n; b.gap = b.conf - b.accuracy; }
+    return rows;
+  }
+
+  // 🔴 Cost per correct answer, on its own, ALWAYS prefers the cheapest model
+  // that is anywhere near adequate - a 74%-accurate model at 1 unit beats a
+  // 96%-accurate one at 20 on that metric every time. The metric is only
+  // meaningful subject to a quality floor: among the strategies that MEET the
+  // accuracy you have promised, which is cheapest?
+  function meetsFloor(result, floor) { return result.accuracy >= floor; }
+
+  function cheapestMeeting(results, floor) {
+    const ok = Object.entries(results).filter(([, r]) => meetsFloor(r, floor));
+    if (!ok.length) return null;
+    return ok.reduce((a, b) => (b[1].cost < a[1].cost ? b : a));
+  }
+
+  return {
+    MODELS, VERIFIER_COST, rng, traffic, answersCorrectly, smallConfidence,
+    meetsFloor, cheapestMeeting,
+    verifierSaysWrong, runStrategy, STRATEGIES, frontier, pareto, confidenceBands
+  };
+})();
+// ===== ENGINE:END =====
+</script>
+
+<script>
+function showTab(name) {
+  for (const t of ["look", "und", "build"]) document.getElementById(t).classList.toggle("hidden", t !== name);
+  document.getElementById("tabLook").classList.toggle("tab-active", name === "look");
+  document.getElementById("tabUnd").classList.toggle("tab-active", name === "und");
+  document.getElementById("tabBuild").classList.toggle("tab-active", name === "build");
+}
+const el = (id) => document.getElementById(id);
+function table(id, head, rows) {
+  el(id).innerHTML =
+    "<tr>" + head.map((h) => "<th>" + h + "</th>").join("") + "</tr>" +
+    rows.map((r) => "<tr" + (r.cls ? ' class="' + r.cls + '"' : "") + ">" +
+      r.cells.map((c, i) => "<td" + (i === 0 ? ' class="txt"' : "") + ">" + c + "</td>").join("") + "</tr>").join("");
+}
+function selfCheckPanel(fn) {
+  const out = []; let n = 0, bad = 0;
+  const t = (label, cond, detail = "") => {
+    n += 1; if (!cond) bad += 1;
+    out.push('<div><span class="' + (cond ? "ok" : "warn") + '">' + (cond ? "PASS" : "FAIL") +
+      '</span><span>' + label + '</span><span class="m">' + detail + "</span></div>");
+  };
+  fn(t);
+  el("selftest").innerHTML =
+    '<p class="note" style="margin:0 0 8px"><b class="' + (bad ? "warn" : "ok") + '">' +
+    (n - bad) + " of " + n + " checks pass</b>" + (bad ? " &mdash; " + bad + " FAILED" : "") + ".</p>" + out.join("");
+}
+
+const REQS = ENGINE.traffic(2000, 1);
+const FRONT = ENGINE.frontier(REQS, 41);
+const PARETO = ENGINE.pareto(FRONT);
+const ALL = Object.fromEntries(Object.entries(ENGINE.STRATEGIES)
+  .map(([k, fn]) => [k, ENGINE.runStrategy(REQS, fn, { threshold: 0.8, difficultyThreshold: 0.5 })]));
+
+function render() {
+  const th = (parseInt(el("thR").value, 10) || 0) / 100;
+  el("thLbl").textContent = th.toFixed(2);
+  const r = ENGINE.runStrategy(REQS, ENGINE.STRATEGIES["route on difficulty"], { difficultyThreshold: th });
+  const big = ALL["always big"], small = ALL["always small"];
+
+  el("kAcc").textContent = (r.accuracy * 100).toFixed(1) + "%";
+  el("kAccNote").textContent = "always-big is " + (big.accuracy * 100).toFixed(1) + "%";
+  el("kCost").textContent = r.cost.toLocaleString("en-US");
+  el("kCostNote").textContent = (100 * r.cost / big.cost).toFixed(0) + "% of always-big";
+  el("kCPC").innerHTML = '<span class="' + (r.costPerCorrect < big.costPerCorrect ? "ok" : "warn") + '">' +
+    r.costPerCorrect.toFixed(2) + "</span>";
+  el("kCPCNote").textContent = "always-big " + big.costPerCorrect.toFixed(2) +
+    ", always-small " + small.costPerCorrect.toFixed(2);
+  el("kBig").textContent = (r.bigShare * 100).toFixed(1) + "%";
+  el("kBigNote").textContent = r.toBig.toLocaleString("en-US") + " of " + r.n + " requests";
+
+  // the frontier plot
+  const W = 420, H = 230, P = 36;
+  const xs = FRONT.map((p) => p.costPerRequest), ys = FRONT.map((p) => p.accuracy);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const px = (v) => P + ((v - x0) / (x1 - x0 || 1)) * (W - 2 * P);
+  const py = (v) => H - P - ((v - y0) / (y1 - y0 || 1)) * (H - 2 * P);
+  let s = '<svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '">';
+  s += '<line x1="' + P + '" y1="' + (H - P) + '" x2="' + (W - P) + '" y2="' + (H - P) + '" stroke="#cbd5e1"/>';
+  s += '<line x1="' + P + '" y1="' + P + '" x2="' + P + '" y2="' + (H - P) + '" stroke="#cbd5e1"/>';
+  s += '<polyline points="' + FRONT.map((p) => px(p.costPerRequest) + "," + py(p.accuracy)).join(" ") +
+    '" fill="none" stroke="#0369a1" stroke-width="2"/>';
+  for (const [k, col] of [["always small", "#64748b"], ["always big", "#be123c"], ["oracle", "#16a34a"]]) {
+    const p = ALL[k];
+    s += '<circle cx="' + px(p.costPerRequest) + '" cy="' + py(p.accuracy) + '" r="4" fill="' + col + '"/>';
+    s += '<text x="' + (px(p.costPerRequest) + 7) + '" y="' + (py(p.accuracy) + 4) +
+      '" font-size="9.5" fill="' + col + '">' + k + "</text>";
+  }
+  s += '<circle cx="' + px(r.costPerRequest) + '" cy="' + py(r.accuracy) + '" r="5" fill="none" stroke="#0f172a" stroke-width="2"/>';
+  s += '<text x="' + (W / 2) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="#64748b">cost per request</text>';
+  s += '<text x="12" y="' + (H / 2) + '" font-size="10" fill="#64748b" transform="rotate(-90 12 ' + (H / 2) + ')">accuracy</text>';
+  s += "</svg>";
+  el("frontier").innerHTML = s;
+  el("frontierNote").innerHTML =
+    "The curve sweeps the difficulty threshold from 0 to 1. The ring is where you are now. " +
+    "Points below and to the right of the curve are strictly wasteful - you could have the same " +
+    "accuracy for less.";
+}
+
+// ---------------------------------------------------------------- the tables
+{
+  const big = ALL["always big"];
+  const rows = Object.entries(ALL).map(([k, r]) => ({
+    cls: k === "oracle" ? "here" : "",
+    cells: [k, (r.accuracy * 100).toFixed(1) + "%", r.costPerRequest.toFixed(2),
+      r.costPerCorrect.toFixed(2), (r.bigShare * 100).toFixed(0) + "%",
+      (100 * r.cost / big.cost).toFixed(0) + "%",
+      r.costPerCorrect < big.costPerCorrect
+        ? '<span class="pill good">better than always-big</span>'
+        : '<span class="pill bad">no better</span>']
+  }));
+  table("tStrat", ["strategy", "accuracy", "cost / request", "cost / correct",
+    "sent to big", "spend vs always-big", "verdict"], rows);
+  const best = Object.entries(ALL).reduce((a, b) => (b[1].costPerCorrect < a[1].costPerCorrect ? b : a));
+  el("stratNote").innerHTML =
+    "Best cost per correct answer: <b>" + best[0] + "</b> at " + best[1].costPerCorrect.toFixed(2) +
+    ", against <b>" + big.costPerCorrect.toFixed(2) + "</b> for always-big. " +
+    "Note that always-small has the <i>lowest</i> cost per request and one of the worst costs per " +
+    "correct answer - which is the whole reason to use the second metric.";
+}
+
+{
+  const floors = [0.70, 0.80, 0.90, 0.95];
+  const rows = floors.map((f) => {
+    const eligible = Object.entries(ALL).filter(([, r]) => ENGINE.meetsFloor(r, f));
+    const best = ENGINE.cheapestMeeting(ALL, f);
+    return {
+      cls: best && best[0] !== "always big" && best[0] !== "oracle" ? "here" : "",
+      cells: [(f * 100).toFixed(0) + "% accuracy",
+        eligible.length + " of " + Object.keys(ALL).length,
+        best ? best[0] : "&mdash;",
+        best ? best[1].costPerRequest.toFixed(2) : "&mdash;",
+        best ? (100 * best[1].cost / ALL["always big"].cost).toFixed(0) + "%" : "&mdash;",
+        eligible.map(([k]) => k).includes("always small")
+          ? '<span class="pill bad">the cheap model still qualifies</span>'
+          : '<span class="pill good">routing earns its place</span>']
+    };
+  });
+  table("tFloor", ["the promise", "strategies that can keep it", "cheapest that does",
+    "cost / request", "spend vs always-big", "reading"], rows);
+  const at90 = ENGINE.cheapestMeeting(ALL, 0.90);
+  el("floorNote").innerHTML =
+    "At a 90% promise the small model is simply not on the menu, and the cheapest option that is " +
+    "costs <b>" + (100 * at90[1].cost / ALL["always big"].cost).toFixed(0) +
+    "%</b> of sending everything to the big model. That saving is the entire value of routing, and " +
+    "it only becomes visible once the quality bar is written down. Quote cost per correct answer " +
+    "without a floor and you will be told to use the cheap model for everything.";
+}
+
+{
+  const base = ENGINE.runStrategy(REQS, ENGINE.STRATEGIES["route on difficulty"], { difficultyThreshold: 0.5 });
+  const rows = [0, 0.25, 0.5, 1, 2, 4].map((rc) => {
+    const r = ENGINE.runStrategy(REQS, ENGINE.STRATEGIES["route on difficulty"],
+      { difficultyThreshold: 0.5, routerCost: rc });
+    const big = ALL["always big"];
+    return {
+      cls: r.costPerCorrect < big.costPerCorrect ? "" : "here",
+      cells: [rc === 0 ? "free (the usual assumption)" : rc + " per request",
+        r.costPerRequest.toFixed(2), r.costPerCorrect.toFixed(2),
+        ((r.routerCost / r.cost) * 100).toFixed(0) + "%",
+        r.costPerCorrect < big.costPerCorrect
+          ? '<span class="pill good">still worth it</span>'
+          : '<span class="pill bad">worse than always-big</span>']
+    };
+  });
+  table("tOverhead", ["router price", "cost / request", "cost / correct",
+    "share of spend that is routing", "verdict"], rows);
+  const breakEven = [0, 0.25, 0.5, 1, 2, 4].find((rc) =>
+    ENGINE.runStrategy(REQS, ENGINE.STRATEGIES["route on difficulty"],
+      { difficultyThreshold: 0.5, routerCost: rc }).costPerCorrect >= ALL["always big"].costPerCorrect);
+  el("overheadNote").innerHTML = breakEven === undefined
+    ? "Even at 4 units per request the router still pays for itself here, because the big model costs " +
+      ENGINE.MODELS.big.cost + " and the saving is large."
+    : "The router stops paying for itself once it costs about <b>" + breakEven +
+      "</b> per request. A router built from an LLM call is not cheap, and this is the line it has to beat.";
+}
+
+{
+  const bands = ENGINE.confidenceBands(REQS);
+  table("tConf", ["the small model says", "requests", "actually right", "accuracy",
+    "gap", "reading"], bands.map((b) => ({
+      cls: b.gap > 0.3 ? "here" : "",
+      cells: [(b.conf * 100).toFixed(0) + "% confident", b.n, b.right,
+        (b.accuracy * 100).toFixed(0) + "%",
+        (b.gap >= 0 ? "+" : "") + (b.gap * 100).toFixed(0) + " pts",
+        b.gap > 0.3 ? '<span class="pill bad">confidently wrong</span>'
+          : b.gap > 0.1 ? '<span class="pill bad">overconfident</span>'
+          : '<span class="pill good">about right</span>']
+    })));
+  const worst = bands.reduce((a, b) => (b.gap > a.gap ? b : a));
+  el("confNote").innerHTML =
+    "The <b>" + (worst.conf * 100).toFixed(0) + "%</b> band is right only <b>" +
+    (worst.accuracy * 100).toFixed(0) + "%</b> of the time. A router that trusts confidence keeps " +
+    "those " + worst.n + " requests on the small model and gets them wrong - and they are exactly the " +
+    "requests escalation exists for. Confidence is a measure of the model's fluency, not of its " +
+    "correctness.";
+}
+
+{
+  const rows = ["cascade with a verifier", "route on difficulty", "route on confidence", "oracle"]
+    .map((k) => {
+      const r = ALL[k];
+      return {
+        cls: k === "cascade with a verifier" ? "here" : "",
+        cells: [k, (r.accuracy * 100).toFixed(1) + "%", r.costPerRequest.toFixed(2),
+          r.costPerCorrect.toFixed(2),
+          k === "cascade with a verifier" ? "pays twice on every escalation" :
+          k === "oracle" ? "cannot be built" : "pays once, decides blind"]
+      };
+    });
+  table("tCascade", ["approach", "accuracy", "cost / request", "cost / correct", "what it costs you"], rows);
+  const c = ALL["cascade with a verifier"], d = ALL["route on difficulty"];
+  el("cascadeNote").innerHTML =
+    "The cascade reaches <b>" + (c.accuracy * 100).toFixed(1) + "%</b> at " + c.costPerCorrect.toFixed(2) +
+    " per correct answer; upfront routing reaches <b>" + (d.accuracy * 100).toFixed(1) + "%</b> at " +
+    d.costPerCorrect.toFixed(2) + ". Which wins depends entirely on the price ratio between the two " +
+    "models and on how good the verifier is - there is no general answer, only a measurement.";
+}
+
+el("codeOracle").textContent = String(ENGINE.STRATEGIES["oracle"]);
+el("codeEngine").textContent = [
+  "// the confidence the small model reports - high where it is WRONG, by design",
+  String(ENGINE.smallConfidence), "",
+  "// scoring a strategy over the traffic",
+  String(ENGINE.runStrategy)
+].join("\n");
+
+el("thR").addEventListener("input", render);
+render();
+
+// --------------------------------------------------------------- the self-check
+selfCheckPanel((t) => {
+  const close = (a, b, e = 1e-9) => Math.abs(a - b) < e;
+
+  // --- the traffic
+  t("the traffic is reproducible from its seed", (() => {
+    const a = ENGINE.traffic(200, 5).map((r) => r.difficulty).join(",");
+    const b = ENGINE.traffic(200, 5).map((r) => r.difficulty).join(",");
+    return a === b;
+  })());
+
+  t("and different seeds give different traffic",
+    ENGINE.traffic(50, 1).map((r) => r.difficulty).join(",") !==
+    ENGINE.traffic(50, 2).map((r) => r.difficulty).join(","));
+
+  t("every difficulty is a real number in [0,1]",
+    REQS.every((r) => Number.isFinite(r.difficulty) && r.difficulty >= 0 && r.difficulty <= 1),
+    REQS.length + " requests");
+
+  t("the traffic really is skewed towards easy", (() => {
+    const easy = REQS.filter((r) => r.difficulty < 0.3).length;
+    return easy > REQS.length * 0.5;
+  })(), (100 * REQS.filter((r) => r.difficulty < 0.3).length / REQS.length).toFixed(0) + "% under 0.3");
+
+  // --- the models
+  t("the big model is strictly more competent and strictly more expensive",
+    ENGINE.MODELS.big.competence > ENGINE.MODELS.small.competence &&
+    ENGINE.MODELS.big.cost > ENGINE.MODELS.small.cost,
+    ENGINE.MODELS.big.cost + "x the price for " +
+    ((ENGINE.MODELS.big.competence - ENGINE.MODELS.small.competence) * 100).toFixed(0) + " points");
+
+  t("the big model gets right everything the small one does", (() => {
+    return REQS.every((r) => !ENGINE.answersCorrectly(ENGINE.MODELS.small, r) ||
+                              ENGINE.answersCorrectly(ENGINE.MODELS.big, r));
+  })(), "so escalation never makes an answer worse");
+
+  t("neither model is perfect - there are requests both get wrong",
+    REQS.some((r) => !ENGINE.answersCorrectly(ENGINE.MODELS.big, r)),
+    REQS.filter((r) => !ENGINE.answersCorrectly(ENGINE.MODELS.big, r)).length + " beyond both");
+
+  // --- the arithmetic of the scorer
+  t("cost per correct is total cost divided by correct answers", (() => {
+    for (const [, r] of Object.entries(ALL)) {
+      if (r.correct === 0) continue;
+      if (!close(r.costPerCorrect, r.cost / r.correct, 1e-9)) return false;
+    }
+    return true;
+  })());
+
+  t("and cost per request is total cost over the request count", (() => {
+    return Object.values(ALL).every((r) => close(r.costPerRequest, r.cost / r.n, 1e-9));
+  })());
+
+  t("accuracy and correct count agree", (() => {
+    return Object.values(ALL).every((r) => close(r.accuracy, r.correct / r.n, 1e-12));
+  })());
+
+  t("always-small costs exactly one unit per request",
+    close(ALL["always small"].costPerRequest, ENGINE.MODELS.small.cost, 1e-12));
+
+  t("always-big costs exactly the big price per request",
+    close(ALL["always big"].costPerRequest, ENGINE.MODELS.big.cost, 1e-12));
+
+  // --- THE point: the two metrics disagree
+  t("always-small is the CHEAPEST per request",
+    Object.values(ALL).every((r) => r.costPerRequest >= ALL["always small"].costPerRequest));
+
+  t("CONTROL: and cost-per-correct ALONE picks it too, which is the trap", (() => {
+    const best = Math.min(...Object.values(ALL).map((r) => r.costPerCorrect));
+    return Math.abs(ALL["always small"].costPerCorrect - best) < 1e-9;
+  })(), "a 74%-accurate model at 1 unit beats a 96%-accurate one at 20 on that metric, every time");
+
+  t("so the metric is only meaningful under an accuracy floor", (() => {
+    return !ENGINE.meetsFloor(ALL["always small"], 0.9) &&
+            ENGINE.meetsFloor(ALL["always big"], 0.9);
+  })(), "always-small cannot meet 90% at any price - it is not on the menu");
+
+  t("and under a 90% floor the cheapest option is NOT always-big", (() => {
+    const best = ENGINE.cheapestMeeting(ALL, 0.9);
+    return best && best[0] !== "always big" && best[1].cost < ALL["always big"].cost;
+  })(), (() => { const b = ENGINE.cheapestMeeting(ALL, 0.9);
+    return b ? b[0] + " at " + (100 * b[1].cost / ALL["always big"].cost).toFixed(0) + "% of always-big" : "none"; })());
+
+  t("routing matches always-big's accuracy for a fraction of the spend",
+    Math.abs(ALL["route on difficulty"].accuracy - ALL["always big"].accuracy) < 1e-12 &&
+    ALL["route on difficulty"].cost < ALL["always big"].cost * 0.5,
+    (100 * ALL["route on difficulty"].cost / ALL["always big"].cost).toFixed(0) +
+    "% of the cost, identical accuracy");
+
+  t("always-big is the MOST accurate",
+    Object.values(ALL).every((r) => r.accuracy <= ALL["always big"].accuracy + 1e-12));
+
+  t("CONTROL: and yet it is not the best value either",
+    ALL["oracle"].costPerCorrect < ALL["always big"].costPerCorrect,
+    "oracle " + ALL["oracle"].costPerCorrect.toFixed(2) + " vs always-big " +
+    ALL["always big"].costPerCorrect.toFixed(2));
+
+  // --- the oracle is a real ceiling
+  t("the oracle matches always-big on accuracy",
+    close(ALL["oracle"].accuracy, ALL["always big"].accuracy, 1e-12),
+    "it never sends a request the small model would fail");
+
+  t("and does it for strictly less money",
+    ALL["oracle"].cost < ALL["always big"].cost,
+    (100 * ALL["oracle"].cost / ALL["always big"].cost).toFixed(0) + "% of the spend");
+
+  t("among strategies that MEET the floor, none beats the oracle on cost", (() => {
+    const floor = ALL["always big"].accuracy - 1e-12;
+    const o = ALL["oracle"].cost;
+    return Object.entries(ALL).every(([k, r]) =>
+      k === "oracle" || !ENGINE.meetsFloor(r, floor) || r.cost >= o - 1e-9);
+  })(), "the oracle is the ceiling only once quality is fixed");
+
+  // --- confidence routing, the headline failure
+  t("there is a band where the small model is confident and wrong", (() => {
+    const bands = ENGINE.confidenceBands(REQS);
+    return bands.some((b) => b.conf >= 0.85 && b.accuracy < 0.2);
+  })(), (() => {
+    const b = ENGINE.confidenceBands(REQS).find((x) => x.conf >= 0.85 && x.accuracy < 0.2);
+    return b ? b.n + " requests at " + (b.conf * 100).toFixed(0) + "% confidence, " +
+      (b.accuracy * 100).toFixed(0) + "% correct" : "none";
+  })());
+
+  t("CONTROL: so confidence routing keeps exactly the wrong requests cheap", (() => {
+    const conf = ALL["route on confidence"], diff = ALL["route on difficulty"];
+    return conf.accuracy < diff.accuracy;
+  })(), "confidence " + (ALL["route on confidence"].accuracy * 100).toFixed(1) +
+    "% vs difficulty " + (ALL["route on difficulty"].accuracy * 100).toFixed(1) + "%");
+
+  t("the confidence bands partition the traffic exactly", (() => {
+    const bands = ENGINE.confidenceBands(REQS);
+    return bands.reduce((a, b) => a + b.n, 0) === REQS.length;
+  })());
+
+  t("every band is non-empty", ENGINE.confidenceBands(REQS).every((b) => b.n > 0),
+    ENGINE.confidenceBands(REQS).length + " bands");
+
+  // --- the frontier
+  t("raising the threshold sends less to the big model, so accuracy falls", (() => {
+    for (let i = 1; i < FRONT.length; i++) {
+      if (FRONT[i].accuracy > FRONT[i - 1].accuracy + 1e-12) return false;
+    }
+    return true;
+  })(), FRONT.length + " points, monotone non-increasing");
+
+  t("and cost falls with it - you cannot get accuracy for free", (() => {
+    for (let i = 1; i < FRONT.length; i++) {
+      if (FRONT[i].costPerRequest > FRONT[i - 1].costPerRequest + 1e-12) return false;
+    }
+    return true;
+  })(), "both curves move the same way, which is what makes it a trade");
+
+  t("the endpoints of the sweep are always-big and always-small", (() => {
+    return close(FRONT[0].costPerRequest, ENGINE.MODELS.big.cost, 1e-9) &&
+           close(FRONT[FRONT.length - 1].costPerRequest, ENGINE.MODELS.small.cost, 1e-9);
+  })(), "threshold 0 routes everything up, threshold 1 routes everything down");
+
+  t("the Pareto filter keeps a strict subset and nothing dominated", (() => {
+    const p = ENGINE.pareto(FRONT);
+    if (p.length === 0 || p.length > FRONT.length) return false;
+    return p.every((a) => !FRONT.some((b) => b !== a &&
+      b.costPerRequest <= a.costPerRequest && b.accuracy > a.accuracy));
+  })(), ENGINE.pareto(FRONT).length + " of " + FRONT.length + " points survive");
+
+  // --- the router's own cost
+  t("charging the router shifts cost per correct upward", (() => {
+    const free = ENGINE.runStrategy(REQS, ENGINE.STRATEGIES["route on difficulty"],
+      { difficultyThreshold: 0.5, routerCost: 0 });
+    const paid = ENGINE.runStrategy(REQS, ENGINE.STRATEGIES["route on difficulty"],
+      { difficultyThreshold: 0.5, routerCost: 2 });
+    return paid.costPerCorrect > free.costPerCorrect;
+  })());
+
+  t("and the router cost is accounted separately, not hidden in the model cost", (() => {
+    const r = ENGINE.runStrategy(REQS, ENGINE.STRATEGIES["route on difficulty"],
+      { difficultyThreshold: 0.5, routerCost: 3 });
+    return close(r.cost, r.modelCost + r.routerCost, 1e-9) &&
+           close(r.routerCost, 3 * REQS.length, 1e-9);
+  })());
+
+  // --- the generator
+  t("below(n) is in range and covers it", (() => {
+    const r = ENGINE.rng(9);
+    const seen = new Set();
+    for (let i = 0; i < 5000; i++) {
+      const v = r.below(6);
+      if (!Number.isInteger(v) || v < 0 || v > 5) return false;
+      seen.add(v);
+    }
+    return seen.size === 6;
+  })());
+
+  t("CONTROL: a high-bit shortcut would be uniform AND fully predictable", (() => {
+    const a = ENGINE.rng(21), b = ENGINE.rng(21);
+    const sa = [], sb = [];
+    for (let i = 0; i < 400; i++) { sa.push(a.nextInt() >= 1073741824 ? 1 : 0); sb.push(b.nextInt() >= 1073741824 ? 1 : 0); }
+    const ones = sa.filter(Boolean).length;
+    return Math.abs(ones - 200) < 50 && sa.join("") === sb.join("");
+  })(), "balanced and identical from the same seed - test the sequence, not the histogram");
+});
+</script>
+</body>
+</html>

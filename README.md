@@ -78,6 +78,13 @@ Every lesson is a single, self-contained HTML file with three tabs — 👁 **LO
 - [AIFromZero · Day 74 — Benchmark contamination](https://dev48.infy.uk/ai/days/day74-benchmark-contamination.html) — `day74-benchmark-contamination.html`
 - [AIFromZero · Day 75 — Inference non-determinism](https://dev48.infy.uk/ai/days/day75-inference-nondeterminism.html) — `day75-inference-nondeterminism.html`
 - [AIFromZero · Day 76 — Human oversight](https://dev48.infy.uk/ai/days/day76-human-oversight.html) — `day76-human-oversight.html`
+- [AIFromZero · Day 77 — Approximate nearest neighbour: the knob that fixes neither the bill nor the recall](https://dev48.in/ai/days/day77-ann-recall.html) — `day77-ann-recall.html`
+- [AIFromZero · Day 78 — Tool-call retries](https://dev48.in/ai/days/day78-tool-call-retries.html) — `day78-tool-call-retries.html`
+- [AIFromZero · Day 79 — Embedding drift](https://dev48.in/ai/days/day79-embedding-drift.html) — `day79-embedding-drift.html`
+- [AIFromZero · Day 80 — Citation verification](https://dev48.in/ai/days/day80-citation-verification.html) — `day80-citation-verification.html`
+- [AIFromZero · Day 81 — Cost routing](https://dev48.in/ai/days/day81-cost-routing.html) — `day81-cost-routing.html`
+- [AIFromZero · Day 82 — Query rewriting](https://dev48.in/ai/days/day82-query-rewriting.html) — `day82-query-rewriting.html`
+- [AIFromZero · Day 83 — TTFT vs TPOT](https://dev48.in/ai/days/day83-ttft-vs-tpot.html) — `day83-ttft-vs-tpot.html`
 
 ---
 Part of **Zero to Hero** — build something real from scratch, every day: https://dev48v.infy.uk
